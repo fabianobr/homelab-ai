@@ -1,0 +1,39 @@
+project:
+  name: homelab-ai
+  owner: Fabiano
+  purpose: "Servidor pessoal de IA local"
+
+host:
+  hostname: homelab
+  os: "Ubuntu 26.04"
+  timezone: "America/Sao_Paulo"
+
+hardware:
+  gpu:
+    vendor: NVIDIA
+    model: "NVIDIA GPU"
+    vram_gb: 16
+  ram:
+    total_gb: 32
+  storage:
+    primary: "NVMe SSD"
+
+network:
+  tailscale:
+    enabled: true
+    purpose: "Acesso privado remoto"
+  cloudflare:
+    enabled: true
+    purpose: "Publicação segura via tunnel e Access"
+
+paths:
+  project_root: "/srv/homelab-ai"
+  models: "/srv/homelab-ai/models"
+  data: "/srv/homelab-ai/data"
+  backups: "/srv/homelab-ai/backups"
+
+ports:
+  lmstudio: 1234
+  open_webui: 3000
+  comfyui: 8188
+  n8n: 5678

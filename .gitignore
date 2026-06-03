@@ -1,0 +1,28 @@
+# Local environment and secrets
+.env
+.env.*
+*.pem
+*.key
+*secret*
+*token*
+
+# Runtime data
+data/*
+models/*
+backups/*
+
+!data/.gitkeep
+!models/.gitkeep
+!backups/.gitkeep
+
+# Backup archives
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
