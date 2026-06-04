@@ -76,7 +76,7 @@ O container publica apenas em loopback para Cloudflare:
 O acesso remoto público deve passar pelo Cloudflare Access:
 
 ```text
-https://ai.example.com
+https://chat.ai.example.com
 ```
 
 ## Uso

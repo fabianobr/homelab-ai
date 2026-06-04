@@ -35,8 +35,9 @@
 Serviços publicados via Cloudflare Access:
 
 ```text
-https://ai.example.com -> http://localhost:3000
-https://media.example.com -> http://localhost:8188
+https://chat.ai.example.com  -> http://localhost:3000  (Open WebUI)
+https://media.ai.example.com -> http://localhost:8188  (ComfyUI)
+https://flow.ai.example.com  -> http://localhost:5678  (n8n)
 ```
 
 E-mail permitido no Access:

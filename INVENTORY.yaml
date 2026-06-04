@@ -30,7 +30,9 @@ paths:
   backups: "/home/user/homelab-ai/backups"
 
 domains:
-  open_webui: "ai.example.com"
+  open_webui: "chat.ai.example.com"
+  comfyui: "media.ai.example.com"
+  n8n: "flow.ai.example.com"
 
 access:
   cloudflare_access_email: "user@example.com"

@@ -57,13 +57,15 @@ Público externo permitido apenas para:
 ```text
 Open WebUI via Cloudflare Access
 ComfyUI via Cloudflare Access
+n8n via Cloudflare Access
 ```
 
 Domínios autorizados:
 
 ```text
-https://ai.example.com
-https://media.example.com
+https://chat.ai.example.com
+https://media.ai.example.com
+https://flow.ai.example.com
 ```
 
 Identidade permitida no Access:

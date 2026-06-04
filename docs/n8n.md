@@ -10,6 +10,12 @@ Automações.
 5678
 ```
 
+## Acesso remoto
+
+```text
+https://flow.ai.example.com
+```
+
 ## Exemplos
 
 - Resumo diário

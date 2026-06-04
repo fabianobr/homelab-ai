@@ -71,8 +71,9 @@ Esse script configura o bind do Ollama Snap, instala o ingress do Cloudflare Tun
 O acesso remoto público permitido passa pelo Cloudflare Access:
 
 ```text
-https://ai.example.com
-https://media.example.com
+https://chat.ai.example.com
+https://media.ai.example.com
+https://flow.ai.example.com
 ```
 
 Ollama e LM Studio sao backends internos do Open WebUI e nao devem ter hostnames publicos.
@@ -109,10 +110,10 @@ Observação operacional: o Open WebUI deve escutar apenas em `127.0.0.1:3000` p
 Abra no navegador:
 
 ```text
-https://ai.example.com
+https://chat.ai.example.com
 ```
 
-Resultado esperado: Cloudflare Access solicita login/MFA e depois abre o Open WebUI.
+Resultado esperado: Cloudflare Access solicita login e depois abre o Open WebUI.
 
 ### 4. LM Studio API
 
@@ -122,7 +123,7 @@ curl http://localhost:1234/v1/models
 
 Resultado esperado: JSON com modelos carregados. Para chat no Open WebUI, carregue um modelo conversacional no LM Studio.
 
-Não teste LM Studio pelo domínio público. Ele não deve responder em `https://ai.example.com`; esse domínio é apenas para Open WebUI.
+Não teste LM Studio pelo domínio público. Ele não deve responder em `https://chat.ai.example.com`; esse domínio é apenas para Open WebUI.
 
 ### 5. Ollama API
 
@@ -156,10 +157,10 @@ http://localhost:8188
 Resultado esperado: interface do ComfyUI local. Acesso remoto separado:
 
 ```text
-https://media.example.com
+https://media.ai.example.com
 ```
 
-Esse hostname deve passar pelo Cloudflare Access com MFA para `user@example.com`.
+Esse hostname deve passar pelo Cloudflare Access para `user@example.com`.
 
 ### 8. GPU NVIDIA
 

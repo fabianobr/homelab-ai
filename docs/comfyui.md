@@ -29,7 +29,7 @@ http://localhost:8188
 O acesso remoto permitido e separado do Open WebUI:
 
 ```text
-https://media.example.com
+https://media.ai.example.com
 ```
 
 Esse hostname deve apontar pelo Cloudflare Tunnel para `http://localhost:8188` e exigir Cloudflare Access com MFA para `user@example.com`.
