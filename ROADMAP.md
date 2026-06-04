@@ -8,8 +8,8 @@
 - [ ] Corrigir FUSE/driver NVIDIA para LM Studio AppImage
 - [x] Instalar Open WebUI
 - [x] Conectar Open WebUI ao LM Studio
-- [ ] Carregar modelo de chat no LM Studio
-- [ ] Testar chat local
+- [x] Carregar modelo de chat no LM Studio
+- [x] Testar chat local
 
 ## Fase 2 — Acesso remoto
 
@@ -18,7 +18,7 @@
 - [x] Corrigir hostname/DNS do tunnel para ai.example.com
 - [x] Configurar Cloudflare Access para user@example.com
 - [x] Criar hostname/DNS do tunnel para media.example.com
-- [ ] Configurar Cloudflare Access com MFA para media.example.com
+- [ ] Configurar Cloudflare Access para media.example.com
 
 ## Fase 3 — Documentos e busca
 
