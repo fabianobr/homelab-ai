@@ -18,6 +18,24 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  comfyui:
+    build:
+      context: /home/user/AI/ComfyUI
+      dockerfile: /home/user/homelab-ai/docker/comfyui/Dockerfile
+    container_name: comfyui
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8188:8188"
+    volumes:
+      - /home/user/AI/ComfyUI:/comfyui
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
   n8n:
     image: docker.n8n.io/n8nio/n8n:latest
     container_name: n8n
