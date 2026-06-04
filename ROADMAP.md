@@ -36,20 +36,20 @@
 
 ## Fase 5 — Vídeo
 
-- [ ] Instalar LTX Video
+- [x] Instalar LTX Video
 - [ ] Testar text-to-video
 - [ ] Testar image-to-video
-- [ ] Documentar presets para NVIDIA GPU 16GB
+- [x] Documentar presets para NVIDIA GPU 16GB
 
 ## Fase 6 — Automações
 
-- [ ] Instalar n8n
+- [x] Instalar n8n
 - [ ] Criar primeiro workflow simples
 - [ ] Integrar com webhook protegido
 - [ ] Avaliar integração com Open WebUI
 
 ## Fase 7 — Agentes de código
 
-- [ ] Configurar Continue.dev
-- [ ] Configurar Codex/Claude Code/OpenCode
-- [ ] Criar padrões para manutenção do projeto
+- [x] Configurar Continue.dev
+- [x] Configurar Codex/Claude Code/OpenCode
+- [x] Criar padrões para manutenção do projeto
