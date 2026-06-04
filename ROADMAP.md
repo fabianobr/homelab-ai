@@ -18,35 +18,35 @@
 - [x] Corrigir hostname/DNS do tunnel para ai.example.com
 - [x] Configurar Cloudflare Access para user@example.com
 - [x] Criar hostname/DNS do tunnel para media.example.com
-- [ ] Configurar Cloudflare Access para media.example.com
+- [x] Configurar Cloudflare Access para media.example.com
 
 ## Fase 3 — Documentos e busca
 
-- [ ] Configurar RAG no Open WebUI
-- [ ] Criar coleções de documentos
-- [ ] Configurar busca web
-- [ ] Avaliar MCP Brave/Tavily
+- [x] Configurar RAG no Open WebUI
+- [x] Criar coleções de documentos
+- [x] Configurar busca web
+- [x] Avaliar MCP Brave/Tavily
 
 ## Fase 4 — Imagem
 
 - [x] Instalar ComfyUI
-- [ ] Instalar modelo FLUX Schnell
-- [ ] Testar geração de imagem
-- [ ] Publicar ComfyUI via Cloudflare Access
+- [x] Instalar modelo FLUX Schnell
+- [x] Testar geração de imagem
+- [x] Publicar ComfyUI via Cloudflare Access
 
 ## Fase 5 — Vídeo
 
 - [x] Instalar LTX Video
-- [ ] Testar text-to-video
-- [ ] Testar image-to-video
+- [x] Testar text-to-video
+- [x] Testar image-to-video
 - [x] Documentar presets para NVIDIA GPU 16GB
 
 ## Fase 6 — Automações
 
 - [x] Instalar n8n
-- [ ] Criar primeiro workflow simples
-- [ ] Integrar com webhook protegido
-- [ ] Avaliar integração com Open WebUI
+- [x] Criar primeiro workflow simples
+- [x] Integrar com webhook protegido
+- [x] Avaliar integração com Open WebUI
 
 ## Fase 7 — Agentes de código
 
