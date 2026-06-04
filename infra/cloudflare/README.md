@@ -2,12 +2,13 @@
 
 ## Objetivo
 
-Publicar o Open WebUI via domínio sem abrir portas no roteador.
+Publicar Open WebUI e ComfyUI via domínio sem abrir portas no roteador.
 
 Exemplo:
 
 ```text
 https://ai.example.com
+https://media.example.com
 ```
 
 ## Instalação básica
@@ -31,7 +32,8 @@ cloudflared tunnel create homelab-ai
 Criar rota DNS:
 
 ```bash
-cloudflared tunnel route dns homelab-ai ia.seudominio.com
+cloudflared tunnel route dns homelab-ai ai.example.com
+cloudflared tunnel route dns homelab-ai media.example.com
 ```
 
 Rodar túnel apontando para Open WebUI:
@@ -42,12 +44,14 @@ cloudflared tunnel --url http://localhost:3000 run homelab-ai
 
 ## Configuração deste host
 
-O tunnel system-wide deve apontar somente o Open WebUI:
+O tunnel system-wide deve apontar Open WebUI e ComfyUI:
 
 ```yaml
 ingress:
   - hostname: ai.example.com
     service: http://localhost:3000
+  - hostname: media.example.com
+    service: http://localhost:8188
   - service: http_status:404
 ```
 
@@ -68,8 +72,10 @@ Política recomendada:
 
 Não publique:
 
+- Ollama
 - LM Studio
-- ComfyUI
 - n8n
 - Docker
 - SSH
+
+ComfyUI e publicado apenas pelo tunnel e deve ficar protegido por Cloudflare Access.

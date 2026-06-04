@@ -3,6 +3,8 @@
 ## Fase 1 — Base funcional
 
 - [x] Instalar LM Studio
+- [x] Instalar Ollama
+- [x] Conectar Open WebUI ao Ollama
 - [ ] Corrigir FUSE/driver NVIDIA para LM Studio AppImage
 - [x] Instalar Open WebUI
 - [x] Conectar Open WebUI ao LM Studio
@@ -15,6 +17,8 @@
 - [x] Criar Cloudflare Tunnel
 - [x] Corrigir hostname/DNS do tunnel para ai.example.com
 - [x] Configurar Cloudflare Access para user@example.com
+- [x] Criar hostname/DNS do tunnel para media.example.com
+- [ ] Configurar Cloudflare Access com MFA para media.example.com
 
 ## Fase 3 — Documentos e busca
 
@@ -25,10 +29,10 @@
 
 ## Fase 4 — Imagem
 
-- [ ] Instalar ComfyUI
+- [x] Instalar ComfyUI
 - [ ] Instalar modelo FLUX Schnell
 - [ ] Testar geração de imagem
-- [ ] Avaliar integração com Open WebUI
+- [ ] Publicar ComfyUI via Cloudflare Access
 
 ## Fase 5 — Vídeo
 

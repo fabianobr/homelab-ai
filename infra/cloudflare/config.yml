@@ -1,0 +1,13 @@
+tunnel: CLOUDFLARE_TUNNEL_ID
+
+credentials-file: /etc/cloudflared/CLOUDFLARE_TUNNEL_ID.json
+protocol: http2
+
+ingress:
+  - hostname: ai.example.com
+    service: http://localhost:3000
+
+  - hostname: media.example.com
+    service: http://localhost:8188
+
+  - service: http_status:404

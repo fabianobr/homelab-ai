@@ -20,7 +20,19 @@ Geração de imagem local.
 
 Não expor ComfyUI diretamente na internet.
 
-Acesso preferencial apenas local ou por integração via Open WebUI.
+O processo deve continuar escutando em loopback:
+
+```text
+http://localhost:8188
+```
+
+O acesso remoto permitido e separado do Open WebUI:
+
+```text
+https://media.example.com
+```
+
+Esse hostname deve apontar pelo Cloudflare Tunnel para `http://localhost:8188` e exigir Cloudflare Access com MFA para `user@example.com`.
 
 ## Estado atual
 

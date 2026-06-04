@@ -8,6 +8,7 @@ Transformar o desktop `homelab` em um servidor pessoal de IA acessível remotame
 
 Stack principal:
 
+- Ollama
 - LM Studio
 - Open WebUI
 - Cloudflare Tunnel + Cloudflare Access
@@ -55,13 +56,26 @@ docker compose --profile optional up -d n8n
 bash ../scripts/healthcheck.sh
 ```
 
+## Aplicar configuração de sistema
+
+Algumas mudanças ficam fora do repositório e exigem root:
+
+```bash
+sudo bash scripts/apply-system-config.sh
+```
+
+Esse script configura o bind do Ollama Snap, instala o ingress do Cloudflare Tunnel e reinicia os serviços afetados.
+
 ## Acesso remoto
 
-O acesso remoto público permitido é apenas o Open WebUI via Cloudflare Access:
+O acesso remoto público permitido passa pelo Cloudflare Access:
 
 ```text
 https://ai.example.com
+https://media.example.com
 ```
+
+Ollama e LM Studio sao backends internos do Open WebUI e nao devem ter hostnames publicos.
 
 ## Testar serviços no ar
 
@@ -110,15 +124,24 @@ Resultado esperado: JSON com modelos carregados. Para chat no Open WebUI, carreg
 
 Não teste LM Studio pelo domínio público. Ele não deve responder em `https://ai.example.com`; esse domínio é apenas para Open WebUI.
 
-### 5. Conectividade Open WebUI -> LM Studio
+### 5. Ollama API
 
 ```bash
+curl http://localhost:11434/api/tags
+```
+
+Resultado esperado: JSON com modelos Ollama. O serviço deve escutar em `0.0.0.0:11434` no host para ser alcançável pelo Docker, mas não deve ser publicado no Cloudflare nem no roteador.
+
+### 6. Conectividade Open WebUI -> backends
+
+```bash
+docker exec open-webui python -c "import urllib.request; print(urllib.request.urlopen('http://host.docker.internal:11434/api/tags', timeout=5).read().decode()[:500])"
 docker exec open-webui python -c "import urllib.request; print(urllib.request.urlopen('http://host.docker.internal:1234/v1/models', timeout=5).read().decode()[:500])"
 ```
 
-Resultado esperado: o mesmo JSON de modelos visto no host.
+Resultado esperado: os mesmos JSONs de modelos vistos no host.
 
-### 6. ComfyUI
+### 7. ComfyUI
 
 ```bash
 curl -I http://localhost:8188
@@ -130,9 +153,15 @@ Abra no navegador:
 http://localhost:8188
 ```
 
-Resultado esperado: interface do ComfyUI local. Não exponha esse serviço no Cloudflare.
+Resultado esperado: interface do ComfyUI local. Acesso remoto separado:
 
-### 7. GPU NVIDIA
+```text
+https://media.example.com
+```
+
+Esse hostname deve passar pelo Cloudflare Access com MFA para `user@example.com`.
+
+### 8. GPU NVIDIA
 
 ```bash
 nvidia-smi
@@ -140,7 +169,7 @@ nvidia-smi
 
 Resultado esperado: NVIDIA GPU listada, com uso de VRAM/processos quando LM Studio ou ComfyUI estiverem carregando modelos.
 
-### 8. Docker e Compose
+### 9. Docker e Compose
 
 ```bash
 docker ps
@@ -153,9 +182,9 @@ Resultado esperado: container `open-webui` saudável e Compose v2 instalado.
 
 Nunca exponha diretamente na internet:
 
+- Ollama `11434`
 - LM Studio `1234`
-- ComfyUI `8188`
 - n8n `5678`
 - Docker socket
 
-Use apenas Cloudflare Access para acesso remoto ao Open WebUI.
+Use Cloudflare Access para os hostnames publicados: Open WebUI e ComfyUI.
