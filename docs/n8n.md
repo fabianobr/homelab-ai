@@ -31,3 +31,12 @@ usuário/senha forte
 +
 MFA
 ```
+
+## Inicialização
+
+O n8n é opcional nesta fase e fica atrás do profile `optional` no Docker Compose:
+
+```bash
+cd docker
+docker compose --profile optional up -d n8n
+```

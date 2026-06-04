@@ -4,14 +4,13 @@ services:
     container_name: open-webui
     restart: unless-stopped
     ports:
-      - "3000:8080"
+      - "127.0.0.1:3000:8080"
+      - "100.74.179.70:3000:8080"
     volumes:
       - open-webui:/app/backend/data
     environment:
       - WEBUI_NAME=Fabiano AI
       - ENABLE_SIGNUP=false
-      # Ajuste conforme o IP/host do LM Studio.
-      # Em Linux, host.docker.internal pode exigir extra_hosts abaixo.
       - OPENAI_API_BASE_URL=http://host.docker.internal:1234/v1
       - OPENAI_API_KEY=lm-studio
     extra_hosts:
@@ -20,9 +19,11 @@ services:
   n8n:
     image: docker.n8n.io/n8nio/n8n:latest
     container_name: n8n
+    profiles:
+      - optional
     restart: unless-stopped
     ports:
-      - "5678:5678"
+      - "127.0.0.1:5678:5678"
     volumes:
       - n8n:/home/node/.n8n
     environment:
@@ -33,4 +34,6 @@ services:
 
 volumes:
   open-webui:
+    name: open-webui
+    external: true
   n8n:

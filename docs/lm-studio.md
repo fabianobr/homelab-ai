@@ -30,6 +30,20 @@ http://localhost:1234/v1
 curl http://localhost:1234/v1/models
 ```
 
+O Open WebUI acessa esse endpoint de dentro do container usando:
+
+```text
+http://host.docker.internal:1234/v1
+```
+
+Para chat, mantenha um modelo conversacional carregado no LM Studio. Um modelo de embedding sozinho valida o endpoint, mas nao atende conversa.
+
 ## Observação
 
 LM Studio deve ser acessado pelo Open WebUI, não diretamente pela internet.
+
+O domínio público `https://ai.example.com` não deve apontar para LM Studio. Para validar remotamente a API, use Tailscale:
+
+```bash
+curl http://100.74.179.70:1234/v1/models
+```

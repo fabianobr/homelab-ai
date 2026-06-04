@@ -2,19 +2,21 @@
 
 ## Fase 1 — Base funcional
 
-- [ ] Instalar LM Studio
-- [ ] Ativar LM Studio Server
-- [ ] Instalar Open WebUI
-- [ ] Conectar Open WebUI ao LM Studio
+- [x] Instalar LM Studio
+- [ ] Corrigir FUSE/driver NVIDIA para LM Studio AppImage
+- [x] Instalar Open WebUI
+- [x] Conectar Open WebUI ao LM Studio
+- [ ] Carregar modelo de chat no LM Studio
 - [ ] Testar chat local
 
 ## Fase 2 — Acesso remoto
 
 - [ ] Instalar Tailscale
 - [ ] Testar acesso remoto via IP Tailscale
-- [ ] Instalar cloudflared
-- [ ] Criar Cloudflare Tunnel
-- [ ] Configurar Cloudflare Access
+- [x] Instalar cloudflared
+- [x] Criar Cloudflare Tunnel
+- [x] Corrigir hostname/DNS do tunnel para ai.example.com
+- [x] Configurar Cloudflare Access para user@example.com
 
 ## Fase 3 — Documentos e busca
 

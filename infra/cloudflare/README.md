@@ -7,7 +7,7 @@ Publicar o Open WebUI via domínio sem abrir portas no roteador.
 Exemplo:
 
 ```text
-https://ia.seudominio.com
+https://ai.example.com
 ```
 
 ## Instalação básica
@@ -40,6 +40,17 @@ Rodar túnel apontando para Open WebUI:
 cloudflared tunnel --url http://localhost:3000 run homelab-ai
 ```
 
+## Configuração deste host
+
+O tunnel system-wide deve apontar somente o Open WebUI:
+
+```yaml
+ingress:
+  - hostname: ai.example.com
+    service: http://localhost:3000
+  - service: http_status:404
+```
+
 ## Segurança obrigatória
 
 Configure Cloudflare Access antes de usar publicamente.
@@ -47,6 +58,7 @@ Configure Cloudflare Access antes de usar publicamente.
 Política recomendada:
 
 - Permitir apenas seu e-mail
+- E-mail permitido neste homelab: `user@example.com`
 - Exigir MFA
 - Bloquear países desnecessários
 - Ativar rate limiting

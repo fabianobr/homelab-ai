@@ -27,10 +27,16 @@ network:
     purpose: "Publicação segura via tunnel e Access"
 
 paths:
-  project_root: "/srv/homelab-ai"
-  models: "/srv/homelab-ai/models"
-  data: "/srv/homelab-ai/data"
-  backups: "/srv/homelab-ai/backups"
+  project_root: "/home/user/homelab-ai"
+  models: "/home/user/homelab-ai/models"
+  data: "/home/user/homelab-ai/data"
+  backups: "/home/user/homelab-ai/backups"
+
+domains:
+  open_webui: "ai.example.com"
+
+access:
+  cloudflare_access_email: "user@example.com"
 
 ports:
   lmstudio: 1234

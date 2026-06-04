@@ -54,3 +54,13 @@ E por trás dela ficam:
 | ComfyUI | 8188 | Imagem |
 | n8n | 5678 | Automações |
 | LTX Video | variável | Vídeo |
+
+## Publicação
+
+O único serviço publicado por domínio é:
+
+```text
+https://ai.example.com -> http://localhost:3000
+```
+
+LM Studio, ComfyUI, n8n, Docker e SSH não devem ser publicados diretamente.

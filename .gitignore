@@ -2,6 +2,7 @@
 .env
 .env.*
 .envrc
+.cloudflared/
 *.pem
 *.key
 *secret*

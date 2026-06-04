@@ -5,7 +5,7 @@ echo "== Atualizando homelab-ai =="
 
 cd "$(dirname "$0")/../docker"
 
-docker compose pull
-docker compose up -d
+docker compose pull open-webui
+docker compose up -d open-webui
 
 echo "== Atualização concluída =="

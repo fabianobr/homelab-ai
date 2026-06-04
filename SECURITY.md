@@ -58,6 +58,18 @@ Público externo permitido apenas para:
 Open WebUI via Cloudflare Access
 ```
 
+Domínio autorizado:
+
+```text
+https://ai.example.com
+```
+
+Identidade permitida no Access:
+
+```text
+user@example.com
+```
+
 Preferência operacional:
 
 ```text

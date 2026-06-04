@@ -10,7 +10,7 @@
 | Cloudflare Tunnel | Sim | systemd | - | Exposição segura |
 | ComfyUI | Sim | Manual/Docker | 8188 | Imagem |
 | LTX Video | Opcional | Manual/Docker | variável | Vídeo |
-| n8n | Opcional | Docker Compose | 5678 | Automações |
+| n8n | Opcional | Docker Compose profile `optional` | 5678 | Automações |
 
 ## Ordem de instalação
 
@@ -29,3 +29,17 @@
 - Gemma 3 12B
 - DeepSeek R1 Distill 14B
 - Modelo leve auxiliar para tarefas rápidas
+
+## Publicação atual
+
+Somente o Open WebUI deve ser publicado via Cloudflare Access:
+
+```text
+https://ai.example.com -> http://localhost:3000
+```
+
+E-mail permitido no Access:
+
+```text
+user@example.com
+```
