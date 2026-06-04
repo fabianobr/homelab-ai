@@ -1,10 +1,25 @@
 # Local environment and secrets
 .env
 .env.*
+.envrc
 *.pem
 *.key
 *secret*
 *token*
+
+# Python caches and virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # Runtime data
 data/*
@@ -15,11 +30,14 @@ backups/*
 !models/.gitkeep
 !backups/.gitkeep
 
-# Backup archives
+# Backup archives and generated packages
 *.tar
 *.tar.gz
 *.tgz
 *.zip
+dist/
+build/
+*.egg-info/
 
 # Editor and OS noise
 .DS_Store
