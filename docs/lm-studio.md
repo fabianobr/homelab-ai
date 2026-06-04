@@ -42,4 +42,4 @@ Para chat, mantenha um modelo conversacional carregado no LM Studio. Um modelo d
 
 LM Studio deve ser acessado pelo Open WebUI, não diretamente pela internet.
 
-O domínio público `https://chat.ai.example.com` não deve apontar para LM Studio. Valide a API localmente no host ou indiretamente pelo Open WebUI.
+O domínio público `https://ai.example.com` não deve apontar para LM Studio. Valide a API localmente no host ou indiretamente pelo Open WebUI.

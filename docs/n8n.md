@@ -13,7 +13,7 @@ Automações.
 ## Acesso remoto
 
 ```text
-https://flow.ai.example.com
+https://flow.example.com
 ```
 
 ## Exemplos

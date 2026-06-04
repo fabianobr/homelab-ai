@@ -46,9 +46,9 @@ C4Container
 
     Rel(user, cf_access, "Acessa", "HTTPS")
     Rel(cf_access, cf_tunnel, "Autoriza", "Cloudflare Access")
-    Rel(cf_tunnel, open_webui, "chat.ai.example.com", "HTTP :3000")
-    Rel(cf_tunnel, comfyui, "media.ai.example.com", "HTTP :8188")
-    Rel(cf_tunnel, n8n, "flow.ai.example.com", "HTTP :5678")
+    Rel(cf_tunnel, open_webui, "ai.example.com", "HTTP :3000")
+    Rel(cf_tunnel, comfyui, "media.example.com", "HTTP :8188")
+    Rel(cf_tunnel, n8n, "flow.example.com", "HTTP :5678")
 
     Rel(open_webui, ollama, "Lista modelos e envia prompts", "HTTP :11434")
     Rel(open_webui, lm_studio, "Lista modelos e envia prompts", "OpenAI-compatible :1234")
@@ -66,9 +66,9 @@ C4Container
 
 | Servico | Porta local | Exposicao | Uso |
 |---|---:|---|---|
-| Open WebUI | 3000 | `https://chat.ai.example.com` via Cloudflare Access | Interface principal |
-| ComfyUI | 8188 | `https://media.ai.example.com` via Cloudflare Access | Geracao de imagem |
-| n8n | 5678 | `https://flow.ai.example.com` via Cloudflare Access | Automacoes |
+| Open WebUI | 3000 | `https://ai.example.com` via Cloudflare Access | Interface principal |
+| ComfyUI | 8188 | `https://media.example.com` via Cloudflare Access | Geracao de imagem |
+| n8n | 5678 | `https://flow.example.com` via Cloudflare Access | Automacoes |
 | Ollama | 11434 | Interno | Backend do Open WebUI |
 | LM Studio | 1234 | Interno | Backend OpenAI-compatible do Open WebUI |
 | LTX Video | variavel | Interno/opcional | Video |
@@ -78,9 +78,9 @@ C4Container
 Servicos publicados por dominio via Cloudflare Access:
 
 ```text
-https://chat.ai.example.com  -> http://localhost:3000
-https://media.ai.example.com -> http://localhost:8188
-https://flow.ai.example.com  -> http://localhost:5678
+https://ai.example.com  -> http://localhost:3000
+https://media.example.com -> http://localhost:8188
+https://flow.example.com  -> http://localhost:5678
 ```
 
 Ollama, LM Studio, n8n, Docker e SSH nao devem ser publicados diretamente. Ollama e LM Studio sao backends internos do Open WebUI.

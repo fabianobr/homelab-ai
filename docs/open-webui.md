@@ -42,14 +42,16 @@ Backend Ollama:
 http://host.docker.internal:11434
 ```
 
-Ollama precisa escutar em `0.0.0.0:11434` no host para ser acessivel a partir do container Docker. No Snap, aplique:
+Ollama precisa escutar em `0.0.0.0:11434` no host para ser acessivel a partir do container Docker. Esse bind so deve ser usado com a regra de firewall aplicada por `scripts/apply-system-config.sh`, que bloqueia a porta fora de loopback e interfaces Docker.
+
+No Snap, o script aplica:
 
 ```bash
 sudo snap set ollama host=0.0.0.0:11434
 sudo systemctl restart snap.ollama.listener.service
 ```
 
-Nao publique essa porta no Cloudflare nem no roteador.
+Nao publique essa porta no Cloudflare, no roteador, na LAN ou na Tailscale.
 
 ## Conectar com LM Studio
 
@@ -76,7 +78,7 @@ O container publica apenas em loopback para Cloudflare:
 O acesso remoto público deve passar pelo Cloudflare Access:
 
 ```text
-https://chat.ai.example.com
+https://ai.example.com
 ```
 
 ## Uso

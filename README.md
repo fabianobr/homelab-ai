@@ -64,16 +64,16 @@ Algumas mudanças ficam fora do repositório e exigem root:
 sudo bash scripts/apply-system-config.sh
 ```
 
-Esse script configura o bind do Ollama Snap, instala o ingress do Cloudflare Tunnel e reinicia os serviços afetados.
+Esse script configura o bind do Ollama Snap, restringe a porta `11434` ao host/redes Docker, instala o ingress do Cloudflare Tunnel e reinicia os serviços afetados.
 
 ## Acesso remoto
 
 O acesso remoto público permitido passa pelo Cloudflare Access:
 
 ```text
-https://chat.ai.example.com
-https://media.ai.example.com
-https://flow.ai.example.com
+https://ai.example.com
+https://media.example.com
+https://flow.example.com
 ```
 
 Ollama e LM Studio sao backends internos do Open WebUI e nao devem ter hostnames publicos.
@@ -110,7 +110,7 @@ Observação operacional: o Open WebUI deve escutar apenas em `127.0.0.1:3000` p
 Abra no navegador:
 
 ```text
-https://chat.ai.example.com
+https://ai.example.com
 ```
 
 Resultado esperado: Cloudflare Access solicita login e depois abre o Open WebUI.
@@ -123,7 +123,7 @@ curl http://localhost:1234/v1/models
 
 Resultado esperado: JSON com modelos carregados. Para chat no Open WebUI, carregue um modelo conversacional no LM Studio.
 
-Não teste LM Studio pelo domínio público. Ele não deve responder em `https://chat.ai.example.com`; esse domínio é apenas para Open WebUI.
+Não teste LM Studio pelo domínio público. Ele não deve responder em `https://ai.example.com`; esse domínio é apenas para Open WebUI.
 
 ### 5. Ollama API
 
@@ -131,7 +131,7 @@ Não teste LM Studio pelo domínio público. Ele não deve responder em `https:/
 curl http://localhost:11434/api/tags
 ```
 
-Resultado esperado: JSON com modelos Ollama. O serviço deve escutar em `0.0.0.0:11434` no host para ser alcançável pelo Docker, mas não deve ser publicado no Cloudflare nem no roteador.
+Resultado esperado: JSON com modelos Ollama. O serviço escuta em `0.0.0.0:11434` para ser alcançável pelo Docker, mas o script de configuração instala uma regra de firewall persistente que permite acesso apenas por loopback e interfaces Docker.
 
 ### 6. Conectividade Open WebUI -> backends
 
@@ -157,7 +157,7 @@ http://localhost:8188
 Resultado esperado: interface do ComfyUI local. Acesso remoto separado:
 
 ```text
-https://media.ai.example.com
+https://media.example.com
 ```
 
 Esse hostname deve passar pelo Cloudflare Access para `user@example.com`.

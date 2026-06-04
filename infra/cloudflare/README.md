@@ -7,9 +7,9 @@ Publicar Open WebUI, ComfyUI e n8n via domínio sem abrir portas no roteador.
 Exemplo:
 
 ```text
-https://chat.ai.example.com
-https://media.ai.example.com
-https://flow.ai.example.com
+https://ai.example.com
+https://media.example.com
+https://flow.example.com
 ```
 
 ## Instalação básica
@@ -33,9 +33,9 @@ cloudflared tunnel create homelab-ai
 Criar rota DNS:
 
 ```bash
-cloudflared tunnel route dns homelab-ai chat.ai.example.com
-cloudflared tunnel route dns homelab-ai media.ai.example.com
-cloudflared tunnel route dns homelab-ai flow.ai.example.com
+cloudflared tunnel route dns homelab-ai ai.example.com
+cloudflared tunnel route dns homelab-ai media.example.com
+cloudflared tunnel route dns homelab-ai flow.example.com
 ```
 
 Rodar túnel apontando para Open WebUI:
@@ -50,11 +50,11 @@ O tunnel system-wide deve apontar Open WebUI e ComfyUI:
 
 ```yaml
 ingress:
-  - hostname: chat.ai.example.com
+  - hostname: ai.example.com
     service: http://localhost:3000
-  - hostname: media.ai.example.com
+  - hostname: media.example.com
     service: http://localhost:8188
-  - hostname: flow.ai.example.com
+  - hostname: flow.example.com
     service: http://localhost:5678
   - service: http_status:404
 ```
