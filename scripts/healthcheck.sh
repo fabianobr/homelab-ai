@@ -48,9 +48,40 @@ fi
 echo
 echo "URLs:"
 check_url "Open WebUI" "http://localhost:3000"
+check_url "Ollama models" "http://localhost:11434/api/tags"
 check_url "LM Studio models" "http://localhost:1234/v1/models"
 check_url "ComfyUI" "http://localhost:8188"
 check_url "n8n" "http://localhost:5678" "SKIP optional"
+
+echo
+echo "Ollama exposure:"
+if systemctl is-active --quiet homelab-ai-ollama-firewall.service; then
+  echo "[OK] Ollama firewall service active"
+else
+  echo "[FAIL] Ollama firewall service inactive"
+  record_fail
+fi
+
+echo
+echo "Container backends:"
+if docker inspect open-webui >/dev/null 2>&1; then
+  if docker exec open-webui python -c "import urllib.request; urllib.request.urlopen('http://host.docker.internal:11434/api/tags', timeout=5).read()" >/dev/null; then
+    echo "[OK] Open WebUI -> Ollama"
+  else
+    echo "[FAIL] Open WebUI -> Ollama"
+    record_fail
+  fi
+
+  if docker exec open-webui python -c "import urllib.request; urllib.request.urlopen('http://host.docker.internal:1234/v1/models', timeout=5).read()" >/dev/null; then
+    echo "[OK] Open WebUI -> LM Studio"
+  else
+    echo "[FAIL] Open WebUI -> LM Studio"
+    record_fail
+  fi
+else
+  echo "[FAIL] open-webui container not found"
+  record_fail
+fi
 
 echo
 echo "Cloudflare:"
@@ -59,6 +90,15 @@ if command -v cloudflared >/dev/null 2>&1; then
     echo "[OK] cloudflared ingress config"
   else
     echo "[FAIL] cloudflared ingress config invalid"
+    record_fail
+  fi
+
+  if grep -q "hostname: ai.example.com" /etc/cloudflared/config.yml \
+    && grep -q "hostname: media.example.com" /etc/cloudflared/config.yml \
+    && grep -q "hostname: flow.example.com" /etc/cloudflared/config.yml; then
+    echo "[OK] cloudflared required hostnames"
+  else
+    echo "[FAIL] cloudflared required hostnames missing"
     record_fail
   fi
 else

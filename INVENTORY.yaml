@@ -31,6 +31,8 @@ paths:
 
 domains:
   open_webui: "ai.example.com"
+  comfyui: "media.example.com"
+  n8n: "flow.example.com"
 
 access:
   cloudflare_access_email: "user@example.com"

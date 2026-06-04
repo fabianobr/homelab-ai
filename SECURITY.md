@@ -4,8 +4,9 @@
 
 Nunca:
 
+- Expor `Ollama` diretamente na internet
 - Expor `LM Studio` diretamente na internet
-- Expor `ComfyUI` diretamente na internet
+- Expor `ComfyUI` sem Cloudflare Access
 - Expor `n8n` diretamente na internet sem autenticação forte
 - Abrir portas no roteador sem necessidade
 - Expor Docker socket
@@ -14,7 +15,7 @@ Nunca:
 
 Sempre:
 
-- Usar Cloudflare Tunnel para o Open WebUI remoto
+- Usar Cloudflare Tunnel para Open WebUI e ComfyUI remotos
 - Usar Cloudflare Access com login e MFA
 - Manter Docker e Ubuntu atualizados
 - Fazer backup antes de mudanças grandes
@@ -55,12 +56,16 @@ Público externo permitido apenas para:
 
 ```text
 Open WebUI via Cloudflare Access
+ComfyUI via Cloudflare Access
+n8n via Cloudflare Access
 ```
 
-Domínio autorizado:
+Domínios autorizados:
 
 ```text
 https://ai.example.com
+https://media.example.com
+https://flow.example.com
 ```
 
 Identidade permitida no Access:
@@ -74,3 +79,12 @@ Preferência operacional:
 ```text
 Cloudflare Access > porta pública direta
 ```
+
+Backends internos que nao devem ter hostname publico:
+
+```text
+Ollama 11434
+LM Studio 1234
+```
+
+Ollama fica em `0.0.0.0:11434` apenas para permitir acesso do container Docker via `host.docker.internal`. A unidade `homelab-ai-ollama-firewall.service` deve estar ativa para bloquear essa porta fora de loopback e interfaces Docker.
