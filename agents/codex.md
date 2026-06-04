@@ -39,9 +39,7 @@ A interface principal é o Open WebUI.
 
 O LM Studio é backend de modelos.
 
-Tailscale é o acesso remoto privado.
-
-Cloudflare Tunnel + Access é o acesso via domínio com autenticação.
+Cloudflare Tunnel + Access é o unico acesso remoto suportado.
 
 ComfyUI, LTX Video e n8n são serviços complementares.
 

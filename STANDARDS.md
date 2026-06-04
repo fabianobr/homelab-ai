@@ -5,8 +5,7 @@
 - Simplicidade antes de sofisticação
 - Docker Compose antes de Kubernetes
 - Uma interface principal: Open WebUI
-- Tailscale para acesso privado
-- Cloudflare Access para exposição pública
+- Cloudflare Access como unico acesso remoto suportado
 - Documentar toda alteração relevante
 
 ## Não usar por padrão

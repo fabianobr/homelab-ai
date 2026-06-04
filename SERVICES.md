@@ -6,7 +6,6 @@
 |---|---|---|---:|---|
 | LM Studio | Sim | Manual ou systemd | 1234 | Backend dos modelos |
 | Open WebUI | Sim | Docker Compose | 3000 | Interface principal |
-| Tailscale | Sim | systemd | - | VPN privada |
 | Cloudflare Tunnel | Sim | systemd | - | Exposição segura |
 | ComfyUI | Sim | Manual/Docker | 8188 | Imagem |
 | LTX Video | Opcional | Manual/Docker | variável | Vídeo |
@@ -16,12 +15,11 @@
 
 1. LM Studio
 2. Open WebUI
-3. Tailscale
-4. Cloudflare Tunnel + Access
-5. ComfyUI
-6. LTX Video
-7. n8n
-8. MCPs e ferramentas
+3. Cloudflare Tunnel + Access
+4. ComfyUI
+5. LTX Video
+6. n8n
+7. MCPs e ferramentas
 
 ## Modelos iniciais recomendados
 

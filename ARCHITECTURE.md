@@ -6,7 +6,6 @@
 flowchart TD
     User[Celular / Notebook]
     Cloudflare[Cloudflare Zero Trust]
-    Tailscale[Tailscale VPN]
     OpenWebUI[Open WebUI]
     LMStudio[LM Studio API]
     Models[Modelos locais]
@@ -15,9 +14,7 @@ flowchart TD
     N8N[n8n]
 
     User --> Cloudflare
-    User --> Tailscale
     Cloudflare --> OpenWebUI
-    Tailscale --> OpenWebUI
 
     OpenWebUI --> LMStudio
     LMStudio --> Models
@@ -43,7 +40,7 @@ E por trás dela ficam:
 - ComfyUI para imagem
 - LTX Video para vídeo
 - n8n para automações
-- Tailscale e Cloudflare para acesso seguro
+- Cloudflare Tunnel e Cloudflare Access para acesso remoto seguro
 
 ## Interfaces
 
@@ -63,4 +60,4 @@ O único serviço publicado por domínio é:
 https://ai.example.com -> http://localhost:3000
 ```
 
-LM Studio, ComfyUI, n8n, Docker e SSH não devem ser publicados diretamente.
+LM Studio, ComfyUI, n8n, Docker e SSH não devem ser publicados diretamente. O acesso remoto suportado neste projeto é somente via Cloudflare Access para o Open WebUI.

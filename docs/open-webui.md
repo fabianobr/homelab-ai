@@ -22,7 +22,6 @@ Enquanto o plugin `docker compose` nao estiver instalado no host, o container po
 ```bash
 docker run -d --name open-webui --restart unless-stopped \
   -p 127.0.0.1:3000:8080 \
-  -p 100.74.179.70:3000:8080 \
   -v open-webui:/app/backend/data \
   -e "WEBUI_NAME=Fabiano AI" \
   -e ENABLE_SIGNUP=false \
@@ -48,16 +47,10 @@ lm-studio
 
 ## Publicação
 
-O container publica em loopback para Cloudflare:
+O container publica apenas em loopback para Cloudflare:
 
 ```text
 127.0.0.1:3000
-```
-
-E no IP Tailscale para acesso privado:
-
-```text
-100.74.179.70:3000
 ```
 
 O acesso remoto público deve passar pelo Cloudflare Access:

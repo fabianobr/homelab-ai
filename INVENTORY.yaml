@@ -19,9 +19,6 @@ hardware:
     primary: "NVMe SSD"
 
 network:
-  tailscale:
-    enabled: true
-    purpose: "Acesso privado remoto"
   cloudflare:
     enabled: true
     purpose: "Publicação segura via tunnel e Access"

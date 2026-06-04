@@ -20,13 +20,7 @@ Geração de imagem local.
 
 Não expor ComfyUI diretamente na internet.
 
-Acesso preferencial:
-
-```text
-Tailscale
-```
-
-ou integração via Open WebUI.
+Acesso preferencial apenas local ou por integração via Open WebUI.
 
 ## Estado atual
 

@@ -14,8 +14,7 @@ Nunca:
 
 Sempre:
 
-- Usar Tailscale para acesso privado
-- Usar Cloudflare Tunnel quando precisar domínio público
+- Usar Cloudflare Tunnel para o Open WebUI remoto
 - Usar Cloudflare Access com login e MFA
 - Manter Docker e Ubuntu atualizados
 - Fazer backup antes de mudanças grandes
@@ -73,5 +72,5 @@ user@example.com
 Preferência operacional:
 
 ```text
-Tailscale > Cloudflare Tunnel > porta pública direta
+Cloudflare Access > porta pública direta
 ```

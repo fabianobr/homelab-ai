@@ -11,8 +11,6 @@
 
 ## Fase 2 — Acesso remoto
 
-- [ ] Instalar Tailscale
-- [ ] Testar acesso remoto via IP Tailscale
 - [x] Instalar cloudflared
 - [x] Criar Cloudflare Tunnel
 - [x] Corrigir hostname/DNS do tunnel para ai.example.com
