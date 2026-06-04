@@ -84,8 +84,9 @@ if command -v cloudflared >/dev/null 2>&1; then
     record_fail
   fi
 
-  if grep -q "hostname: ai.example.com" /etc/cloudflared/config.yml \
-    && grep -q "hostname: media.example.com" /etc/cloudflared/config.yml; then
+  if grep -q "hostname: chat.ai.example.com" /etc/cloudflared/config.yml \
+    && grep -q "hostname: media.ai.example.com" /etc/cloudflared/config.yml \
+    && grep -q "hostname: flow.ai.example.com" /etc/cloudflared/config.yml; then
     echo "[OK] cloudflared required hostnames"
   else
     echo "[FAIL] cloudflared required hostnames missing"
