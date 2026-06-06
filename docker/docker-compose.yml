@@ -1,8 +1,26 @@
 services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - /home/user/AI/ollama:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
     container_name: open-webui
     restart: unless-stopped
+    depends_on:
+      - ollama
     ports:
       - "127.0.0.1:3000:8080"
     volumes:
@@ -12,11 +30,9 @@ services:
       - ENABLE_SIGNUP=false
       - WEBUI_AUTH_TRUSTED_EMAIL_HEADER=Cf-Access-Authenticated-User-Email
       - ENABLE_OPENAI_API=True
-      - OLLAMA_BASE_URL=http://host.docker.internal:11434
-      - OPENAI_API_BASE_URL=http://host.docker.internal:1234/v1
-      - OPENAI_API_KEY=lm-studio
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OPENAI_API_BASE_URL=http://ollama:11434/v1
+      - OPENAI_API_KEY=ollama
 
   comfyui:
     build:
