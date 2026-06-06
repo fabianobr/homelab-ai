@@ -36,4 +36,4 @@ ENV PYTHONPATH=/opt/comfyui-python
 
 WORKDIR /comfyui
 EXPOSE 8188
-CMD ["python", "main.py", "--listen", "0.0.0.0", "--port", "8188"]
+CMD ["python", "main.py", "--listen", "0.0.0.0", "--port", "8188", "--disable-cuda-malloc"]
