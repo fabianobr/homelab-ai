@@ -4,24 +4,22 @@
 
 | Serviço | Obrigatório | Inicialização | Porta | Observação |
 |---|---|---|---:|---|
-| Ollama | Sim | Snap/systemd | 11434 | Backend interno do Open WebUI |
-| LM Studio | Sim | Manual ou systemd | 1234 | Backend OpenAI-compatible interno |
+| Ollama | Sim | Docker Compose | 11434 | Backend único de modelos |
 | Open WebUI | Sim | Docker Compose | 3000 | Interface principal |
+| ComfyUI | Sim | Docker Compose | 8188 | Interface de imagem via Access |
 | Cloudflare Tunnel | Sim | systemd | - | Exposição segura |
-| ComfyUI | Sim | Manual/Docker | 8188 | Interface de imagem via Access |
-| LTX Video | Opcional | Manual/Docker | variável | Vídeo |
+| LTX Video | Opcional | Docker | variável | Vídeo |
 | n8n | Opcional | Docker Compose profile `optional` | 5678 | Automações |
 
 ## Ordem de instalação
 
-1. Ollama
-2. LM Studio
-3. Open WebUI
+1. Ollama (Docker)
+2. Open WebUI (Docker)
+3. ComfyUI (Docker)
 4. Cloudflare Tunnel + Access
-5. ComfyUI
-6. LTX Video
-7. n8n
-8. MCPs e ferramentas
+5. LTX Video
+6. n8n
+7. MCPs e ferramentas
 
 ## Modelos iniciais recomendados
 
@@ -46,9 +44,18 @@ E-mail permitido no Access:
 user@example.com
 ```
 
-Ollama e LM Studio ficam internos e sao acessados pelo Open WebUI com:
+Ollama é acessado pelo Open WebUI via rede interna do Docker Compose:
 
 ```text
-http://host.docker.internal:11434
-http://host.docker.internal:1234/v1
+http://ollama:11434        (chat/completions)
+http://ollama:11434/v1     (endpoint OpenAI-compatible)
 ```
+
+## Paths de modelos (bind mounts)
+
+Modelos ficam fora do Docker (muito volume de storage):
+
+| Serviço | Path local | Path no container |
+|---|---|---|
+| Ollama | `/home/user/AI/ollama` | `/root/.ollama` |
+| ComfyUI | `/home/user/AI/ComfyUI` | `/comfyui` |

@@ -1,8 +1,43 @@
 services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - /home/user/AI/ollama:/root/.ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=30s   # solta a VRAM rápido quando ocioso (libera p/ ComfyUI); node OllamaFlushVRAM é a garantia explícita
+      - OLLAMA_MAX_LOADED_MODELS=1  # 1 modelo na VRAM por vez (evita transbordo pra CPU)
+      - OLLAMA_NUM_PARALLEL=1       # sem requisições paralelas concorrendo na GPU
+    # GPU via CDI (nvidia.com/gpu=all) em vez do runtime nvidia legado.
+    # O runtime legado injeta regras de cgroup pela nvidia-container-cli que o
+    # systemd remove em qualquer `daemon-reload`, derrubando o acesso à GPU
+    # (NVML "Unknown Error" -> fallback pra CPU). CDI usa o caminho OCI nativo
+    # do runc, que sobrevive a reloads. Spec mantido por nvidia-cdi-refresh.service.
+    devices:
+      - "nvidia.com/gpu=all"
+    healthcheck:
+      test: ["CMD", "ollama", "ps"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 8g
+        reservations:
+          memory: 2g
+
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
     container_name: open-webui
     restart: unless-stopped
+    depends_on:
+      - ollama
     ports:
       - "127.0.0.1:3000:8080"
     volumes:
@@ -12,11 +47,20 @@ services:
       - ENABLE_SIGNUP=false
       - WEBUI_AUTH_TRUSTED_EMAIL_HEADER=Cf-Access-Authenticated-User-Email
       - ENABLE_OPENAI_API=True
-      - OLLAMA_BASE_URL=http://host.docker.internal:11434
-      - OPENAI_API_BASE_URL=http://host.docker.internal:1234/v1
-      - OPENAI_API_KEY=lm-studio
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OPENAI_API_BASE_URL=http://ollama:11434/v1
+      - OPENAI_API_KEY=ollama
+      - ENABLE_API_KEY=true
+      - RAG_EMBEDDING_ENGINE=ollama                  # embeddings na GPU via Ollama (não na CPU local)
+      - RAG_OLLAMA_BASE_URL=http://ollama:11434
+      - RAG_EMBEDDING_MODEL=nomic-embed-text
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 3g
+        reservations:
+          memory: 512m
 
   comfyui:
     build:
@@ -24,17 +68,36 @@ services:
       dockerfile: /home/user/homelab-ai/docker/comfyui/Dockerfile
     container_name: comfyui
     restart: unless-stopped
+    command: ["python", "main.py", "--listen", "0.0.0.0", "--port", "8188", "--disable-cuda-malloc"]
+    # GPU via CDI — ver comentário no serviço ollama. Evita perda de GPU em daemon-reload.
+    devices:
+      - "nvidia.com/gpu=all"
     ports:
       - "127.0.0.1:8188:8188"
     volumes:
       - /home/user/AI/ComfyUI:/comfyui
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8188/system_stats', timeout=5).read()",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     deploy:
       resources:
+        limits:
+          cpus: "4.0"
+          # Modelos de vídeo (LTX) + pinned memory do ComfyUI (~27GB) estouravam
+          # o limite antigo de 10g -> kernel OOM-killer matava o processo (restart loop).
+          # No host puro não havia limite; 24g dá folga mantendo um teto de segurança.
+          memory: 24g
         reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+          memory: 2g
 
   n8n:
     image: docker.n8n.io/n8nio/n8n:latest
@@ -53,6 +116,23 @@ services:
       - TZ=America/Sao_Paulo
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q --spider http://127.0.0.1:5678/healthz || wget -q --spider http://127.0.0.1:5678/",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1g
+        reservations:
+          memory: 256m
 
 volumes:
   open-webui:

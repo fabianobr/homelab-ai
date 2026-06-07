@@ -25,7 +25,8 @@ network:
 
 paths:
   project_root: "/home/user/homelab-ai"
-  models: "/home/user/homelab-ai/models"
+  models_ollama: "/home/user/AI/ollama"
+  models_comfyui: "/home/user/AI/ComfyUI/models"
   data: "/home/user/homelab-ai/data"
   backups: "/home/user/homelab-ai/backups"
 
@@ -38,7 +39,7 @@ access:
   cloudflare_access_email: "user@example.com"
 
 ports:
-  lmstudio: 1234
+  ollama: 11434
   open_webui: 3000
   comfyui: 8188
   n8n: 5678
