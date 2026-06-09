@@ -4,9 +4,9 @@ project:
   purpose: "Servidor pessoal de IA local"
 
 host:
-  hostname: homelab
+  hostname: ai-host
   os: "Ubuntu 26.04"
-  timezone: "America/Sao_Paulo"
+  timezone: "Etc/UTC"
 
 hardware:
   gpu:
@@ -24,11 +24,11 @@ network:
     purpose: "Publicação segura via tunnel e Access"
 
 paths:
-  project_root: "/home/user/homelab-ai"
-  models_ollama: "/home/user/AI/ollama"
-  models_comfyui: "/home/user/AI/ComfyUI/models"
-  data: "/home/user/homelab-ai/data"
-  backups: "/home/user/homelab-ai/backups"
+  project_root: "/opt/homelab-ai"
+  models_ollama: "/srv/homelab-ai/ollama"
+  models_comfyui: "/srv/homelab-ai/comfyui/models"
+  data: "/opt/homelab-ai/data"
+  backups: "/opt/homelab-ai/backups"
 
 domains:
   open_webui: "ai.example.com"

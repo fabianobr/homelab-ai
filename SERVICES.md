@@ -57,5 +57,5 @@ Modelos ficam fora do Docker (muito volume de storage):
 
 | Serviço | Path local | Path no container |
 |---|---|---|
-| Ollama | `/home/user/AI/ollama` | `/root/.ollama` |
-| ComfyUI | `/home/user/AI/ComfyUI` | `/comfyui` |
+| Ollama | `/srv/homelab-ai/ollama` | `/root/.ollama` |
+| ComfyUI | `/srv/homelab-ai/comfyui` | `/comfyui` |

@@ -28,12 +28,12 @@ Documentar cada modelo instalado e cada preset funcional.
 
 ## Estado atual
 
-Nodes instalados em `/home/user/AI/ComfyUI/custom_nodes/`:
+Nodes instalados em `/srv/homelab-ai/comfyui/custom_nodes/`:
 
 - `ComfyUI-LTXVideo`
 - `ComfyUI-LTXVideo-Extra`
 
-Modelo disponível em `/home/user/AI/ComfyUI/models/checkpoints/`:
+Modelo disponível em `/srv/homelab-ai/comfyui/models/checkpoints/`:
 
 - `ltx-video-2b-v0.9.5.safetensors`
 
@@ -41,7 +41,7 @@ Modelo disponível em `/home/user/AI/ComfyUI/models/checkpoints/`:
 
 ```bash
 # Ativar o ComfyUI se não estiver rodando
-cd /home/user/AI/ComfyUI
+cd /srv/homelab-ai/comfyui
 source venv/bin/activate
 python main.py --listen 127.0.0.1 --port 8188
 ```

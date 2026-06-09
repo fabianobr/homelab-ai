@@ -21,10 +21,10 @@
 ### Diretórios
 
 ```text
-/home/user/homelab-ai
-/home/user/homelab-ai/data
-/home/user/homelab-ai/models
-/home/user/homelab-ai/backups
+/opt/homelab-ai
+/opt/homelab-ai/data
+/opt/homelab-ai/models
+/opt/homelab-ai/backups
 ```
 
 ### Commits

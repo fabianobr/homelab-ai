@@ -33,7 +33,7 @@ C4Container
     System_Ext(cf_access, "Cloudflare Access", "Login e MFA.")
     System_Ext(cf_tunnel, "Cloudflare Tunnel", "Publica hostnames.")
 
-    Container_Boundary(host, "Desktop homelab - Ubuntu + NVIDIA GPU") {
+    Container_Boundary(host, "Desktop ai-host - Ubuntu + NVIDIA GPU") {
         Container(open_webui, "Open WebUI", "Docker", "Interface de chat, RAG e ferramentas. :3000")
         Container(comfyui, "ComfyUI", "Docker/GPU", "Geracao de imagem. :8188")
         Container(ollama, "Ollama", "Docker/GPU", "Backend unico de modelos. :11434 + /v1")

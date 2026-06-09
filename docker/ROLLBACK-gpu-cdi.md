@@ -1,6 +1,6 @@
 # Rollback — migração GPU para CDI + desativação do Ollama/WebUI snap
 
-Data: 2026-06-07
+Data: <DATE>
 Branch: `fix/comfyui-custom-node-deps`
 
 ## Por que isso foi feito
@@ -53,7 +53,7 @@ Confirmado em `journalctl -k`. No host puro não havia limite. Reverter: voltar 
 ### 1c. `docker/docker-compose.yml` — `OLLAMA_KEEP_ALIVE` 5m -> 30s
 Faz o Ollama soltar a VRAM rápido quando ocioso (defesa contra disputa de VRAM
 com o ComfyUI). Camada complementar ao custom node `OllamaFlushVRAM`
-(`/home/user/AI/ComfyUI/custom_nodes/ComfyUI-OllamaFlushVRAM/`). Reverter: voltar `5m`.
+(`/srv/homelab-ai/comfyui/custom_nodes/ComfyUI-OllamaFlushVRAM/`). Reverter: voltar `5m`.
 
 ### 2. Snaps `ollama` e `ollama-webui` — parados e desabilitados (NÃO removidos)
 ```
@@ -68,7 +68,7 @@ Estado anterior: ambos `enabled` + `active`.
 
 ### Reverter a mudança de GPU (voltar ao runtime nvidia legado)
 ```bash
-cd /home/user/homelab-ai
+cd /opt/homelab-ai
 git checkout docker/docker-compose.yml      # descarta a mudança CDI (se ainda não commitada)
 # ou, se já commitada, edite manualmente trocando:
 #   devices: ["nvidia.com/gpu=all"]
@@ -82,11 +82,11 @@ sudo snap start --enable ollama
 sudo snap start --enable ollama-webui
 ```
 > Atenção: o snap Ollama e o container Ollama brigam pela porta 11434.
-> Para usar o snap, pare antes o container: `cd /home/user/homelab-ai/docker && docker compose stop ollama`
+> Para usar o snap, pare antes o container: `cd /opt/homelab-ai/docker && docker compose stop ollama`
 
 ### Voltar 100% ao estado anterior (snap manda, Docker Ollama desligado)
 ```bash
-cd /home/user/homelab-ai/docker && docker compose stop ollama
+cd /opt/homelab-ai/docker && docker compose stop ollama
 sudo snap start --enable ollama
 sudo snap start --enable ollama-webui
 ```
@@ -97,7 +97,7 @@ sudo snap start --enable ollama-webui
 ```bash
 docker exec ollama nvidia-smi                 # deve listar a NVIDIA GPU (sem NVML error)
 docker exec ollama ollama ps                  # PROCESSOR deve ser GPU, não CPU
-cd /home/user/homelab-ai/docker && docker compose ps   # comfyui e ollama: Up (healthy)
+cd /opt/homelab-ai/docker && docker compose ps   # comfyui e ollama: Up (healthy)
 
 # Teste do bug do daemon-reload (o que quebrava antes):
 sudo systemctl daemon-reload

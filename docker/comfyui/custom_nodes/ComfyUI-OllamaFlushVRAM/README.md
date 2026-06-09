@@ -31,12 +31,12 @@ descarregar os modelos e espera a VRAM ser liberada antes de seguir o grafo.
 ## Instalação / sincronização
 Esta é a **cópia versionada** (backup/fonte). A cópia **ativa** que o container
 ComfyUI carrega fica no bind mount:
-`/home/user/AI/ComfyUI/custom_nodes/ComfyUI-OllamaFlushVRAM/`.
+`/srv/homelab-ai/comfyui/custom_nodes/ComfyUI-OllamaFlushVRAM/`.
 
 Ao editar aqui, sincronize para a cópia ativa e reinicie o ComfyUI:
 ```bash
 cp -r docker/comfyui/custom_nodes/ComfyUI-OllamaFlushVRAM \
-      /home/user/AI/ComfyUI/custom_nodes/
+      /srv/homelab-ai/comfyui/custom_nodes/
 docker compose -f docker/docker-compose.yml restart comfyui
 ```
 
