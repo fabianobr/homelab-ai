@@ -4,7 +4,7 @@ Laboratório pessoal de IA local para rodar chat, agentes, RAG, geração de ima
 
 ## Objetivo
 
-Transformar o desktop `homelab` em um servidor pessoal de IA acessível remotamente com segurança.
+Transformar o desktop `ai-host` em um servidor pessoal de IA acessível remotamente com segurança.
 
 Stack principal:
 
@@ -83,7 +83,7 @@ Ollama e LM Studio sao backends internos do Open WebUI e nao devem ter hostnames
 ### 1. Healthcheck geral
 
 ```bash
-cd /home/user/homelab-ai
+cd /opt/homelab-ai
 bash scripts/healthcheck.sh
 ```
 

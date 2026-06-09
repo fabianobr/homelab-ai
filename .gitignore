@@ -3,8 +3,16 @@
 .env.*
 .envrc
 .cloudflared/
+homelab.env
+*.local.yml
+*.local.yaml
+inventory.local.yaml
+config.local.yml
+config.local.yaml
+.public-denylist.local
 *.pem
 *.key
+*.json
 *secret*
 *token*
 
@@ -13,6 +21,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 .venv/
+.tools/
 venv/
 env/
 ENV/
@@ -45,3 +54,4 @@ build/
 Thumbs.db
 .vscode/
 .idea/
+.claude/

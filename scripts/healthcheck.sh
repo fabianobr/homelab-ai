@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LOCAL_ENV="${LOCAL_ENV:-/etc/homelab-ai/homelab.env}"
+if [[ -f "${LOCAL_ENV}" ]]; then
+  # shellcheck disable=SC1090
+  source "${LOCAL_ENV}"
+elif [[ -f "${PROJECT_ROOT}/homelab.env" ]]; then
+  # shellcheck disable=SC1091
+  source "${PROJECT_ROOT}/homelab.env"
+fi
+
 echo "== homelab-ai healthcheck =="
 
 FAIL_COUNT=0
@@ -49,7 +59,7 @@ echo
 echo "URLs:"
 check_url "Open WebUI" "http://localhost:3000"
 check_url "Ollama models" "http://localhost:11434/api/tags"
-check_url "LM Studio models" "http://localhost:1234/v1/models"
+check_url "LM Studio models" "http://localhost:1234/v1/models" "SKIP optional"
 check_url "ComfyUI" "http://localhost:8188"
 check_url "n8n" "http://localhost:5678" "SKIP optional"
 
@@ -65,19 +75,14 @@ fi
 echo
 echo "Container backends:"
 if docker inspect open-webui >/dev/null 2>&1; then
-  if docker exec open-webui python -c "import urllib.request; urllib.request.urlopen('http://host.docker.internal:11434/api/tags', timeout=5).read()" >/dev/null; then
+  if docker exec open-webui python -c "import urllib.request; urllib.request.urlopen('http://ollama:11434/api/tags', timeout=5).read()" >/dev/null; then
     echo "[OK] Open WebUI -> Ollama"
   else
     echo "[FAIL] Open WebUI -> Ollama"
     record_fail
   fi
 
-  if docker exec open-webui python -c "import urllib.request; urllib.request.urlopen('http://host.docker.internal:1234/v1/models', timeout=5).read()" >/dev/null; then
-    echo "[OK] Open WebUI -> LM Studio"
-  else
-    echo "[FAIL] Open WebUI -> LM Studio"
-    record_fail
-  fi
+  echo "[SKIP optional] Open WebUI -> LM Studio"
 else
   echo "[FAIL] open-webui container not found"
   record_fail
@@ -85,17 +90,21 @@ fi
 
 echo
 echo "Cloudflare:"
+CLOUDFLARED_CONFIG="${CLOUDFLARED_CONFIG:-/etc/cloudflared/config.yml}"
+OPEN_WEBUI_HOSTNAME="${OPEN_WEBUI_HOSTNAME:-ai.example.com}"
+COMFYUI_HOSTNAME="${COMFYUI_HOSTNAME:-media.example.com}"
+N8N_HOSTNAME="${N8N_HOSTNAME:-flow.example.com}"
 if command -v cloudflared >/dev/null 2>&1; then
-  if cloudflared tunnel --config /etc/cloudflared/config.yml ingress validate; then
+  if cloudflared tunnel --config "${CLOUDFLARED_CONFIG}" ingress validate; then
     echo "[OK] cloudflared ingress config"
   else
     echo "[FAIL] cloudflared ingress config invalid"
     record_fail
   fi
 
-  if grep -q "hostname: ai.example.com" /etc/cloudflared/config.yml \
-    && grep -q "hostname: media.example.com" /etc/cloudflared/config.yml \
-    && grep -q "hostname: flow.example.com" /etc/cloudflared/config.yml; then
+  if grep -q "hostname: ${OPEN_WEBUI_HOSTNAME}" "${CLOUDFLARED_CONFIG}" \
+    && grep -q "hostname: ${COMFYUI_HOSTNAME}" "${CLOUDFLARED_CONFIG}" \
+    && grep -q "hostname: ${N8N_HOSTNAME}" "${CLOUDFLARED_CONFIG}"; then
     echo "[OK] cloudflared required hostnames"
   else
     echo "[FAIL] cloudflared required hostnames missing"

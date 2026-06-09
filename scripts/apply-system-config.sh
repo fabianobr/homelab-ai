@@ -6,7 +6,13 @@ if [[ "${EUID}" -ne 0 ]]; then
   exit 1
 fi
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LOCAL_ENV="${LOCAL_ENV:-/etc/homelab-ai/homelab.env}"
+if [[ -f "${LOCAL_ENV}" ]]; then
+  # shellcheck disable=SC1090
+  source "${LOCAL_ENV}"
+fi
+
+CLOUDFLARED_CONFIG="${CLOUDFLARED_CONFIG:-/etc/cloudflared/config.yml}"
 
 echo "== Configurando Ollama Snap =="
 snap set ollama host=0.0.0.0:11434
@@ -48,8 +54,12 @@ systemctl daemon-reload
 systemctl enable --now homelab-ai-ollama-firewall.service
 
 echo "== Configurando Cloudflare Tunnel =="
-install -m 0644 "${PROJECT_ROOT}/infra/cloudflare/config.yml" /etc/cloudflared/config.yml
-cloudflared tunnel --config /etc/cloudflared/config.yml ingress validate
+if [[ ! -f "${CLOUDFLARED_CONFIG}" ]]; then
+  echo "Config real do Cloudflare Tunnel nao encontrada em ${CLOUDFLARED_CONFIG}." >&2
+  echo "Crie fora do Git usando infra/cloudflare/config.example.yml como referencia." >&2
+  exit 1
+fi
+cloudflared tunnel --config "${CLOUDFLARED_CONFIG}" ingress validate
 systemctl restart cloudflared
 
 echo

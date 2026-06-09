@@ -6,11 +6,10 @@ services:
     ports:
       - "127.0.0.1:11434:11434"
     volumes:
-      - /home/user/AI/ollama:/root/.ollama
+      - ${OLLAMA_DATA_DIR:-/srv/homelab-ai/ollama}:/root/.ollama
     environment:
-      - OLLAMA_KEEP_ALIVE=30s   # solta a VRAM rápido quando ocioso (libera p/ ComfyUI); node OllamaFlushVRAM é a garantia explícita
-      - OLLAMA_MAX_LOADED_MODELS=1  # 1 modelo na VRAM por vez (evita transbordo pra CPU)
-      - OLLAMA_NUM_PARALLEL=1       # sem requisições paralelas concorrendo na GPU
+      - OLLAMA_KEEP_ALIVE=30s        # solta a VRAM rápido quando ocioso (libera p/ ComfyUI); node OllamaFlushVRAM é a garantia explícita
+      # - OLLAMA_MAX_LOADED_MODELS=1  # 1 modelo na VRAM por vez (evita transbordo pra CPU com ComfyUI compartilhando)
     # GPU via CDI (nvidia.com/gpu=all) em vez do runtime nvidia legado.
     # O runtime legado injeta regras de cgroup pela nvidia-container-cli que o
     # systemd remove em qualquer `daemon-reload`, derrubando o acesso à GPU
@@ -28,7 +27,7 @@ services:
       resources:
         limits:
           cpus: "4.0"
-          memory: 8g
+          memory: 25g
         reservations:
           memory: 2g
 
@@ -64,8 +63,8 @@ services:
 
   comfyui:
     build:
-      context: /home/user/AI/ComfyUI
-      dockerfile: /home/user/homelab-ai/docker/comfyui/Dockerfile
+      context: ${COMFYUI_SOURCE_DIR:-/srv/homelab-ai/comfyui}
+      dockerfile: ${PROJECT_ROOT:-/opt/homelab-ai}/docker/comfyui/Dockerfile
     container_name: comfyui
     restart: unless-stopped
     command: ["python", "main.py", "--listen", "0.0.0.0", "--port", "8188", "--disable-cuda-malloc"]
@@ -75,7 +74,7 @@ services:
     ports:
       - "127.0.0.1:8188:8188"
     volumes:
-      - /home/user/AI/ComfyUI:/comfyui
+      - ${COMFYUI_SOURCE_DIR:-/srv/homelab-ai/comfyui}:/comfyui
     healthcheck:
       test:
         [
@@ -88,14 +87,17 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+    # memswap_limit=-1: sem teto de swap para o container (replica comportamento local).
+    # Localmente o processo usava os 32g de swap livremente; com teto restrito o
+    # OOM-killer global disparava mesmo após aumentar o limite de RAM para 27g.
+    memswap_limit: -1
     deploy:
       resources:
         limits:
           cpus: "4.0"
-          # Modelos de vídeo (LTX) + pinned memory do ComfyUI (~27GB) estouravam
-          # o limite antigo de 10g -> kernel OOM-killer matava o processo (restart loop).
-          # No host puro não havia limite; 24g dá folga mantendo um teto de segurança.
-          memory: 24g
+          # LTX Video offloada ~13GB para RAM do host + pinned memory CUDA → pico ~27GB.
+          # 24g causava OOM-kill (3x em <DATE>). 27g alinha com o pico observado.
+          memory: 27g
         reservations:
           memory: 2g
 
@@ -113,7 +115,7 @@ services:
       - N8N_HOST=localhost
       - N8N_PORT=5678
       - N8N_PROTOCOL=http
-      - TZ=America/Sao_Paulo
+      - TZ=${TZ:-Etc/UTC}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
