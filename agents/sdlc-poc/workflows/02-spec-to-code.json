@@ -18,7 +18,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const DEV_PROMPT = `You are a senior software engineer implementing a feature from a PRD.\n\nGiven a PRD, produce working Python code that implements ALL functional requirements.\n\nRules:\n- Use FastAPI for HTTP endpoints\n- Use Pydantic v2 for data models\n- Include a basic in-memory store if no database is specified\n- Write one file per logical component: models.py, routes.py, main.py\n- Include a test file: test_main.py using pytest and httpx\n- Each file must start with a comment: # FILE: <filename>\n- Do not use external databases or services unless the PRD requires them\n- All endpoints must return JSON\n- Include error handling for 404 and 422\n\nOutput format: produce each file separated by a line containing only \"---FILE---\".`;\n\nconst spec = $input.first().json.body?.spec || $input.first().json.spec || '';\nif (!spec) throw new Error('Missing required field: spec');\n\nconst bodyStr = JSON.stringify({\n  model: 'qwen2.5-coder:32b',\n  stream: false,\n  options: { temperature: 0.1 },\n  messages: [\n    { role: 'system', content: DEV_PROMPT },\n    { role: 'user', content: `PRD TO IMPLEMENT:\\n\\n${spec}` }\n  ]\n});\n\nreturn [{ json: { bodyStr, spec } }];"
+        "jsCode": "const DEV_PROMPT = `You are a senior software engineer implementing a feature from a PRD.\n\nGiven a PRD, produce working Python code that implements ALL functional requirements.\n\nRules:\n- Use FastAPI for HTTP endpoints\n- Use Pydantic v2 for data models\n- Include a basic in-memory store if no database is specified\n- Write one file per logical component: models.py, routes.py, main.py\n- Include a test file: test_main.py using pytest and httpx\n- Each file must start with a comment: # FILE: <filename>\n- Do not use external databases or services unless the PRD requires them\n- All endpoints must return JSON\n- Include error handling for 404 and 422\n- Import pydantic directly: use 'from pydantic import BaseModel, Field', never 'from pydantic.v1 import' or 'from pydantic.v2 import'\n- For async httpx tests: use 'from httpx import AsyncClient, ASGITransport' and 'async with AsyncClient(transport=ASGITransport(app=app), base_url=\"http://test\") as client:', not the deprecated 'AsyncClient(app=app)'\n\nOutput format: produce each file separated by a line containing only \"---FILE---\".`;\n\nconst spec = $input.first().json.body?.spec || $input.first().json.spec || '';\nif (!spec) throw new Error('Missing required field: spec');\n\nconst bodyStr = JSON.stringify({\n  model: 'qwen2.5-coder:32b',\n  stream: false,\n  options: { temperature: 0.1 },\n  messages: [\n    { role: 'system', content: DEV_PROMPT },\n    { role: 'user', content: `PRD TO IMPLEMENT:\\n\\n${spec}` }\n  ]\n});\n\nreturn [{ json: { bodyStr, spec } }];"
       },
       "id": "b2c3d4e5-0002-0000-0000-000000000002",
       "name": "PrepareDevRequest",
@@ -34,7 +34,7 @@
         "contentType": "raw",
         "rawContentType": "application/json",
         "body": "={{ $json.bodyStr }}",
-        "options": {}
+        "options": {"timeout": 600}
       },
       "id": "b2c3d4e5-0002-0000-0000-000000000003",
       "name": "CallOllama",

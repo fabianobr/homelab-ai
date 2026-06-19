@@ -6,25 +6,18 @@ CONTAINER_WORKFLOWS_DIR="/tmp/n8n-workflows"
 
 import_workflow() {
   local file="$1"
+  local workflow_id="$2"
 
   # Guard: skip if file doesn't exist
-  if [ ! -f "$file" ]; then
-    echo "Skipping $file (not yet created)"
-    return
-  fi
+  [ -f "$file" ] || { echo "Skipping $file (not yet created)"; return; }
 
-  local name
-  name=$(python3 -c "import json,sys; print(json.load(open('$file'))['name'])")
-  echo "Importing: $name"
-
-  # Copy workflow file to container
   local filename
   filename=$(basename "$file")
   docker cp "$file" "n8n:$CONTAINER_WORKFLOWS_DIR/$filename"
 
   # Import workflow using n8n CLI
   docker exec n8n n8n import:workflow --input="$CONTAINER_WORKFLOWS_DIR/$filename"
-  echo "  -> Workflow imported successfully"
+  docker exec n8n n8n update:workflow --id="$workflow_id" --active=true
 }
 
 echo "=== Importing SDLC PoC workflows ==="
@@ -33,14 +26,10 @@ echo "=== Importing SDLC PoC workflows ==="
 docker exec n8n mkdir -p "$CONTAINER_WORKFLOWS_DIR" 2>/dev/null || true
 
 # Import workflow 1
-import_workflow "$WORKFLOWS_DIR/01-chat-discovery-to-spec.json"
+import_workflow "$WORKFLOWS_DIR/01-chat-discovery-to-spec.json" "sdlc-poc-wf01"
 
-# Conditionally import workflow 2
-import_workflow "$WORKFLOWS_DIR/02-spec-to-code.json"
-
-echo ""
-echo "=== Activating workflows ==="
-docker exec n8n n8n update:workflow --active=true
+# Import workflow 2
+import_workflow "$WORKFLOWS_DIR/02-spec-to-code.json" "sdlc-poc-wf02"
 
 echo ""
 echo "=== Restarting n8n ==="

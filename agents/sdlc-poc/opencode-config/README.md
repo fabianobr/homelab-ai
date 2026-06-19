@@ -1,3 +1,15 @@
+## Workflow: Discovery → Spec → Code
+
+The SDLC PoC uses two n8n workflows and a manual handoff step:
+
+1. **Discovery (Workflow 1):** POST to `/webhook/sdlc-poc-chat` with `{"chatInput": "...", "messages": []}`. Have a multi-turn conversation until you're ready to generate the spec, then send `"chatInput": "gerar spec"`.
+
+2. **Spec handoff (manual):** The response will contain a spec wrapped between `---SPEC-START---` and `---SPEC-END---`. Copy the text between those markers.
+
+3. **Code gen (Workflow 2):** POST to `/webhook/sdlc-poc-spec-to-code` with `{"spec": "<copied spec text>"}`. Returns `{files: [...], fileCount: N}`.
+
+4. **OpenCode (optional):** Alternatively, paste the spec into OpenCode TUI and let it implement directly in your codebase.
+
 # OpenCode Configuration
 
 This directory contains an example configuration for OpenCode v1.17.8 with Ollama integration.
