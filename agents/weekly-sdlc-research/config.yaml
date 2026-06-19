@@ -1,0 +1,22 @@
+ollama_url: "http://localhost:11434"
+ollama_model: "qwen2.5-coder:14b"
+ollama_fallback_model: "llama3.2:latest"
+searxng_url: "http://localhost:8080"
+backlog_path: "../../docs/sdlc-agentico/backlog.md"
+reports_dir: "./reports"
+log_file: "./research.log"
+
+search_queries:
+  - "local LLM agentic coding 2026 new tool"
+  - "ollama coding agent open source 2026"
+  - "self-hosted AI software development pipeline 2026"
+  - "local LLM SDLC automation open source"
+  - "xda developers local AI agent coding 2026"
+  - "OpenCode Aider OpenHands update 2026"
+  - "CrewAI LangGraph ollama local 2026"
+
+hardware_context: "RTX 5060 Ti 16GB VRAM, 32GB RAM. Roda modelos até 14B Q4 confortavelmente, ~24B Q4_K_M apertado (13GB). 1 GPU = sem paralelismo de inferência."
+
+known_discarded:
+  - "Cline"
+  - "Continue.dev"
