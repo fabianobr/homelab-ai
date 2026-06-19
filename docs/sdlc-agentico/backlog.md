@@ -33,6 +33,7 @@ Este arquivo registra todas as ferramentas, modelos e tecnologias pesquisadas pa
 | 23 | Fallback hibrido local + API | Arquitetura | 4/5 | 4/5 | Pendente |
 | 24 | SearXNG + Pipeline | Pesquisa no Discovery | 4/5 | 4/5 | Pendente |
 | 25 | Qdrant + RAG | Contexto de Codebase | 4/5 | 4/5 | Pendente |
+| 26 | Workflow 3 — Spec to UX Wireframe | Fase SDLC | 4/5 | 5/5 | Pendente |
 
 **Legenda de Status:** Pendente / Em avaliacao / Descartado / Implementado
 
@@ -156,6 +157,15 @@ Este arquivo registra todas as ferramentas, modelos e tecnologias pesquisadas pa
 - Descricao: motor de busca self-hosted; integrado ao pipeline de discovery para pesquisa orientada a dados
 - Integracao sugerida: n8n chama SearXNG API, passa resultados ao LLM para sintese
 
+### 26. Workflow 3 — Spec to UX Wireframe
+- **Tipo:** Fase SDLC (novo workflow n8n)
+- **Relevancia:** 5/5 — fecha o gap entre PRD e implementação visual
+- **Viabilidade:** 4/5 — mesmo padrão dos Workflows 1 e 2 (Code node + HTTP Request + Ollama)
+- **Descricao:** Workflow n8n que recebe o PRD do Workflow 1 e gera componentes de UI navegáveis antes da fase de código. LLM produz HTML/Tailwind ou React/TSX com layout de telas, navegação entre páginas, e dados mockados. Usuário valida o fluxo visual antes de commitar a implementação.
+- **Abordagem recomendada:** Prompt no estilo "você é um frontend designer sênior — dado este PRD, produza as telas principais como HTML+Tailwind standalone, uma tela por arquivo, separadas por ---FILE---". Mesmo parser do Workflow 2.
+- **Alternativas avaliadas:** Bolt.new self-hosted (pendente maturidade offline), Lovable (cloud-only), v0 (cloud-only).
+- **Pré-requisito:** Task 7 validada — confirmar que o fluxo Discovery → Spec → Code está estável antes de adicionar fase de UX.
+
 ### 25. Qdrant + RAG
 - Descricao: banco vetorial self-hosted; permite recuperar contexto de codebase longa sem estourar janela de contexto
 - Uso: fase 06-spec-to-code com codebases grandes; fase 01-discovery com historico de decisoes
@@ -203,6 +213,16 @@ Detalhes adicionais em [feedback.md](../feedback.md).
 ---
 
 ## Novos itens pendentes de avaliacao
+
+### Pesquisa de 2026-06-18
+
+### KodeOps
+- **Tipo:** infrastructure
+- **Relevancia SDLC:** 5/5
+- **Viabilidade HW:** 3/5
+- **Descricao:** An open source CLI and TUI tool that automates the software development lifecycle from concept to structured backlog using agentic AI.
+- **Fonte:** https://github.com/your-repo/kodeops
+
 
 _Itens descobertos pela pesquisa semanal automatica. Adicionados toda segunda-feira._
 
