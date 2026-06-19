@@ -1,0 +1,4 @@
+Build a REST API for a personal todo list manager.
+Users need to create, read, update and delete todo items.
+Each item has a title, optional description, and a done/not-done status.
+The API will be used by a mobile app.
