@@ -18,13 +18,39 @@
     },
     {
       "parameters": {
-        "jsCode": "const SYSTEM_PROMPT = `You are an AI Product Manager helping run a structured software discovery session.\n\nYou guide the user through these stages in order:\n1. DISCOVERY: understand the problem, context, users affected\n2. HYPOTHESES: formulate 3 testable hypotheses\n3. METRICS: define 3 measurable success KPIs\n4. SPEC READY: when user says 'gerar spec' or 'generate spec', produce the full PRD\n\nWhen producing the PRD (stage 4), use this exact format:\n\n---SPEC-START---\n## Feature Name\n[verb-noun, e.g. \"Manage Personal Tasks\"]\n\n## Background\n[1 paragraph]\n\n## Functional Requirements\nRF-01: The system MUST ...\nRF-02: The system MUST ...\n[5-8 requirements]\n\n## Non-Functional Requirements\n[3-5: performance, security, observability]\n\n## Acceptance Criteria\n[Given/When/Then for each RF]\n\n## Out of Scope\n[3+ items]\n\n## Definition of Done\n[checklist]\n---SPEC-END---\n\nFor all other messages, respond conversationally to refine the discovery. Keep responses concise.`;\n\nconst messages = $input.first().json.body?.messages || $input.first().json.messages || [];\nconst userMessage = $input.first().json.body?.chatInput || $input.first().json.chatInput || '';\n\n// Build message history for multi-turn\nconst history = messages.map(m => ({ role: m.role, content: m.content }));\nhistory.push({ role: 'user', content: userMessage });\n\nconst allMessages = [{ role: 'system', content: SYSTEM_PROMPT }, ...history];\n\nconst resp = await fetch('http://ollama:11434/api/chat', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    model: 'qwen3-coder:30b',\n    stream: false,\n    options: { temperature: 0.3 },\n    messages: allMessages\n  })\n});\n\nif (!resp.ok) throw new Error(`Ollama error: ${resp.status} ${await resp.text()}`);\nconst data = await resp.json();\nconst reply = data.message.content;\n\n// If response contains a spec, save it to the handoff file\nif (reply.includes('---SPEC-START---')) {\n  const specMatch = reply.match(/---SPEC-START---([\\s\\S]*?)---SPEC-END---/);\n  if (specMatch) {\n    const spec = specMatch[1].trim();\n    // Write spec to handoff file via n8n filesystem\n    const fs = require('fs');\n    fs.mkdirSync('/tmp/sdlc-poc', { recursive: true });\n    fs.writeFileSync('/tmp/sdlc-poc/spec.md', spec, 'utf8');\n  }\n}\n\nreturn [{ json: { output: reply } }];"
+        "jsCode": "const SYSTEM_PROMPT = `You are an AI Product Manager helping run a structured software discovery session.\n\nYou guide the user through these stages in order:\n1. DISCOVERY: understand the problem, context, users affected\n2. HYPOTHESES: formulate 3 testable hypotheses\n3. METRICS: define 3 measurable success KPIs\n4. SPEC READY: when user says 'gerar spec' or 'generate spec', produce the full PRD\n\nWhen producing the PRD (stage 4), use this exact format:\n\n---SPEC-START---\n## Feature Name\n[verb-noun, e.g. \"Manage Personal Tasks\"]\n\n## Background\n[1 paragraph]\n\n## Functional Requirements\nRF-01: The system MUST ...\nRF-02: The system MUST ...\n[5-8 requirements]\n\n## Non-Functional Requirements\n[3-5: performance, security, observability]\n\n## Acceptance Criteria\n[Given/When/Then for each RF]\n\n## Out of Scope\n[3+ items]\n\n## Definition of Done\n[checklist]\n---SPEC-END---\n\nFor all other messages, respond conversationally to refine the discovery. Keep responses concise.`;\n\nconst messages = $input.first().json.body?.messages || $input.first().json.messages || [];\nconst userMessage = $input.first().json.body?.chatInput || $input.first().json.chatInput || '';\n\nconst history = messages.map(m => ({ role: m.role, content: m.content }));\nhistory.push({ role: 'user', content: userMessage });\nconst allMessages = [{ role: 'system', content: SYSTEM_PROMPT }, ...history];\n\nconst ollamaBody = JSON.stringify({\n  model: 'qwen3-coder:30b',\n  stream: false,\n  options: { temperature: 0.3 },\n  messages: allMessages\n});\n\nreturn [{ json: { ollamaBody, userMessage } }];"
       },
       "id": "1a2b3c4d-0001-0000-0000-000000000002",
-      "name": "SDLC Chat LLM",
+      "name": "Prepare Request",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ollama:11434/api/chat",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.ollamaBody }}",
+        "options": {}
+      },
+      "id": "1a2b3c4d-0001-0000-0000-000000000003",
+      "name": "Call Ollama",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const reply = $input.first().json.message?.content || $input.first().json.choices?.[0]?.message?.content || '';\n\nconst hasSpec = reply.includes('---SPEC-START---');\nlet specNote = '';\nif (hasSpec) {\n  const m = reply.match(/---SPEC-START---([\\s\\S]*?)---SPEC-END---/);\n  if (m) specNote = '\\n\\n[Spec extracted. Copy the section above between ---SPEC-START--- and ---SPEC-END--- to use with OpenCode.]';\n}\n\nreturn [{ json: { output: reply + specNote, hasSpec } }];"
+      },
+      "id": "1a2b3c4d-0001-0000-0000-000000000004",
+      "name": "Process Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 300]
     },
     {
       "parameters": {
@@ -32,18 +58,24 @@
         "responseBody": "={{ { output: $json.output } }}",
         "options": {}
       },
-      "id": "1a2b3c4d-0001-0000-0000-000000000003",
+      "id": "1a2b3c4d-0001-0000-0000-000000000005",
       "name": "Respond to Webhook",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [720, 300]
+      "position": [1200, 300]
     }
   ],
   "connections": {
     "Webhook": {
-      "main": [[{ "node": "SDLC Chat LLM", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Prepare Request", "type": "main", "index": 0 }]]
     },
-    "SDLC Chat LLM": {
+    "Prepare Request": {
+      "main": [[{ "node": "Call Ollama", "type": "main", "index": 0 }]]
+    },
+    "Call Ollama": {
+      "main": [[{ "node": "Process Response", "type": "main", "index": 0 }]]
+    },
+    "Process Response": {
       "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
     }
   },
