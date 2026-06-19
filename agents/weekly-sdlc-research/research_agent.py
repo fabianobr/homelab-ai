@@ -7,6 +7,7 @@ compares against the backlog and appends new discoveries.
 
 import json
 import logging
+import os
 import re
 import sys
 import time
@@ -561,6 +562,46 @@ def update_backlog(
 
 
 # ---------------------------------------------------------------------------
+# Telegram notification
+# ---------------------------------------------------------------------------
+def send_telegram(new_items: list[dict], today: str, logger: logging.Logger) -> None:
+    """Send a Telegram message via the Hermes bot. Reads token and chat_id from env."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    # TELEGRAM_ALLOWED_USERS is a comma-separated list of user IDs.
+    # For private chats, user_id == chat_id, so we use the first entry.
+    raw_users = os.environ.get("TELEGRAM_ALLOWED_USERS", "").strip()
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", raw_users.split(",")[0].strip() if raw_users else "").strip()
+
+    if not token or not chat_id:
+        logger.info("Telegram not configured (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set) — skipping notification.")
+        return
+
+    if not new_items:
+        text = f"Weekly LLM Research — {today}\n\nNenhum item novo encontrado esta semana."
+    else:
+        lines = [f"Weekly LLM Research — {today}", f"\n{len(new_items)} novo(s) item(ns) encontrado(s):\n"]
+        for i, item in enumerate(new_items, 1):
+            name = item.get("name", "?")
+            itype = item.get("type", "-")
+            sdlc = item.get("sdlc_relevance", "-")
+            hw = item.get("hw_viability", "-")
+            desc = item.get("description", "")[:120]
+            lines.append(f"{i}. {name} ({itype})")
+            lines.append(f"   SDLC {sdlc}/5 | HW {hw}/5")
+            lines.append(f"   {desc}")
+        lines.append("\nVer backlog: docs/sdlc-agentico/backlog.md")
+        text = "\n".join(lines)
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    try:
+        resp = requests.post(url, json={"chat_id": chat_id, "text": text}, timeout=15)
+        resp.raise_for_status()
+        logger.info("Telegram notification sent to chat_id %s.", chat_id)
+    except Exception as exc:
+        logger.warning("Telegram notification failed: %s", exc)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 def main() -> None:
@@ -615,6 +656,9 @@ def main() -> None:
 
     # 7. Update backlog
     update_backlog(backlog_path, new_items, today, logger)
+
+    # 8. Notify via Telegram
+    send_telegram(new_items, today, logger)
 
     logger.info("=== Agent finished. Report: %s ===", report_path)
 
