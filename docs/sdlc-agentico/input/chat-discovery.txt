@@ -1,0 +1,12 @@
+me ajude com a especificação de uma aplicação de ecommerce que deve atender sellers e buyers.
+Area de sellers, ele pode anunciar seus produtos, por categoria, colocar suas fotos, preço, e será gratis para anunciar, cada venda feita pela plataforma sera cobrada uma taxa de 10% sobre as vendas. Caso ele anuncie na plataforma de Ads, sua taxa cai para 8%a aplicação tera uma area de seller central para os anuncios, metricas, vendas, pos-vendas, faturamento, todo gamificado para que venda mais.
+O ecoomerce vai ser todo automático, priorizando os produtos que tenham mais procura, tera plataforma de aprendizado com base na atenção do comprador, pesquisas e tempo de uso da aplicação, receberá recomendações.
+Aplicação terá plataforma de fidelidade, cobrando 5 DOLARES por mes para os compradores, com a vantagem de ter frete gratis para compra com mais de 21 dolares, e também cashback de 1%
+
+plataforma tera pagina principal com rabbit role sob recomendações, com area de anuncio.
+
+plataforma tera sistema proprio de pagamento com wallet, cartão proprio e cartões de parceiros no wallet.
+
+plataforma terá pos-venda e politica de devolução sem critério em 7 dias.
+
+Reputação do seller será medido por avaliaãção e quantidade de vendas sem devolução ou reclamação.

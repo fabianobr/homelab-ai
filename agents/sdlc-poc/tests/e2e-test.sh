@@ -156,7 +156,7 @@ if [ -f "$TMPDIR_TESTS/test_main.py" ]; then
     TEST_RESULT="FAIL"
   fi
 
-  cd /home/fabiano/homelab-ai
+  cd "$(git rev-parse --show-toplevel)"
 else
   echo "  test_main.py not found in generated output — skipping"
 fi

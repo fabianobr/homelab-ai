@@ -84,6 +84,39 @@ The example config includes:
 - **Model:** `qwen2.5-coder:32b` (high-capacity code generation)
 - **SDK:** Uses `@ai-sdk/openai-compatible` for API communication
 
+## Como usar o opencode com a POC SDLC
+
+O opencode pode substituir o WF3+WF4 (Developer Agent + Fix Agent) ou ser usado para interpretar o pipeline existente.
+
+### Modo A — opencode como Developer Agent (substitui WF3+WF4)
+
+Gere a spec via WF1 (Discovery), copie o bloco entre `---SPEC-START---` e `---SPEC-END---`, e implemente direto no opencode. Ele escreve arquivos, roda pytest e itera automaticamente.
+
+```bash
+# Modo interativo (TUI):
+cd "$(git rev-parse --show-toplevel)"
+opencode
+# Cole a spec no chat e peça: "Implemente como FastAPI com TDD, gere test_main.py primeiro"
+
+# Modo headless:
+opencode run \
+  "Implemente a spec abaixo em FastAPI: models.py, routes.py, main.py.
+   Gere test_main.py primeiro (TDD). Rode pytest e corrija até 100% passing.
+   <spec>" \
+  --model ollama/qwen3-coder:30b
+```
+
+### Modo B — opencode como driver dos scripts existentes
+
+```bash
+opencode run \
+  "Execute ./agents/sdlc-poc/tests/generate-tdd.sh /tmp/spec.md /tmp/out,
+   leia o resultado do pytest e explique o que falhou e por quê" \
+  --model ollama/qwen3-coder:30b
+```
+
+---
+
 ## Troubleshooting
 
 - **Config not loading:** Ensure the file is at `~/.config/opencode/opencode.jsonc` (case-sensitive, JSONC format)

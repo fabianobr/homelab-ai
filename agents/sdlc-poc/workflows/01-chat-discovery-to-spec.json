@@ -18,7 +18,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const SYSTEM_PROMPT = `You are an AI Product Manager helping run a structured software discovery session.\n\nYou guide the user through these stages in order:\n1. DISCOVERY: understand the problem, context, users affected\n2. HYPOTHESES: formulate 3 testable hypotheses\n3. METRICS: define 3 measurable success KPIs\n4. SPEC READY: when user says 'gerar spec' or 'generate spec', produce the full PRD\n\nWhen producing the PRD (stage 4), use this exact format:\n\n---SPEC-START---\n## Feature Name\n[verb-noun, e.g. \"Manage Personal Tasks\"]\n\n## Background\n[1 paragraph]\n\n## Functional Requirements\nRF-01: The system MUST ...\nRF-02: The system MUST ...\n[5-8 requirements]\n\n## Non-Functional Requirements\n[3-5: performance, security, observability]\n\n## Acceptance Criteria\n[Given/When/Then for each RF]\n\n## Out of Scope\n[3+ items]\n\n## Definition of Done\n[checklist]\n---SPEC-END---\n\nFor all other messages, respond conversationally to refine the discovery. Keep responses concise.`;\n\nconst messages = $input.first().json.body?.messages || $input.first().json.messages || [];\nconst userMessage = $input.first().json.body?.chatInput || $input.first().json.chatInput || '';\n\nconst history = messages.map(m => ({ role: m.role, content: m.content }));\nhistory.push({ role: 'user', content: userMessage });\nconst allMessages = [{ role: 'system', content: SYSTEM_PROMPT }, ...history];\n\nconst ollamaBody = JSON.stringify({\n  model: 'qwen3-coder:30b',\n  stream: false,\n  options: { temperature: 0.3 },\n  messages: allMessages\n});\n\nreturn [{ json: { ollamaBody, userMessage } }];"
+        "jsCode": "const SYSTEM_PROMPT = `You are an AI Product Manager helping run a structured software discovery session.\n\nYou guide the user through these stages in order:\n1. DISCOVERY: understand the problem, context, users affected\n2. HYPOTHESES: formulate 3 testable hypotheses\n3. METRICS: define 3 measurable success KPIs\n4. SPEC READY: when user says 'gerar spec' or 'generate spec', produce the full PRD\n\nWhen producing the PRD (stage 4), use this exact format:\n\n---SPEC-START---\n## Feature Name\n[verb-noun, e.g. \"Manage Personal Tasks\"]\n\n## Background\n[1 paragraph]\n\n## Functional Requirements\nRF-01: The system MUST ...\nRF-02: The system MUST ...\n[5-8 requirements]\n\n## Non-Functional Requirements\n[3-5: performance, security, observability]\n\n## Acceptance Criteria\n[Given/When/Then for each RF]\n\n## Out of Scope\n[3+ items]\n\n## Definition of Done\n[checklist]\n---SPEC-END---\n\nFor all other messages, respond conversationally to refine the discovery. Keep responses concise.`;\n\nconst messages = $input.first().json.body?.messages || $input.first().json.messages || [];\nconst userMessage = $input.first().json.body?.chatInput || $input.first().json.chatInput || '';\n\nconst history = messages.map(m => ({ role: m.role, content: m.content }));\nhistory.push({ role: 'user', content: userMessage });\nconst allMessages = [{ role: 'system', content: SYSTEM_PROMPT }, ...history];\n\nconst litellmBody = JSON.stringify({\n  model: 'sdlc-discovery',\n  stream: false,\n  temperature: 0.3,\n  messages: allMessages\n});\n\nreturn [{ json: { ollamaBody: litellmBody, userMessage } }];"
       },
       "id": "1a2b3c4d-0001-0000-0000-000000000002",
       "name": "Prepare Request",
@@ -29,7 +29,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://ollama:11434/api/chat",
+        "url": "http://litellm:4000/v1/chat/completions",
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
@@ -37,7 +37,7 @@
         "options": {"timeout": 600000}
       },
       "id": "1a2b3c4d-0001-0000-0000-000000000003",
-      "name": "Call Ollama",
+      "name": "Call LiteLLM",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [720, 300]
@@ -72,7 +72,7 @@
     "Prepare Request": {
       "main": [[{ "node": "Call Ollama", "type": "main", "index": 0 }]]
     },
-    "Call Ollama": {
+    "Call LiteLLM": {
       "main": [[{ "node": "Process Response", "type": "main", "index": 0 }]]
     },
     "Process Response": {

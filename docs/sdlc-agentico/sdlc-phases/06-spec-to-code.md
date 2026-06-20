@@ -183,7 +183,7 @@ aider \
 Ou diretamente via variavel de ambiente:
 
 ```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
+export ANTHROPIC_API_KEY="sk-ant-..."  # placeholder — substitua pela sua chave real, nunca commite
 aider \
   --model claude-sonnet-4-5 \
   --message "{{ spec }}"

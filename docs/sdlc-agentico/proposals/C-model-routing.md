@@ -1,9 +1,9 @@
 # Proposta C — Roteamento por Modelos Especialistas
 
-**Prioridade:** Media
-**Viabilidade no homelab:** 3/5
+**Prioridade:** Alta
+**Viabilidade no homelab:** 5/5
 **Relevancia para o SDLC:** 5/5
-**Status:** Pendente
+**Status:** Implementado (2026-06-20) — ver `docker/litellm-config.yaml` e `agents/sdlc-hybrid/`
 
 ---
 
@@ -203,3 +203,75 @@ docker run -d \
 ```
 
 Apos configurado, qualquer ferramenta que fala OpenAI API pode apontar para `http://litellm:4000` e usar os modelos via alias (`pm-model`, `dev-model`, etc.).
+
+---
+
+## Implementação Real: n8n + LiteLLM (jun/2026)
+
+A proposta foi implementada usando **n8n como orquestrador** (reusando o pipeline TDD+auto-fix ja validado) e **LiteLLM como gateway de roteamento**, em vez de redesenhar a orquestração.
+
+### Arquitetura implementada
+
+```mermaid
+flowchart TD
+    subgraph N8N["n8n — Orquestrador"]
+        WF1["WF1 Discovery\n(model: sdlc-discovery)"]
+        WF5["WF5 QA Agent\n(model: sdlc-test)"]
+        WF3["WF3 Developer\n(model: sdlc-codegen)"]
+        WF4["WF4 Fix Agent\n(model: sdlc-fix)"]
+    end
+
+    subgraph LITELLM["LiteLLM Gateway :4000"]
+        R1["sdlc-discovery → Claude Sonnet"]
+        R2["sdlc-test → qwen2.5-coder:32b"]
+        R3["sdlc-codegen → qwen3-coder:30b"]
+        R4["sdlc-fix → qwen3:14b + fallback Claude"]
+    end
+
+    subgraph BACKENDS["Backends"]
+        CL["Anthropic Claude\n(cloud)"]
+        OL["Ollama Local\n(RTX 5060 Ti 16GB)"]
+    end
+
+    WF1 --> R1 --> CL
+    WF5 --> R2 --> OL
+    WF3 --> R3 --> OL
+    WF4 --> R4 --> OL
+
+    style LITELLM fill:#1a1a3e,color:#ccccff,stroke:#4444cc
+    style CL fill:#2d1515,color:#ffcccc,stroke:#aa4444
+    style OL fill:#0d2d0d,color:#ccffcc,stroke:#44aa44
+```
+
+### Roteamento por ambiguidade
+
+| Fase | Ambiguidade | Modelo | Custo/feature |
+|---|---|---|---|
+| Discovery (WF1) | Alta | Claude Sonnet | ~$0.02 |
+| Test-gen (WF5) | Baixa (ACs explícitos) | qwen2.5-coder:32b | $0 |
+| Code-gen (WF3) | Baixa (spec estruturada) | qwen3-coder:30b | $0 |
+| Fix (WF4) | Baixa-média | qwen3:14b → Claude fallback | $0–$0.02 |
+| **Total estimado** | | | **~$0.04–0.07/feature** |
+
+### Estratégia incremental de migração
+
+WF1 já aponta para LiteLLM (Discovery → Claude). WF3/4/5 ainda chamam Ollama nativo — podem ser migrados para o LiteLLM a qualquer momento sem mudar a lógica, apenas para ter tracking unificado de custo e fallback automático.
+
+### Subir o stack híbrido
+
+```bash
+# Copiar chave (nunca commitar):
+echo "ANTHROPIC_API_KEY=sk-ant-..." > docker/.env
+
+# Subir n8n + LiteLLM:
+docker compose --profile optional up -d n8n litellm
+
+# Smoke test:
+curl http://localhost:4000/health
+curl -X POST http://localhost:4000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"sdlc-codegen","messages":[{"role":"user","content":"ping"}]}'
+
+# Reimportar WF1 atualizado no n8n:
+cd agents/sdlc-poc/tests && ./import-workflows.sh
+```

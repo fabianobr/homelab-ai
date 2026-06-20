@@ -1,0 +1,48 @@
+# LiteLLM gateway para o pipeline SDLC híbrido (n8n + Claude + Ollama)
+#
+# Roteamento por papel SDLC:
+#   sdlc-discovery  → Claude Sonnet (alta ambiguidade, julgamento)
+#   sdlc-review     → Claude Sonnet (qualidade, compliance)
+#   sdlc-codegen    → qwen3-coder:30b (lógica de negócio, SWE-bench 69.6%)
+#   sdlc-test       → qwen2.5-coder:32b (geração de testes com ACs explícitos)
+#   sdlc-fix        → qwen3:14b thinking (debug local, fallback → Claude se travar)
+#
+# Subir: docker compose --profile optional up -d litellm
+# Smoke test: curl http://localhost:4000/health
+
+model_list:
+  - model_name: sdlc-discovery
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: sdlc-review
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: sdlc-codegen
+    litellm_params:
+      model: ollama/qwen3-coder:30b
+      api_base: http://ollama:11434
+
+  - model_name: sdlc-test
+    litellm_params:
+      model: ollama/qwen2.5-coder:32b
+      api_base: http://ollama:11434
+
+  - model_name: sdlc-fix
+    litellm_params:
+      model: ollama/qwen3:14b
+      api_base: http://ollama:11434
+
+litellm_settings:
+  # Se o fix local falhar/exceder timeout, escala para Claude
+  fallbacks:
+    - sdlc-fix:
+        - sdlc-review
+  num_retries: 2
+  request_timeout: 600
+  # Para habilitar tracking de custo via Langfuse (ver backlog):
+  # success_callback: ["langfuse"]
+  # failure_callback: ["langfuse"]

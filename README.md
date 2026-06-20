@@ -186,6 +186,22 @@ Nunca exponha diretamente na internet:
 - Ollama `11434`
 - LM Studio `1234`
 - n8n `5678`
+- LiteLLM `4000`
 - Docker socket
 
 Use Cloudflare Access para os hostnames publicados: Open WebUI e ComfyUI.
+
+## Segurança do repositório (repo é público)
+
+Este repositório é público no GitHub. Antes de qualquer commit:
+
+```bash
+# Instalar o hook de pre-commit (uma vez):
+pip install pre-commit
+pre-commit install
+
+# Rodar manualmente antes de commitar:
+pre-commit run --all-files
+```
+
+O hook usa [gitleaks](https://github.com/gitleaks/gitleaks) para detectar segredos. Nunca commite `.env`, chaves de API, tokens ou IPs internos.
