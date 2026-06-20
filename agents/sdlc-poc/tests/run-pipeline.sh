@@ -124,6 +124,21 @@ T3_END=$(date +%s)
 echo "$PYTEST_OUT"
 
 # ─────────────────────────────────────────────
+# ETAPA 4 (opcional): Auto-fix loop
+# ─────────────────────────────────────────────
+AUTO_FIXES=0
+if [ "$PYTEST_EXIT" -ne 0 ]; then
+  echo ""
+  echo -e "${YELLOW}[4/4] Auto-fix loop (WF4 — qwen2.5-coder:32b)${NC}"
+  if bash "$SCRIPT_DIR/fix-loop.sh" "$OUTPUT_DIR" "$SPEC_FILE" 3; then
+    PYTEST_EXIT=0
+    AUTO_FIXES=$(grep -c "Corrigido:" /dev/stdin 2>/dev/null || true)
+    # Re-capture final pytest output for the summary
+    PYTEST_OUT=$(cd "$OUTPUT_DIR" && python3 -m pytest test_main.py -v --tb=short 2>&1) || true
+  fi
+fi
+
+# ─────────────────────────────────────────────
 # Resumo final
 # ─────────────────────────────────────────────
 TOTAL_END=$(date +%s)
@@ -143,6 +158,10 @@ if [ "$PYTEST_EXIT" -eq 0 ]; then
   echo -e "${CYAN}║${NC}  Testes:  ${GREEN}${PASSED} passando ✓${NC}"
 else
   echo -e "${CYAN}║${NC}  Testes:  ${GREEN}${PASSED} passando${NC} / ${RED}${FAILED} falhando ✗${NC}"
+fi
+
+if [ "$AUTO_FIXES" -gt 0 ]; then
+  echo -e "${CYAN}║${NC}  Auto-fixes: ${YELLOW}${AUTO_FIXES} arquivo(s) corrigido(s) pelo Fix Agent${NC}"
 fi
 
 echo -e "${CYAN}║${NC}  Tempo total: ${TOTAL}s (~$(( TOTAL / 60 ))min)"

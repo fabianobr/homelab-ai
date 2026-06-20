@@ -1,0 +1,135 @@
+{
+  "id": "sdlc-poc-wf04",
+  "name": "SDLC PoC 04 — Fix from Test Failures",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sdlc-poc-fix",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "4b5c6d7e-0004-0000-0000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "d4e5f6a7-0004-0000-0000-000000000001"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || $input.first().json;\nconst spec = body.spec || '';\nconst pytestOutput = body.pytest_output || '';\nconst files = body.files || [];\n\nif (!spec) throw new Error('Missing required field: spec');\nif (!pytestOutput) throw new Error('Missing required field: pytest_output');\nif (!files.length) throw new Error('Missing required field: files');\n\nconst filesBlock = files.map(f => `--- ${f.filename} ---\\n${f.content}`).join('\\n\\n');\n\nconst systemPrompt = `You are a debugging engineer fixing a Python FastAPI project.\nThe SPEC below is the ONLY source of truth. When spec and test conflict, the spec wins.\n\nDecision rules (apply in order):\n1. Test asserts a value that CONTRADICTS the spec -> fix the TEST (wrong expected value)\n2. Code computes a value that CONTRADICTS the spec -> fix the CODE\n3. Tests fail due to shared global state between tests -> fix test_main.py:\n   - add 'import routes' at the top (after other imports)\n   - add @pytest.fixture(autouse=True) that calls .clear() on every in-memory store dict and resets global counters to 1\n4. Endpoint or field is missing but required by spec -> add it to the relevant file\n\nVersion rules (never violate):\n- Pydantic v2: from pydantic import BaseModel, Field  (never pydantic.v1 or pydantic.v2)\n- httpx tests: from httpx import AsyncClient, ASGITransport\n  async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:\n- Monetary values: store as INTEGER cents, return as format(cents / 100, '.2f')\n\nOutput EXACTLY ONE file — the one you fixed. Write it complete (every line, not a diff).\nStart your response with exactly: # FILE: <filename>\nThen the full corrected file. No markdown fences, no explanations, never output more than one file.`;\n\nconst userContent = `SPEC (source of truth):\n${spec}\n\nPYTEST FAILURE OUTPUT:\n${pytestOutput}\n\nCURRENT PROJECT FILES:\n${filesBlock}`;\n\nconst ollamaBody = JSON.stringify({\n  model: 'qwen2.5-coder:32b',\n  stream: false,\n  options: { temperature: 0.1 },\n  messages: [\n    { role: 'system', content: systemPrompt },\n    { role: 'user', content: userContent }\n  ]\n});\n\nreturn [{ json: { ollamaBody } }];"
+      },
+      "id": "4b5c6d7e-0004-0000-0000-000000000002",
+      "name": "PrepareFixRequest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ollama:11434/api/chat",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.ollamaBody }}",
+        "options": {
+          "timeout": 1200000
+        }
+      },
+      "id": "4b5c6d7e-0004-0000-0000-000000000003",
+      "name": "CallOllama",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.message?.content || '';\n\n// Strip markdown fences if model wrapped the output\nconst cleaned = raw\n  .replace(/^```[\\w]*\\n?/m, '')\n  .replace(/\\n?```$/m, '')\n  .trim();\n\n// Extract filename from # FILE: comment if present\nconst filenameMatch = cleaned.match(/^# FILE: (.+)/m);\nconst filename = filenameMatch ? filenameMatch[1].trim() : 'unknown.py';\n\nconst lines = cleaned.split('\\n').length;\n\nreturn [{ json: { filename, content: cleaned, lines } }];"
+      },
+      "id": "4b5c6d7e-0004-0000-0000-000000000004",
+      "name": "ParseFile",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { filename: $json.filename, content: $json.content, lines: $json.lines } }}",
+        "options": {}
+      },
+      "id": "4b5c6d7e-0004-0000-0000-000000000005",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "PrepareFixRequest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PrepareFixRequest": {
+      "main": [
+        [
+          {
+            "node": "CallOllama",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CallOllama": {
+      "main": [
+        [
+          {
+            "node": "ParseFile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ParseFile": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
