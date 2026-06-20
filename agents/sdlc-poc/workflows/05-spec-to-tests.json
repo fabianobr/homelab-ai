@@ -1,0 +1,135 @@
+{
+  "id": "sdlc-poc-wf05",
+  "name": "SDLC PoC 05 — Spec to Tests (TDD — tests first)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sdlc-poc-spec-to-tests",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "5c6d7e8f-0005-0000-0000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "e5f6a7b8-0005-0000-0000-000000000001"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || $input.first().json;\nconst spec = body.spec || '';\nconst allFiles = body.all_files || ['models.py', 'routes.py', 'main.py', 'test_main.py'];\n\nif (!spec) throw new Error('Missing required field: spec');\n\nconst systemPrompt = `You are a senior QA engineer writing acceptance tests from a PRD.\nYou have NOT seen any implementation code. Write tests based ONLY on the spec below.\nYour tests will be run against code written by a different engineer — they must FAIL if the spec is not implemented correctly.\n\nRules for test_main.py:\n- Use pytest + httpx async: from httpx import AsyncClient, ASGITransport\n  async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:\n- Import app from main: from main import app\n- Mark every test: @pytest.mark.asyncio\n- Add autouse fixture at the top to reset global state:\n    import routes\n    @pytest.fixture(autouse=True)\n    def reset_stores():\n        for attr in vars(routes).values():\n            if isinstance(attr, dict): attr.clear()\n- For each Acceptance Criterion in the spec, write one test that:\n    - Sets up the precondition (POST to create resources)\n    - Calls the endpoint being tested\n    - Asserts the EXACT value the spec mandates (e.g., if spec says 10% fee on $100 sale, assert seller_net == \"90.00\")\n- Include HTTP status code assertions (assert response.status_code == 200)\n- Test names must match the AC they verify: test_<ac_description>\n\nImplementation files that will exist (do NOT import or define their internals — just import app):\n${allFiles.filter(f => f !== 'test_main.py').map(f => '- ' + f).join('\\n')}\n\nStart your response with exactly: # FILE: test_main.py\nThen the complete test file. No markdown fences, no explanations.`;\n\nconst ollamaBody = JSON.stringify({\n  model: 'qwen2.5-coder:32b',\n  stream: false,\n  options: { temperature: 0.1 },\n  messages: [\n    { role: 'system', content: systemPrompt },\n    { role: 'user', content: 'PRD (write tests for ALL acceptance criteria):\\n\\n' + spec }\n  ]\n});\n\nreturn [{ json: { ollamaBody } }];"
+      },
+      "id": "5c6d7e8f-0005-0000-0000-000000000002",
+      "name": "PrepareTestRequest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ollama:11434/api/chat",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.ollamaBody }}",
+        "options": {
+          "timeout": 1200000
+        }
+      },
+      "id": "5c6d7e8f-0005-0000-0000-000000000003",
+      "name": "CallOllama",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.message?.content || '';\n\nconst cleaned = raw\n  .replace(/^```[\\w]*\\n?/m, '')\n  .replace(/\\n?```$/m, '')\n  .trim();\n\nconst filenameMatch = cleaned.match(/^# FILE: (.+)/m);\nconst filename = filenameMatch ? filenameMatch[1].trim() : 'test_main.py';\n\nconst lines = cleaned.split('\\n').length;\n\nreturn [{ json: { filename, content: cleaned, lines } }];"
+      },
+      "id": "5c6d7e8f-0005-0000-0000-000000000004",
+      "name": "ParseTests",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { filename: $json.filename, content: $json.content, lines: $json.lines } }}",
+        "options": {}
+      },
+      "id": "5c6d7e8f-0005-0000-0000-000000000005",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "PrepareTestRequest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PrepareTestRequest": {
+      "main": [
+        [
+          {
+            "node": "CallOllama",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CallOllama": {
+      "main": [
+        [
+          {
+            "node": "ParseTests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ParseTests": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
