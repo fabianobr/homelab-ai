@@ -34,7 +34,7 @@
         "contentType": "raw",
         "rawContentType": "application/json",
         "body": "={{ $json.bodyStr }}",
-        "options": {"timeout": 600}
+        "options": {"timeout": 600000}
       },
       "id": "b2c3d4e5-0002-0000-0000-000000000003",
       "name": "CallOllama",
