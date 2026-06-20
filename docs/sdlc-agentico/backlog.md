@@ -34,6 +34,7 @@ Este arquivo registra todas as ferramentas, modelos e tecnologias pesquisadas pa
 | 24 | SearXNG + Pipeline | Pesquisa no Discovery | 4/5 | 4/5 | Pendente |
 | 25 | Qdrant + RAG | Contexto de Codebase | 4/5 | 4/5 | Pendente |
 | 26 | Workflow 3 — Spec to UX Wireframe | Fase SDLC | 4/5 | 5/5 | Pendente |
+| 27 | Workflow 4 — TDD Invertido (Spec → Testes → Código) | Fase SDLC | 5/5 | 5/5 | Pendente |
 
 **Legenda de Status:** Pendente / Em avaliacao / Descartado / Implementado
 
@@ -165,6 +166,61 @@ Este arquivo registra todas as ferramentas, modelos e tecnologias pesquisadas pa
 - **Abordagem recomendada:** Prompt no estilo "você é um frontend designer sênior — dado este PRD, produza as telas principais como HTML+Tailwind standalone, uma tela por arquivo, separadas por ---FILE---". Mesmo parser do Workflow 2.
 - **Alternativas avaliadas:** Bolt.new self-hosted (pendente maturidade offline), Lovable (cloud-only), v0 (cloud-only).
 - **Pré-requisito:** Task 7 validada — confirmar que o fluxo Discovery → Spec → Code está estável antes de adicionar fase de UX.
+
+### 27. Workflow 4 — TDD Invertido (Spec → Testes → Código)
+
+- **Tipo:** Fase SDLC (novo workflow n8n)
+- **Relevância:** 5/5 — resolve o problema de circularidade do WF3 (mesmo LLM gera código e testes)
+- **Viabilidade:** 5/5 — mesmo padrão do WF3, apenas inverte a ordem e usa agentes separados
+
+**Problema que resolve:**
+
+No WF3 atual, o mesmo modelo (`qwen2.5-coder:32b`) gera `routes.py` e depois `test_main.py`.
+Se o código estiver errado, os testes tendem a refletir o mesmo erro — circularidade.
+Exemplo real desta sessão: `revenue_cents: 800` (errado) gerado tanto no código quanto no teste.
+
+**Como funciona o TDD invertido:**
+
+```
+spec.md
+  │
+  ├─→ [WF4a — Test Agent]  ← lê só a spec, nunca vê o código
+  │     qwen3-coder:30b (modelo de reasoning, não coding)
+  │     Papel: QA Engineer sênior
+  │     Output: test_main.py com asserções baseadas nos AC da spec
+  │     (ex: "AC-03 diz taxa 8% → assert revenue == amount * 0.92")
+  │
+  └─→ [WF4b — Code Agent]  ← lê spec + test_main.py gerado
+        qwen2.5-coder:32b
+        Papel: Developer que implementa para passar os testes
+        Output: models.py + routes.py + main.py
+              ↓
+           pytest → prova que Code Agent satisfaz Test Agent
+                    sem que um soubesse o que o outro faria
+```
+
+**Por que usar modelos diferentes (opcional mas recomendado):**
+- `qwen3-coder:30b` no Test Agent: melhor em reasoning e interpretação de critérios
+- `qwen2.5-coder:32b` no Code Agent: melhor em geração de código funcional
+- Mesmo usando o mesmo modelo, a separação de contexto já elimina a circularidade
+
+**Implementação no n8n:**
+
+```
+WF4a: Webhook → PrepareTestPrompt → CallOllama(30b) → ParseTests → Respond
+WF4b: Webhook → PrepareCodePrompt(spec + tests) → CallOllama(32b) × 3 → Respond
+
+generate-tdd.sh:
+  1. Chama WF4a → salva test_main.py
+  2. Chama WF4b com spec + test_main.py → salva models.py, routes.py, main.py
+  3. pytest test_main.py → resultado
+```
+
+**Métrica de sucesso:** testes escritos pelo Test Agent passando no código do Code Agent, sem nenhum fix manual de asserção de valor.
+
+**Diferença para WF3:**
+- WF3: `[spec] → [código] → [testes]` — testes validam o código
+- WF4: `[spec] → [testes] → [código]` — código é forçado a satisfazer testes independentes
 
 ### 25. Qdrant + RAG
 - Descricao: banco vetorial self-hosted; permite recuperar contexto de codebase longa sem estourar janela de contexto
