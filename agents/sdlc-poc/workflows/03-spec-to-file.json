@@ -13,18 +13,24 @@
       "name": "Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
-      "position": [240, 300],
+      "position": [
+        240,
+        300
+      ],
       "webhookId": "c3d4e5f6-0003-0000-0000-000000000001"
     },
     {
       "parameters": {
-        "jsCode": "const FILE_RULES = {\n  'models.py': 'Pydantic v2 data models only. No routes, no FastAPI app, no business logic. Only class definitions and type imports.',\n  'routes.py': 'FastAPI APIRouter with all endpoint implementations. Import models from models.py. Include in-memory store at module level. All business logic goes here.',\n  'main.py': 'FastAPI app instantiation only. Import the router from routes.py and include it. Keep this file minimal — no business logic.',\n  'test_main.py': 'pytest + httpx async tests. Import app from main. Test every acceptance criterion from the PRD. Use AsyncClient(transport=ASGITransport(app=app), base_url=\"http://test\").'\n};\n\nconst DEFAULT_FILES = ['models.py', 'routes.py', 'main.py', 'test_main.py'];\n\nconst body = $input.first().json.body || $input.first().json;\nconst spec = body.spec || '';\nconst filename = body.filename || '';\nconst allFiles = body.all_files || DEFAULT_FILES;\nconst context = body.context || [];  // [{filename, content}, ...] of already-generated files\n\nif (!spec) throw new Error('Missing required field: spec');\nif (!filename) throw new Error('Missing required field: filename');\n\nconst fileHint = FILE_RULES[filename] || `Implement the ${filename} component based on the PRD.`;\nconst otherFiles = allFiles.filter(f => f !== filename);\n\n// Build context block from previously generated files\nconst contextBlock = context.length > 0\n  ? `\\n\\nALREADY GENERATED FILES — you MUST use the exact same class names, field names, function names, and import paths as these files:\\n\\n${context.map(f => `--- ${f.filename} ---\\n${f.content}`).join('\\n\\n')}`\n  : '';\n\nconst systemPrompt = `You are a senior software engineer implementing one specific file from a PRD.\n\nYou will generate ONLY the file: ${filename}\nDo not generate any other files. Do not add explanations or markdown fences.\n\nThis file's responsibility: ${fileHint}\n\nOther files in this project (already handled separately, do not duplicate their content):\n${otherFiles.map(f => `- ${f}: ${FILE_RULES[f] || f}`).join('\\n')}${contextBlock}\n\nRules:\n- Use FastAPI for HTTP endpoints\n- Use Pydantic v2: import directly with 'from pydantic import BaseModel, Field' (never from pydantic.v1 or pydantic.v2)\n- Store monetary values as INTEGER cents to avoid floating-point errors\n- Return amounts as decimal strings (e.g., \"90.00\") using format(amount_cents / 100, '.2f')\n- Include error handling for 404 and 422\n- In-memory store: use a plain dict at module level unless PRD requires a database\n- For tests: use 'from httpx import AsyncClient, ASGITransport' and 'async with AsyncClient(transport=ASGITransport(app=app), base_url=\"http://test\") as client:'\n\nStart your response with exactly: # FILE: ${filename}\nThen write the complete file. Nothing else.`;\n\nconst ollamaBody = JSON.stringify({\n  model: 'qwen2.5-coder:32b',\n  stream: false,\n  options: { temperature: 0.1 },\n  messages: [\n    { role: 'system', content: systemPrompt },\n    { role: 'user', content: `PRD TO IMPLEMENT:\\n\\n${spec}\\n\\nGenerate ONLY: ${filename}` }\n  ]\n});\n\nreturn [{ json: { ollamaBody, filename, spec } }];"
+        "jsCode": "const FILE_RULES = {\n  'models.py': 'Pydantic v2 data models only. No routes, no FastAPI app, no business logic. Only class definitions and type imports.',\n  'routes.py': 'FastAPI APIRouter with all endpoint implementations. Import models from models.py. Include in-memory store at module level. All business logic goes here.',\n  'main.py': 'FastAPI app instantiation only. Import the router from routes.py and include it. Keep this file minimal — no business logic.',\n  'test_main.py': 'pytest + httpx async tests. Import app from main. Test every acceptance criterion from the PRD. Use AsyncClient(transport=ASGITransport(app=app), base_url=\"http://test\").'\n};\n\nconst DEFAULT_FILES = ['models.py', 'routes.py', 'main.py', 'test_main.py'];\n\nconst body = $input.first().json.body || $input.first().json;\nconst spec = body.spec || '';\nconst filename = body.filename || '';\nconst allFiles = body.all_files || DEFAULT_FILES;\nconst context = body.context || [];  // [{filename, content}, ...] of already-generated files\n\nif (!spec) throw new Error('Missing required field: spec');\nif (!filename) throw new Error('Missing required field: filename');\n\nconst fileHint = FILE_RULES[filename] || `Implement the ${filename} component based on the PRD.`;\nconst otherFiles = allFiles.filter(f => f !== filename);\n\n// Detect TDD mode: test_main.py is in context (generated before implementation files)\nconst testFile = context.find(f => f.filename === 'test_main.py');\nconst tddMode = !!testFile;\n\n// Build context block from previously generated files\nconst contextBlock = context.length > 0\n  ? `\\n\\nALREADY GENERATED FILES — you MUST use the exact same class names, field names, function names, and import paths as these files:\\n\\n${context.map(f => `--- ${f.filename} ---\\n${f.content}`).join('\\n\\n')}`\n  : '';\n\n// In TDD mode: the test defines the API contract — field names and types must match exactly\nconst tddNote = tddMode\n  ? `\\n\\nTDD MODE — CRITICAL CONTRACT RULE:\\ntest_main.py is included in the context above and defines the exact API contract.\\nYou MUST match its JSON field names and Python types EXACTLY:\\n- If the test sends {\"total_amount\": 30.00} → your model MUST have total_amount: float (NOT total_amount_cents: int)\\n- If the test sends {\"amount\": 100.00} → your model MUST have amount: float (NOT amount_cents: int)\\n- Do NOT rename fields or add _cents suffix — the tests will 422 if you do\\nThe test is the SINGLE source of truth for API field names and types.`\n  : '';\n\nconst monetaryRule = tddMode\n  ? '- For monetary values: match EXACTLY the field names and types from test_main.py (float if tests send floats, int if tests send ints)'\n  : '- Store monetary values as INTEGER cents to avoid floating-point errors\\n- Return amounts as decimal strings (e.g., \"90.00\") using format(amount_cents / 100, \\'.2f\\')';\n\nconst systemPrompt = `You are a senior software engineer implementing one specific file from a PRD.\n\nYou will generate ONLY the file: ${filename}\nDo not generate any other files. Do not add explanations or markdown fences.\n\nThis file's responsibility: ${fileHint}\n\nOther files in this project (already handled separately, do not duplicate their content):\n${otherFiles.map(f => `- ${f}: ${FILE_RULES[f] || f}`).join('\\n')}${contextBlock}${tddNote}\n\nRules:\n- Use FastAPI for HTTP endpoints\n- Use Pydantic v2: import directly with 'from pydantic import BaseModel, Field' (never from pydantic.v1 or pydantic.v2)\n${monetaryRule}\n- Include error handling for 404 and 422\n- In-memory store: use a plain dict at module level unless PRD requires a database\n- For tests: use 'from httpx import AsyncClient, ASGITransport' and 'async with AsyncClient(transport=ASGITransport(app=app), base_url=\"http://test\") as client:'\n\nStart your response with exactly: # FILE: ${filename}\nThen write the complete file. Nothing else.`;\n\nconst ollamaBody = JSON.stringify({\n  model: 'qwen2.5-coder:32b',\n  stream: false,\n  options: { temperature: 0.1 },\n  messages: [\n    { role: 'system', content: systemPrompt },\n    { role: 'user', content: `PRD TO IMPLEMENT:\\n\\n${spec}\\n\\nGenerate ONLY: ${filename}` }\n  ]\n});\n\nreturn [{ json: { ollamaBody, filename, spec } }];"
       },
       "id": "3a4b5c6d-0003-0000-0000-000000000002",
       "name": "PrepareRequest",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [480, 300]
+      "position": [
+        480,
+        300
+      ]
     },
     {
       "parameters": {
@@ -34,13 +40,18 @@
         "contentType": "raw",
         "rawContentType": "application/json",
         "body": "={{ $json.ollamaBody }}",
-        "options": {"timeout": 1200000}
+        "options": {
+          "timeout": 1200000
+        }
       },
       "id": "3a4b5c6d-0003-0000-0000-000000000003",
       "name": "CallOllama",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [720, 300]
+      "position": [
+        720,
+        300
+      ]
     },
     {
       "parameters": {
@@ -50,7 +61,10 @@
       "name": "ParseFile",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [960, 300]
+      "position": [
+        960,
+        300
+      ]
     },
     {
       "parameters": {
@@ -62,23 +76,60 @@
       "name": "Respond",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [1200, 300]
+      "position": [
+        1200,
+        300
+      ]
     }
   ],
   "connections": {
     "Webhook": {
-      "main": [[{ "node": "PrepareRequest", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "PrepareRequest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "PrepareRequest": {
-      "main": [[{ "node": "CallOllama", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "CallOllama",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "CallOllama": {
-      "main": [[{ "node": "ParseFile", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "ParseFile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "ParseFile": {
-      "main": [[{ "node": "Respond", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,
-  "settings": { "executionOrder": "v1" }
+  "settings": {
+    "executionOrder": "v1"
+  }
 }
