@@ -25,8 +25,8 @@ FIXES_APPLIED=0
 for attempt in $(seq 1 "$MAX_RETRIES"); do
   echo -e "  ${YELLOW}Tentativa $attempt/$MAX_RETRIES — rodando pytest...${NC}"
 
-  PYTEST_OUT=$(python3 -m pytest test_main.py -v --tb=short 2>&1) || true
-  PYTEST_EXIT=$?
+  PYTEST_EXIT=0
+  PYTEST_OUT=$(python3 -m pytest test_main.py -v --tb=short 2>&1) || PYTEST_EXIT=$?
 
   if [ "$PYTEST_EXIT" -eq 0 ]; then
     echo -e "  ${GREEN}✓ Todos os testes passando após $FIXES_APPLIED fix(es) automático(s)${NC}"
