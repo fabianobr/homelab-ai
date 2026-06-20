@@ -161,9 +161,9 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 512m
+          memory: 2g
         reservations:
-          memory: 128m
+          memory: 512m
 
 volumes:
   open-webui:

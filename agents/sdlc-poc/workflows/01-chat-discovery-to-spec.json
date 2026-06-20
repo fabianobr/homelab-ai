@@ -70,7 +70,7 @@
       "main": [[{ "node": "Prepare Request", "type": "main", "index": 0 }]]
     },
     "Prepare Request": {
-      "main": [[{ "node": "Call Ollama", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Call LiteLLM", "type": "main", "index": 0 }]]
     },
     "Call LiteLLM": {
       "main": [[{ "node": "Process Response", "type": "main", "index": 0 }]]
