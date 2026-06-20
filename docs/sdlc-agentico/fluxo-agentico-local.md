@@ -1,12 +1,12 @@
 # Fluxo Agêntico Local — SDLC com 100% LLM Local
 
-> Sessão de validação: 2026-06-20  
+> Última atualização: 2026-06-20  
 > Hardware: RTX 5060 Ti 16 GB VRAM  
 > Inferência: Ollama (sem chamadas externas em runtime)
 
 ---
 
-## 1. Visão Geral do Pipeline
+## 1. Visão Geral do Pipeline (com TDD Invertido e Auto-Fix)
 
 ```mermaid
 flowchart TD
@@ -16,99 +16,106 @@ flowchart TD
         TXT[chat-discovery.txt\ndescriçao livre do produto]
     end
 
-    subgraph N8N["n8n — Orquestrador"]
+    subgraph N8N["n8n 2.23.3 — Orquestrador"]
         direction TB
-        WF1["WF1 — PM Agent\n/webhook/sdlc-poc-chat\n─────────────────\nqwen3-coder:30b\nPapel: Product Manager IA\n4 estágios: Discovery → Hipóteses\n→ Métricas → Spec"]
-        WF3A["WF3 [1/4] — Developer Agent\nArquivo: models.py\nContexto: nenhum"]
-        WF3B["WF3 [2/4] — Developer Agent\nArquivo: routes.py\nContexto: models.py ✓"]
-        WF3C["WF3 [3/4] — Developer Agent\nArquivo: main.py\nContexto: models.py + routes.py ✓"]
-        WF3D["WF3 [4/4] — Developer Agent\nArquivo: test_main.py\nContexto: 3 arquivos anteriores ✓"]
+        WF1["WF1 — PM Agent\n/webhook/sdlc-poc-chat\n─────────────────\nqwen3-coder:30b\nPapel: Product Manager IA\n4 estágios: Discovery → Spec"]
+
+        subgraph TDD["Modo TDD Invertido (generate-tdd.sh)"]
+            WF5["WF5 — QA Agent\n/webhook/sdlc-poc-spec-to-tests\nqwen2.5-coder:32b\nGera test_main.py PRIMEIRO\n(não vê código algum)"]
+            WF3A["WF3 [1/3] — Developer Agent\nArquivo: models.py\nContexto: test_main.py ✓"]
+            WF3B["WF3 [2/3] — Developer Agent\nArquivo: routes.py\nContexto: test + models ✓"]
+            WF3C["WF3 [3/3] — Developer Agent\nArquivo: main.py\nContexto: test + models + routes ✓"]
+        end
+
+        WF4["WF4 — Fix Agent\n/webhook/sdlc-poc-fix\nqwen2.5-coder:32b\nRecebe pytest failures + spec\nCorrige 1 arquivo por iteração"]
     end
 
     subgraph OLLAMA["Ollama — Inferência 100% Local"]
         M1["qwen3-coder:30b\nDiscovery + Spec"]
-        M2["qwen2.5-coder:32b\nCode Generation"]
+        M2["qwen2.5-coder:32b\nCode + Fix"]
     end
 
-    subgraph OUTPUT["Output Gerado"]
-        SPEC["spec.md\n41 linhas\nRF × 8 + AC × 4"]
-        MDL["models.py — 37 linhas\nPydantic v2 models"]
-        RTS["routes.py — 110 linhas\nFastAPI endpoints\nbusiness logic"]
-        MN["main.py — 6 linhas\napp init"]
-        TST["test_main.py — 254 linhas\n9 testes async"]
-    end
-
-    PYTEST{"pytest\n9/9 ✓\n0.16s"}
+    PYTEST{"pytest\n✓ ou ✗"}
 
     DEV --> TXT --> WF1
     WF1 <-->|chat/api| M1
-    WF1 --> SPEC
-    SPEC --> WF3A
-    WF3A <-->|api| M2
-    WF3A --> MDL
+    WF1 --> SPEC[spec.md]
+
+    SPEC --> WF5
+    WF5 <-->|api| M2
+    WF5 --> TEST[test_main.py]
+    TEST --> WF3A
+    WF3A <-->|api + contexto| M2
+    WF3A --> MDL[models.py]
     MDL --> WF3B
     WF3B <-->|api + contexto| M2
-    WF3B --> RTS
+    WF3B --> RTS[routes.py]
     RTS --> WF3C
     WF3C <-->|api + contexto| M2
-    WF3C --> MN
-    MN --> WF3D
-    WF3D <-->|api + contexto| M2
-    WF3D --> TST
-    MDL & RTS & MN & TST --> PYTEST
+    WF3C --> MN[main.py]
+
+    TEST & MDL & RTS & MN --> PYTEST
+
+    PYTEST -->|falhou| WF4
+    WF4 <-->|api| M2
+    WF4 -->|arquivo corrigido| PYTEST
+    PYTEST -->|passou| OK(["✅ 4/4 passed\n0 chamadas externas"])
 
     style OLLAMA fill:#1a1a2e,color:#e0e0ff,stroke:#4444aa
     style N8N fill:#1e3a1e,color:#e0ffe0,stroke:#44aa44
-    style PYTEST fill:#1a3a1a,color:#aaffaa,stroke:#44ff44
+    style TDD fill:#1a2a1a,color:#ccffcc,stroke:#44aa44,stroke-dasharray:4
+    style OK fill:#0a2a0a,color:#aaffaa,stroke:#44ff44
 ```
 
 ---
 
-## 2. O Que Cada Agente Fez
+## 2. Sequência Detalhada — TDD Invertido
 
 ```mermaid
 sequenceDiagram
-    participant Dev as 👤 Desenvolvedor
-    participant WF1 as PM Agent (WF1)
+    participant Dev as 👤 Script
+    participant WF5 as QA Agent (WF5)
     participant WF3 as Developer Agent (WF3)
+    participant WF4 as Fix Agent (WF4)
     participant Ollama as Ollama Local
+    participant PT as pytest
 
-    Dev->>WF1: POST /sdlc-poc-chat<br/>{chatInput: "me ajude com ecommerce..."}
-    WF1->>Ollama: qwen3-coder:30b<br/>estágio DISCOVERY
-    Ollama-->>WF1: resposta conversacional
-    WF1-->>Dev: hipóteses + perguntas
+    Note over Dev,PT: Fase 1 — QA Agent gera testes da spec (sem ver código)
+    Dev->>WF5: POST {spec}
+    WF5->>Ollama: qwen2.5-coder:32b<br/>QA engineer persona — spec only
+    Ollama-->>WF5: test_main.py (fixture reset + 1 test por AC)
+    WF5-->>Dev: {filename:"test_main.py", content, lines:56}
 
-    Dev->>WF1: POST /sdlc-poc-chat<br/>{chatInput: "gerar spec"}
-    WF1->>Ollama: qwen3-coder:30b<br/>estágio SPEC
-    Ollama-->>WF1: ---SPEC-START--- ... ---SPEC-END---
-    WF1-->>Dev: spec estruturada (RF, NF, AC)
+    Note over Dev,PT: Fase 2 — Developer Agent gera implementação (vê testes primeiro)
+    Dev->>WF3: POST {spec, filename:"models.py", context:[test_main.py]}
+    WF3->>Ollama: qwen2.5-coder:32b — TDD mode detectado
+    Ollama-->>Dev: models.py (campos compatíveis com os testes)
 
-    Note over Dev,WF3: generate-files.sh extrai spec e chama WF3 × 4
+    Dev->>WF3: POST {spec, filename:"routes.py", context:[test_main.py, models.py]}
+    WF3->>Ollama: qwen2.5-coder:32b
+    Ollama-->>Dev: routes.py
 
-    Dev->>WF3: {spec, filename:"models.py", context:[]}
-    WF3->>Ollama: qwen2.5-coder:32b — 114s
-    Ollama-->>WF3: Pydantic v2 models
-    WF3-->>Dev: models.py (37 linhas)
+    Dev->>WF3: POST {spec, filename:"main.py", context:[test_main.py, models.py, routes.py]}
+    WF3->>Ollama: qwen2.5-coder:32b — 14s
+    Ollama-->>Dev: main.py
 
-    Dev->>WF3: {spec, filename:"routes.py", context:[models.py]}
-    WF3->>Ollama: qwen2.5-coder:32b — 226s
-    Ollama-->>WF3: FastAPI router + business logic
-    WF3-->>Dev: routes.py (110 linhas)
+    Note over Dev,PT: Fase 3 — pytest + auto-fix loop (max 3 tentativas)
+    Dev->>PT: pytest test_main.py -v
+    PT-->>Dev: 2 failed (KeyError: seller_net, shipping_cost)
 
-    Dev->>WF3: {spec, filename:"main.py", context:[models.py, routes.py]}
-    WF3->>Ollama: qwen2.5-coder:32b — 12s
-    Ollama-->>Dev: main.py (6 linhas)
+    Dev->>WF4: POST {spec, pytest_output, files:[todos os .py]}
+    Note over WF4: Regra 4: KeyError = FastAPI response_model stripping<br/>→ adicionar Optional field em models.py
+    WF4->>Ollama: qwen2.5-coder:32b — 85s
+    Ollama-->>WF4: models.py corrigido (+ seller_net + shipping_cost Optional)
+    WF4-->>Dev: {filename:"models.py", content}
 
-    Dev->>WF3: {spec, filename:"test_main.py", context:[models.py, routes.py, main.py]}
-    WF3->>Ollama: qwen2.5-coder:32b — 467s
-    Ollama-->>Dev: test_main.py (254 linhas)
-
-    Note over Dev: pytest test_main.py -v → 9/9 ✓
+    Dev->>PT: pytest test_main.py -v
+    PT-->>Dev: 4/4 passed ✓
 ```
 
 ---
 
-## 3. Cobertura dos Critérios de Aceite
+## 3. Cobertura dos Critérios de Aceite (TDD Mode)
 
 ```mermaid
 flowchart LR
@@ -119,41 +126,37 @@ flowchart LR
         AC4["AC-04\nDevolução solicitada ≤ 7 dias\n→ aprovada sem critério"]
     end
 
-    subgraph TESTES["Testes gerados pelo Developer Agent"]
-        T1["test_create_and_get_product ✓"]
-        T2["test_create_and_get_advertisement ✓"]
-        T3["test_create_and_get_seller_metrics ✓"]
-        T4["test_create_and_get_buyer ✓"]
-        T5["test_create_and_get_purchase ✓"]
-        T6["test_create_and_get_refund ✓"]
-        T7["test_paid_advertisement_commission ✓"]
-        T8["test_refund_within_7_days ✓"]
-        T9["test_fidelity_member_free_shipping ✓"]
+    subgraph TESTES_TDD["Testes gerados pelo QA Agent (WF5) — spec only"]
+        T1["test_ac_01 ✓\ndashboard retorna ad_metrics"]
+        T2["test_ac_02 ✓\nfrete=0 p/ loyalty + compra>$21"]
+        T3["test_ac_03 ✓\nseller_net = '92.00' (8% fee)"]
+        T4["test_ac_04 ✓\nreturn status = 'completed'"]
     end
 
-    AC1 --> T1 & T2 & T3
-    AC2 --> T4 & T9
-    AC3 --> T7
-    AC4 --> T6 & T8
-    T5 -.->|cobertura extra\nfluxo de compra| AC1
+    AC1 --> T1
+    AC2 --> T2
+    AC3 --> T3
+    AC4 --> T4
+
+    style TESTES_TDD fill:#1a2a3a,color:#ccddff,stroke:#4466aa
 ```
 
 ---
 
-## 4. O Que Foi Usado Onde
+## 4. Construção vs Runtime
 
 ```mermaid
 flowchart TD
     subgraph BUILD["🔧 Construção da Infraestrutura\n(one-time, não runtime)"]
-        CC["Claude Code\n(Anthropic Sonnet 4.6)\n\nUsado para:\n• Criar os JSON dos workflows n8n\n• Escrever generate-files.sh\n• Depurar bugs (timeout 600ms→600s)\n• Aplicar fixes pós-geração\n• Escrever este documento"]
+        CC["Claude Code\n(Anthropic Sonnet 4.6)\n\nUsado para:\n• Criar os JSON dos workflows n8n\n• Escrever os scripts bash\n• Depurar bugs (timeout, exit code, __builtins__)\n• Aplicar fixes pós-geração\n• Escrever este documento"]
     end
 
     subgraph RUNTIME["⚡ Runtime do Pipeline\n(100% local, repetível sem internet)"]
         direction LR
         N8N2["n8n 2.23.3\n(orquestrador)"]
         OL["Ollama\n(inferência)"]
-        Q3["qwen3-coder:30b\nPM Agent"]
-        Q2["qwen2.5-coder:32b\nDeveloper Agent"]
+        Q3["qwen3-coder:30b\nPM Agent (WF1)"]
+        Q2["qwen2.5-coder:32b\nQA Agent (WF5)\nDeveloper Agent (WF3)\nFix Agent (WF4)"]
         PY["Python / pytest\n(validação)"]
         N8N2 --> OL
         OL --> Q3 & Q2
@@ -168,28 +171,38 @@ flowchart TD
 
 ---
 
-## 5. Métricas da Sessão
+## 5. Métricas Comparativas
+
+### Fluxo Code-First (geração anterior — generate-files.sh)
 
 | Métrica | Valor |
 |---|---|
 | Tempo total discovery → pytest | ~15 min |
-| Tokens processados localmente | ~150k (estimado) |
-| Chamadas para APIs externas (runtime) | **0** |
 | Arquivos gerados | 4 |
-| Linhas de código geradas | 407 |
-| Testes gerados | 9 |
-| Testes passando as-generated | 7/9 |
-| Testes passando pós-fix mínimo | **9/9** |
-| Fixes manuais aplicados | 2 (autouse fixture + valor de cálculo) |
+| Linhas de código | 407 |
+| Testes | 9 |
+| Passando as-generated | 7/9 |
+| Fixes manuais | **2** (autouse fixture + valor de cálculo) |
+| Chamadas externas | **0** |
 
-### Fixes que o contexto progressivo eliminou
-Na geração anterior (sem contexto), eram necessários 4 fixes:
-- `platform_fee_usd` → `platform_fee` (divergência de nome)
-- `seller_net_usd` → `seller_net` (divergência de nome)
-- Endpoint `/ledger` ausente
-- Lógica de freeze com off-by-one
+### Fluxo TDD Invertido (generate-tdd.sh — sessão atual)
 
-Com contexto progressivo, nenhum desses ocorreu. As **254 linhas** de `test_main.py` usaram exatamente os mesmos nomes de campo que `routes.py`.
+| Métrica | Valor |
+|---|---|
+| Tempo total spec → pytest verde | ~7min geração + ~8min fixes |
+| QA Agent (WF5) — test_main.py | 190s |
+| Developer Agent (WF3) — 3 arquivos | 54s + 180s + 14s |
+| Fix Agent (WF4) — 1 iteração | 85s |
+| Passando as-generated | 1/4 |
+| Passando pós auto-fix | **4/4** |
+| Fixes manuais | **0** (só fixture corrigida no prompt do WF5) |
+| Chamadas externas | **0** |
+
+### O que o TDD Invertido eliminou
+
+- **Divergência de nomes** — Code Agent vê os testes primeiro, usa os mesmos nomes de campo
+- **Circularidade** — testes são escritos por agente diferente (QA), não pelo mesmo que gera código
+- **Fixes manuais** — WF4 resolveu o `response_model stripping` automaticamente
 
 ---
 
@@ -199,30 +212,55 @@ Com contexto progressivo, nenhum desses ocorreu. As **254 linhas** de `test_main
 mindmap
   root((Limitações))
     Latência
-      models.py: 114s
-      routes.py: 226s
-      test_main.py: 467s
-      Total: ~15 min por módulo
+      QA Agent test_main.py 190s
+      Developer Agent 3 arquivos ~250s
+      Fix Agent por iteração ~85-200s
+      Total TDD ~15 min
+    Bugs descobertos (agora corrigidos)
+      fixture limpava __builtins__ causando hang
+      fix-loop exit code capturava || true sempre 0
+      WF3 ignorava tipos dos testes em modo TDD
     Escopo de geração
-      One-shot funciona para specs simples
-      Specs complexas precisam de WF3 por arquivo
-      Módulos grandes ainda truncam
+      Testes simples 1 assert por AC
+      Não gera testes de erro 404 422
+      Specs complexas podem truncar
     Qualidade
-      Cálculo de valor errado no teste
-      State leak entre testes não foi gerado
-      Requer 2 fixes manuais mínimos
+      Fix Agent corrige 1 arquivo por iteração
+      Pode precisar de mais de 3 tentativas
+      KeyError de response_model requer regra explícita
     Cobertura parcial
       Business rules simples bem cobertas
-      Fluxos assíncronos e tempo difíceis de testar
+      Fluxos async e tempo difíceis de testar
       Integração entre módulos não coberta
 ```
 
 ---
 
-## 7. Próximos Passos Naturais
+## 7. Próximos Passos
 
-1. **Contexto entre módulos** — gerar Seller Central com context de Fintech Core (wallet compartilhado)
-2. **Modelo mais rápido** — testar `qwen2.5-coder:7b` para iteração (~15-30s/arquivo vs 2-8min)
-3. **WF4 — UX Wireframe** — mesmo padrão, output HTML/Tailwind por tela
-4. **Langfuse** — observabilidade: ver tokens, latência, qualidade por chamada
-5. **Auto-fix loop** — WF4: rodar pytest → erros → prompt de fix → re-gerar arquivo com bug
+| Item | Status | Prioridade |
+|---|---|---|
+| WF4 — Auto-fix loop | ✅ Implementado | — |
+| WF5 — TDD Invertido | ✅ Implementado | — |
+| `qwen2.5-coder:7b` — modelo rápido para iteração | Backlog | Alta |
+| Langfuse — observabilidade de tokens/latência | Backlog | Média |
+| WF6 — UX Wireframe (HTML/Tailwind por AC) | Backlog | Média |
+| Contexto entre módulos (Seller + Fintech) | Backlog | Baixa |
+
+---
+
+## 8. Comando para Re-executar
+
+```bash
+# Fluxo completo Code-First (com auto-fix loop):
+cd agents/sdlc-poc/tests
+./run-pipeline.sh docs/sdlc-agentico/input/chat-discovery.txt /tmp/output-$(date +%Y%m%d)
+
+# Fluxo TDD Invertido (testes antes do código):
+./generate-tdd.sh /tmp/marketplace-spec.md /tmp/tdd-output-$(date +%Y%m%d)
+
+# Só re-importar e ativar todos os workflows:
+./import-workflows.sh
+```
+
+**Pré-requisitos:** n8n em `http://localhost:5678`, Ollama em `http://localhost:11434`, modelos `qwen3-coder:30b` e `qwen2.5-coder:32b` disponíveis.
