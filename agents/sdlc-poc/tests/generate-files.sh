@@ -10,7 +10,11 @@ set -euo pipefail
 SPEC_FILE="${1:-}"
 OUTPUT_DIR="${2:-./generated}"
 shift 2 2>/dev/null || true
-FILES=("${@:-models.py routes.py main.py test_main.py}")
+if [ $# -eq 0 ]; then
+  FILES=(models.py routes.py main.py test_main.py)
+else
+  FILES=("$@")
+fi
 
 WEBHOOK="http://localhost:5678/webhook/sdlc-poc-spec-to-file"
 
