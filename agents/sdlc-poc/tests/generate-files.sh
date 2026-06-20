@@ -13,13 +13,10 @@ WEBHOOK="http://localhost:5678/webhook/sdlc-poc-spec-to-file"
 
 if [ -z "$SPEC_FILE" ] || [ ! -f "$SPEC_FILE" ]; then
   echo "Usage: $0 <spec-file> [output-dir] [file1 file2 ...]"
-  echo "Example: $0 spec.md ./output models.py routes.py main.py test_main.py"
   exit 1
 fi
 
 mkdir -p "$OUTPUT_DIR"
-SPEC=$(cat "$SPEC_FILE")
-ALL_FILES_JSON=$(printf '"%s",' "${FILES[@]}" | sed 's/,$//')
 
 echo "=== Spec to Files ==="
 echo "Spec: $SPEC_FILE"
@@ -29,34 +26,52 @@ echo ""
 
 TOTAL_START=$(date +%s)
 
+# Build all_files JSON array once
+ALL_FILES_JSON=$(python3 -c "import json, sys; print(json.dumps(sys.argv[1:]))" "${FILES[@]}")
+
 for filename in "${FILES[@]}"; do
   echo "Generating $filename..."
   FILE_START=$(date +%s)
 
-  PAYLOAD=$(python3 -c "
+  # Write payload to temp file to avoid shell quoting issues
+  TMPFILE=$(mktemp /tmp/wf3-payload-XXXXXX.json)
+  python3 - "$SPEC_FILE" "$filename" "$ALL_FILES_JSON" "$TMPFILE" << 'PYEOF'
 import json, sys
-spec = open('$SPEC_FILE').read()
+spec_file, filename, all_files_json, out_file = sys.argv[1:]
 payload = {
-  'spec': spec,
-  'filename': '$filename',
-  'all_files': [$(echo "$ALL_FILES_JSON" | sed 's/,$//' | tr ',' '\n' | sed 's/^/\"/' | sed 's/$/\"/' | tr '\n' ',' | sed 's/,$//')]
+    "spec": open(spec_file).read(),
+    "filename": filename,
+    "all_files": json.loads(all_files_json)
 }
-print(json.dumps(payload))
-")
+with open(out_file, "w") as f:
+    json.dump(payload, f)
+PYEOF
 
   RESPONSE=$(curl -s -X POST "$WEBHOOK" \
     -H "Content-Type: application/json" \
-    -d "$PAYLOAD" \
+    -d @"$TMPFILE" \
     --max-time 1300)
+  rm -f "$TMPFILE"
 
   FILE_END=$(date +%s)
   ELAPSED=$((FILE_END - FILE_START))
 
-  if echo "$RESPONSE" | python3 -c "import json,sys; d=json.load(sys.stdin); open('$OUTPUT_DIR/$filename','w').write(d['content']); print(f'  OK: {d[\"lines\"]} lines in ${ELAPSED}s')" 2>/dev/null; then
-    :
-  else
-    echo "  ERROR after ${ELAPSED}s: $(echo "$RESPONSE" | head -c 200)"
-  fi
+  python3 - "$RESPONSE" "$OUTPUT_DIR/$filename" "$ELAPSED" << 'PYEOF'
+import json, sys
+response_str, out_path, elapsed = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    d = json.loads(response_str)
+    content = d.get("content", "")
+    if not content:
+        print(f"  ERROR after {elapsed}s: empty content. Response: {response_str[:200]}")
+        sys.exit(1)
+    with open(out_path, "w") as f:
+        f.write(content)
+    print(f"  OK: {d.get('lines', '?')} lines in {elapsed}s")
+except Exception as e:
+    print(f"  ERROR after {elapsed}s: {e}. Response: {response_str[:200]}")
+    sys.exit(1)
+PYEOF
 done
 
 TOTAL_END=$(date +%s)
