@@ -2,7 +2,7 @@
 
 Agente de pesquisa semanal automatizado que busca novidades sobre ferramentas
 LLM agênticas para desenvolvimento de software local, avalia a viabilidade
-para o hardware do homelab e atualiza o backlog em `docs/sdlc-agentico/backlog.md`.
+para o hardware do homelab e atualiza o backlog em `research/sdlc-agentico/backlog.md`.
 
 ## O que faz
 
@@ -10,7 +10,7 @@ para o hardware do homelab e atualiza o backlog em `docs/sdlc-agentico/backlog.m
 2. Lê o backlog existente para extrair itens já conhecidos
 3. Envia os resultados ao Ollama local (`qwen2.5-coder:14b`) para análise e filtragem
 4. Gera um relatório semanal em `reports/YYYY-MM-DD-weekly-research.md`
-5. Adiciona os novos itens encontrados ao backlog em `docs/sdlc-agentico/backlog.md`
+5. Adiciona os novos itens encontrados ao backlog em `research/sdlc-agentico/backlog.md`
 6. Registra tudo em `research.log`
 
 ## Dependências
@@ -40,7 +40,7 @@ Um arquivo por execução, com data no nome.
 
 ## Como o backlog é atualizado
 
-O agente lê `docs/sdlc-agentico/backlog.md`, extrai todos os nomes de ferramentas
+O agente lê `research/sdlc-agentico/backlog.md`, extrai todos os nomes de ferramentas
 já presentes, e adiciona apenas itens **novos** sob a seção
 `## Novos itens pendentes de avaliacao`, agrupados por data de pesquisa.
 

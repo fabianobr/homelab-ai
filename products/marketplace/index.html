@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#10221f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Mercado Loop">
+  <title>Mercado Loop</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./icons/icon-192.svg">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <aside class="rail" aria-label="Navegacao principal">
+    <div class="mark">ML</div>
+    <button class="nav active" data-view="shop" title="Comprar">⌂</button>
+    <button class="nav" data-view="seller" title="Seller Central">▦</button>
+    <button class="nav" data-view="ops" title="Operacao">◉</button>
+  </aside>
+
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Marketplace operacional</p>
+        <h1>Mercado Loop</h1>
+      </div>
+      <div class="top-actions">
+        <button id="syncApi" class="ghost">Sincronizar API</button>
+        <button id="openCart" class="primary">Carrinho <span id="cartCount">0</span></button>
+      </div>
+    </header>
+
+    <section id="shop" class="view active">
+      <div class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Buyer experience</p>
+          <h2>Produtos que aprendem com procura, compra e atencao.</h2>
+          <p>Feed comercial com cashback, frete integrado, wallet e checkout por parceiro.</p>
+          <div class="hero-actions">
+            <button class="primary" data-scroll="feed">Explorar feed</button>
+            <button class="ghost" id="primeToggle">Ativar fidelidade</button>
+          </div>
+        </div>
+        <div class="hero-product">
+          <div class="device-card">
+            <span class="signal"></span>
+            <strong>Smart Camera Pro</strong>
+            <small>Score 94 · tracking ready</small>
+          </div>
+        </div>
+      </div>
+
+      <section class="section-head" id="feed">
+        <div>
+          <p class="eyebrow">Rabbit feed</p>
+          <h2>Recomendados agora</h2>
+        </div>
+        <div class="segmented">
+          <button class="active" data-filter="all">Tudo</button>
+          <button data-filter="electronics">Eletronicos</button>
+          <button data-filter="home">Casa</button>
+        </div>
+      </section>
+      <div id="productGrid" class="product-grid"></div>
+    </section>
+
+    <section id="seller" class="view">
+      <div class="seller-layout">
+        <section class="panel seller-form">
+          <p class="eyebrow">Seller Central</p>
+          <h2>Novo anuncio</h2>
+          <label>Titulo<input id="sellerTitle" value="Smart Camera Pro"></label>
+          <label>Categoria<input id="sellerCategory" value="Electronics > Cameras"></label>
+          <label>Preco<input id="sellerPrice" type="number" value="120"></label>
+          <label>SKU<input id="sellerSku" value="CAM-PRO-1"></label>
+          <button id="publishProduct" class="primary">Publicar gratis</button>
+        </section>
+
+        <section class="panel seller-metrics">
+          <div class="section-head compact">
+            <div>
+              <p class="eyebrow">Performance</p>
+              <h2>Seller Central</h2>
+            </div>
+            <button id="simulateSale" class="ghost">Simular venda</button>
+          </div>
+          <div class="metrics">
+            <article><span>Vendas</span><strong id="metricSales">0</strong></article>
+            <article><span>Comissao</span><strong id="metricCommission">$0.00</strong></article>
+            <article><span>Reputacao</span><strong id="metricReputation">0</strong></article>
+            <article><span>Produtos ativos</span><strong id="metricProducts">0</strong></article>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Produto</th><th>Preco</th><th>Status</th><th></th></tr></thead>
+              <tbody id="sellerTable"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section id="ops" class="view">
+      <div class="ops-grid">
+        <section class="panel">
+          <p class="eyebrow">Go-live</p>
+          <h2>Readiness</h2>
+          <div id="readinessBadge" class="status warn">Aguardando</div>
+          <button id="enableLaunch" class="primary">Habilitar producao local</button>
+        </section>
+        <section class="panel">
+          <p class="eyebrow">Operacao</p>
+          <h2>Smoke</h2>
+          <div class="checks" id="smokeChecks"></div>
+          <button id="runSmoke" class="ghost">Rodar smoke</button>
+        </section>
+        <section class="panel span-2">
+          <p class="eyebrow">Checkout monitor</p>
+          <h2>Metricas</h2>
+          <div class="metrics">
+            <article><span>Total</span><strong id="opsTotal">0</strong></article>
+            <article><span>Aprovados</span><strong id="opsApproved">0</strong></article>
+            <article><span>Bloqueados</span><strong id="opsBlocked">0</strong></article>
+            <article><span>Taxa</span><strong id="opsRate">0%</strong></article>
+          </div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="cartDialog">
+    <form method="dialog" class="cart">
+      <div class="section-head compact">
+        <div>
+          <p class="eyebrow">Checkout</p>
+          <h2>Seu carrinho</h2>
+        </div>
+        <button class="icon">×</button>
+      </div>
+      <div id="cartItems" class="cart-items"></div>
+      <div class="checkout-row">
+        <span>Total</span>
+        <strong id="cartTotal">$0.00</strong>
+      </div>
+      <div class="checkout-actions">
+        <button id="payWallet" type="button" class="ghost">Wallet</button>
+        <button id="payCard" type="button" class="primary">Cartao parceiro</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status"></div>
+  <script src="./app.js"></script>
+</body>
+</html>

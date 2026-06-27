@@ -21,6 +21,21 @@ Sempre:
 - Fazer backup antes de mudanças grandes
 - Usar usuários sem privilégios quando possível
 
+## Integração pública do media pipeline
+
+- O bootstrap não recebe nem persiste segredos. `HF_TOKEN` pertence somente ao
+  ambiente do processo consumidor e nunca deve aparecer em argumentos ou logs.
+- O script de preparo clona apenas origens públicas allowlisted no lock file e
+  faz checkout de commits completos fixos.
+- Nenhum script da integração usa `sudo`, altera firewall, configura Cloudflare,
+  inicia Hermes ou publica portas fora de `127.0.0.1`.
+- Modelos, mídia, prompts privados, payloads, inputs e outputs ficam fora do Git.
+- Releases dependentes devem fixar uma tag SemVer exata do `homelab-ai`; executar
+  código de `main` não faz parte do contrato suportado.
+- Antes de uma tag pública, execute `pre-commit run --all-files`, gitleaks no
+  worktree e histórico, revisão de CVEs das imagens e
+  `infra/scripts/check-public-ready.sh`.
+
 ## Cloudflare
 
 Configuração recomendada:

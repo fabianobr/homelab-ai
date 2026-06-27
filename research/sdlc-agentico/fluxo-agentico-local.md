@@ -253,8 +253,8 @@ mindmap
 
 ```bash
 # Fluxo completo Code-First (com auto-fix loop):
-cd agents/sdlc-poc/tests
-./run-pipeline.sh docs/sdlc-agentico/input/chat-discovery.txt /tmp/output-$(date +%Y%m%d)
+cd products/sdlc-hibrido/tests
+./run-pipeline.sh research/sdlc-agentico/input/chat-discovery.txt /tmp/output-$(date +%Y%m%d)
 
 # Fluxo TDD Invertido (testes antes do código):
 ./generate-tdd.sh /tmp/marketplace-spec.md /tmp/tdd-output-$(date +%Y%m%d)

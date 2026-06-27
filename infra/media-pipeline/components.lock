@@ -1,0 +1,7 @@
+# Formato shell restrito: somente valores constantes auditáveis.
+COMFYUI_REPOSITORY=https://github.com/comfyanonymous/ComfyUI.git
+COMFYUI_COMMIT=603d891eaf045d726d9c23276b4428daf2977624
+COMFYUI_MANAGER_REPOSITORY=https://github.com/ltdrdata/ComfyUI-Manager.git
+COMFYUI_MANAGER_COMMIT=8da299d978fc7063282cfe2f3978cef26be2db2a
+COMFYUI_LTXVIDEO_REPOSITORY=https://github.com/Lightricks/ComfyUI-LTXVideo.git
+COMFYUI_LTXVIDEO_COMMIT=4f45fd6c222eb06eb3e46605da62e7c889e4be5c

@@ -1,6 +1,7 @@
 # Local environment and secrets
 .env
 .env.*
+!.env.media-pipeline.example
 .envrc
 .cloudflared/
 homelab.env
@@ -37,10 +38,14 @@ htmlcov/
 data/*
 models/*
 backups/*
+infra/runtime/*
 
 !data/.gitkeep
 !models/.gitkeep
 !backups/.gitkeep
+!infra/runtime/.gitkeep
+tmp/
+.tmp-sdlc-hybrid-gates/
 
 # Backup archives and generated packages
 *.tar

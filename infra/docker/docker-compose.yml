@@ -1,14 +1,16 @@
 services:
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.30.10
     container_name: ollama
+    profiles:
+      - media-pipeline
     restart: unless-stopped
     ports:
       - "127.0.0.1:11434:11434"
     volumes:
-      - ${OLLAMA_DATA_DIR:-/srv/homelab-ai/ollama}:/root/.ollama
+      - ${OLLAMA_DATA_DIR:?set OLLAMA_DATA_DIR in .env}:/root/.ollama
     environment:
-      - OLLAMA_KEEP_ALIVE=30s        # solta a VRAM rápido quando ocioso (libera p/ ComfyUI); node OllamaFlushVRAM é a garantia explícita
+      - OLLAMA_KEEP_ALIVE=300s        # solta a VRAM rápido quando ocioso (libera p/ ComfyUI); node OllamaFlushVRAM é a garantia explícita
       # - OLLAMA_MAX_LOADED_MODELS=1  # 1 modelo na VRAM por vez (evita transbordo pra CPU com ComfyUI compartilhando)
     # GPU via CDI (nvidia.com/gpu=all) em vez do runtime nvidia legado.
     # O runtime legado injeta regras de cgroup pela nvidia-container-cli que o
@@ -62,9 +64,11 @@ services:
           memory: 512m
 
   comfyui:
+    profiles:
+      - media-pipeline
     build:
-      context: ${COMFYUI_SOURCE_DIR:-/srv/homelab-ai/comfyui}
-      dockerfile: ${PROJECT_ROOT:-/opt/homelab-ai}/docker/comfyui/Dockerfile
+      context: ${COMFYUI_SOURCE_DIR:?set COMFYUI_SOURCE_DIR in .env}
+      dockerfile: ${HOMELAB_ROOT:?set HOMELAB_ROOT in .env}/infra/docker/comfyui/Dockerfile
     container_name: comfyui
     restart: unless-stopped
     command: ["python", "main.py", "--listen", "0.0.0.0", "--port", "8188", "--disable-cuda-malloc"]
@@ -74,7 +78,7 @@ services:
     ports:
       - "127.0.0.1:8188:8188"
     volumes:
-      - ${COMFYUI_SOURCE_DIR:-/srv/homelab-ai/comfyui}:/comfyui
+      - ${COMFYUI_SOURCE_DIR:?set COMFYUI_SOURCE_DIR in .env}:/comfyui
     healthcheck:
       test:
         [
@@ -152,7 +156,15 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:4000/health || exit 1"]
+      # /health faz health profundo dos backends e pode acordar modelos Ollama.
+      # A raiz valida só que o proxy HTTP está respondendo.
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/', timeout=5).read()",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3

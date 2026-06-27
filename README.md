@@ -1,207 +1,85 @@
 # homelab-ai
 
-Laboratório pessoal de IA local para rodar chat, agentes, RAG, geração de imagem, vídeo e automações em um desktop Ubuntu com GPU NVIDIA.
+Lab pessoal para medir o alcance real de LLMs no ciclo de desenvolvimento de software —
+o que funciona, o que não funciona, com números. Desktop Ubuntu com GPU NVIDIA RTX 5060 Ti 16GB.
 
-## Objetivo
+## Trilhas
 
-Transformar o desktop `ai-host` em um servidor pessoal de IA acessível remotamente com segurança.
+| | Trilha | O que é |
+|---|---|---|
+| 🏗️ | [`infra/`](infra/) | Docker Compose, scripts, Cloudflare Tunnel/Access, arquitetura do homelab |
+| 🔬 | [`research/sdlc-agentico/`](research/sdlc-agentico/) | Pesquisa: 27+ ferramentas avaliadas, fases do SDLC, backlog com métricas |
+| 🚀 | [`products/sdlc-hibrido/`](products/sdlc-hibrido/) | Pipeline flagship: LLM local + cloud, $0.04–0.07 por feature |
+| 📦 | [`products/marketplace/`](products/marketplace/) | Mercado Loop — primeiro app não-toy gerado pelo pipeline |
 
-Stack principal:
+## Aprendizados em destaque
 
-- Ollama
-- LM Studio
-- Open WebUI
-- Cloudflare Tunnel + Cloudflare Access
-- ComfyUI
-- LTX Video
-- n8n
+- **$0.04 – $0.07 por feature** com roteamento híbrido (Ollama local + Claude Sonnet para alta
+  ambiguidade) vs $0.50–2.00 tudo-cloud ou $0 + mais fixes manuais tudo-local.
+- **TDD Invertido elimina circularidade:** gerar testes *a partir da spec* (sem ver código) e
+  código *a partir dos testes* (sem escrever testes) impede que o mesmo modelo erre da mesma
+  forma nos dois artefatos. Resultado: 6/7 testes passando sem fix manual no PoC.
+- **Modelos locais de 14–32B cobrem ~80% dos casos cotidianos.** O gap real está em raciocínio
+  multi-arquivo complexo e planejamento de longo horizonte — nesses pontos, modelos frontier
+  (Claude Sonnet) compensam o custo.
+- **n8n como orquestrador funciona**, com um caveat: o sandbox JS do n8n 2.23.3 bloqueia `fetch()`
+  em Code nodes. Todas as chamadas externas precisam de HTTP Request nodes (mais verboso, não bloqueia).
 
-## Estrutura
+## Por onde começar
 
-```text
-homelab-ai/
-├── README.md
-├── ARCHITECTURE.md
-├── INVENTORY.yaml
-├── SERVICES.md
-├── SECURITY.md
-├── STANDARDS.md
-├── ROADMAP.md
-├── docker/
-│   └── docker-compose.yml
-├── infra/
-│   └── cloudflare/
-├── scripts/
-├── agents/
-└── docs/
-```
+- **Subir o homelab:** [`infra/README.md`](infra/README.md)
+- **Entender a pesquisa:** [`research/sdlc-agentico/README.md`](research/sdlc-agentico/README.md)
+- **Usar o pipeline:** [`products/sdlc-hibrido/README.md`](products/sdlc-hibrido/README.md)
+- **Ver um app gerado:** [`products/marketplace/README.md`](products/marketplace/README.md)
 
-## Subir serviços Docker
+## Media Meme Pipeline
 
-```bash
-cd docker
-docker compose up -d open-webui
-```
-
-O `n8n` é opcional nesta fase e só deve ser iniciado explicitamente:
+O contrato público está em [`infra/media-pipeline/contract.yaml`](infra/media-pipeline/contract.yaml)
+e é versionado por tags SemVer exatas. A primeira release planejada é `v1.0.0`;
+o pipeline não deve consumir `main`.
 
 ```bash
-cd docker
-docker compose --profile optional up -d n8n
+cp .env.media-pipeline.example .env
+# Edite .env usando caminhos absolutos do seu workspace.
+set -a; source .env; set +a
+bash infra/scripts/prepare-media-pipeline.sh
+docker compose --env-file .env -f infra/docker/docker-compose.yml \
+  --profile media-pipeline up -d ollama comfyui
 ```
 
-## Validar ambiente
+Esse profile contém somente Ollama e ComfyUI. n8n, Hermes e Telegram não são
+iniciados. As portas permanecem em loopback. O preparo é idempotente, não usa
+`sudo`, preserva modelos e outputs fora do Git e recusa checkouts com alterações
+locais. Requisitos oficiais iniciais: Ubuntu, GPU NVIDIA com 16 GiB de VRAM,
+Docker Compose, NVIDIA Container Toolkit com CDI e cerca de 100 GiB livres.
+
+O bootstrap do repo `media-meme-pipeline` deve validar a tag antes de executar:
 
 ```bash
-bash ../scripts/healthcheck.sh
+bash infra/scripts/check-media-pipeline-contract.sh \
+  --expected-tag v1.0.0 --expected-contract 1
 ```
 
-## Aplicar configuração de sistema
+Veja [`infra/media-pipeline/RELEASING.md`](infra/media-pipeline/RELEASING.md)
+para os gates de segurança e release.
 
-Algumas mudanças ficam fora do repositório e exigem root:
+## Stack principal
 
-```bash
-sudo bash scripts/apply-system-config.sh
-```
+- Ollama · Open WebUI · ComfyUI · LTX Video · n8n · LiteLLM
+- Cloudflare Tunnel + Access (acesso remoto seguro, sem abrir portas)
+- GPU NVIDIA RTX 5060 Ti 16GB VRAM
 
-Esse script configura o bind do Ollama Snap, restringe a porta `11434` ao host/redes Docker, instala o ingress do Cloudflare Tunnel e reinicia os serviços afetados.
-
-## Acesso remoto
-
-O acesso remoto público permitido passa pelo Cloudflare Access:
-
-```text
-https://ai.example.com
-https://media.example.com
-https://flow.example.com
-```
-
-Ollama e LM Studio sao backends internos do Open WebUI e nao devem ter hostnames publicos.
-
-## Testar serviços no ar
-
-### 1. Healthcheck geral
-
-```bash
-cd /opt/homelab-ai
-bash scripts/healthcheck.sh
-```
-
-Resultado esperado: Open WebUI, LM Studio, ComfyUI, Docker Compose, Cloudflare e GPU com `[OK]`. O `n8n` pode aparecer como `[SKIP optional]`.
-
-### 2. Open WebUI local
-
-```bash
-curl -I http://localhost:3000
-```
-
-Abra no navegador:
-
-```text
-http://localhost:3000
-```
-
-Resultado esperado: tela inicial do Open WebUI.
-
-Observação operacional: o Open WebUI deve escutar apenas em `127.0.0.1:3000` para Cloudflare. Ele não deve escutar em `0.0.0.0:3000`.
-
-### 3. Open WebUI via Cloudflare
-
-Abra no navegador:
-
-```text
-https://ai.example.com
-```
-
-Resultado esperado: Cloudflare Access solicita login e depois abre o Open WebUI.
-
-### 4. LM Studio API
-
-```bash
-curl http://localhost:1234/v1/models
-```
-
-Resultado esperado: JSON com modelos carregados. Para chat no Open WebUI, carregue um modelo conversacional no LM Studio.
-
-Não teste LM Studio pelo domínio público. Ele não deve responder em `https://ai.example.com`; esse domínio é apenas para Open WebUI.
-
-### 5. Ollama API
-
-```bash
-curl http://localhost:11434/api/tags
-```
-
-Resultado esperado: JSON com modelos Ollama. O serviço escuta em `0.0.0.0:11434` para ser alcançável pelo Docker, mas o script de configuração instala uma regra de firewall persistente que permite acesso apenas por loopback e interfaces Docker.
-
-### 6. Conectividade Open WebUI -> backends
-
-```bash
-docker exec open-webui python -c "import urllib.request; print(urllib.request.urlopen('http://host.docker.internal:11434/api/tags', timeout=5).read().decode()[:500])"
-docker exec open-webui python -c "import urllib.request; print(urllib.request.urlopen('http://host.docker.internal:1234/v1/models', timeout=5).read().decode()[:500])"
-```
-
-Resultado esperado: os mesmos JSONs de modelos vistos no host.
-
-### 7. ComfyUI
-
-```bash
-curl -I http://localhost:8188
-```
-
-Abra no navegador:
-
-```text
-http://localhost:8188
-```
-
-Resultado esperado: interface do ComfyUI local. Acesso remoto separado:
-
-```text
-https://media.example.com
-```
-
-Esse hostname deve passar pelo Cloudflare Access para `user@example.com`.
-
-### 8. GPU NVIDIA
-
-```bash
-nvidia-smi
-```
-
-Resultado esperado: NVIDIA GPU listada, com uso de VRAM/processos quando LM Studio ou ComfyUI estiverem carregando modelos.
-
-### 9. Docker e Compose
-
-```bash
-docker ps
-docker compose version
-```
-
-Resultado esperado: container `open-webui` saudável e Compose v2 instalado.
-
-## Regra de ouro
-
-Nunca exponha diretamente na internet:
-
-- Ollama `11434`
-- LM Studio `1234`
-- n8n `5678`
-- LiteLLM `4000`
-- Docker socket
-
-Use Cloudflare Access para os hostnames publicados: Open WebUI e ComfyUI.
-
-## Segurança do repositório (repo é público)
+## Segurança do repositório (repo público)
 
 Este repositório é público no GitHub. Antes de qualquer commit:
 
 ```bash
-# Instalar o hook de pre-commit (uma vez):
-pip install pre-commit
-pre-commit install
+# Instalar o hook (uma vez):
+pip install pre-commit && pre-commit install
 
-# Rodar manualmente antes de commitar:
+# Rodar manualmente:
 pre-commit run --all-files
 ```
 
-O hook usa [gitleaks](https://github.com/gitleaks/gitleaks) para detectar segredos. Nunca commite `.env`, chaves de API, tokens ou IPs internos.
+O hook usa [gitleaks](https://github.com/gitleaks/gitleaks). Nunca commite `.env`,
+chaves de API, tokens ou IPs internos. Ver [`SECURITY.md`](SECURITY.md).

@@ -25,7 +25,7 @@ Conclusão executiva:
 
 Evidências:
 
-- `docker/docker-compose.yml` confia no header `Cf-Access-Authenticated-User-Email`
+- `infra/docker/docker-compose.yml` confia no header `Cf-Access-Authenticated-User-Email`
 - `README.md` afirma que o serviço não pode escutar em `0.0.0.0`
 - `SECURITY.md` define Cloudflare Access como controle obrigatório
 
@@ -86,7 +86,7 @@ Status:
 
 Evidências:
 
-- `scripts/apply-system-config.sh`
+- `infra/scripts/apply-system-config.sh`
 - `README.md`
 - `SECURITY.md`
 
@@ -101,7 +101,7 @@ O desenho expõe o backend ao bind amplo no host e depende de `iptables` para is
 Evidências:
 
 - `INVENTORY.yaml`
-- `docker/docker-compose.yml`
+- `infra/docker/docker-compose.yml`
 
 Risco:
 

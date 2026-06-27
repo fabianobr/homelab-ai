@@ -1,0 +1,23 @@
+# Contrato público consumido por media-meme-pipeline.
+contract_version: 1
+homelab_release: v1.0.0
+compose:
+  file: infra/docker/docker-compose.yml
+  profile: media-pipeline
+  services:
+    - ollama
+    - comfyui
+prepare_command: infra/scripts/prepare-media-pipeline.sh
+environment_example: .env.media-pipeline.example
+requirements:
+  os: ubuntu
+  gpu_vendor: nvidia
+  minimum_vram_gib: 16
+  minimum_free_disk_gib: 100
+security:
+  public_bind: false
+  accepts_secrets: false
+  performs_privileged_actions: false
+compatibility:
+  policy: exact-tag
+  supported_pipeline_repository: https://github.com/fabianobr/media-meme-pipeline

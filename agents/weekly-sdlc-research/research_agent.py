@@ -589,7 +589,7 @@ def send_telegram(new_items: list[dict], today: str, logger: logging.Logger) -> 
             lines.append(f"{i}. {name} ({itype})")
             lines.append(f"   SDLC {sdlc}/5 | HW {hw}/5")
             lines.append(f"   {desc}")
-        lines.append("\nVer backlog: docs/sdlc-agentico/backlog.md")
+        lines.append("\nVer backlog: research/sdlc-agentico/backlog.md")
         text = "\n".join(lines)
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"

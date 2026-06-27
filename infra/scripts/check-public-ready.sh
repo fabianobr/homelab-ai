@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT}"
 
 fail=0
@@ -16,7 +16,7 @@ check_absent() {
     --glob '!homelab.env' \
     --glob '!.public-denylist.local' \
     --glob '!PUBLIC_REPO_SECURITY_REVIEW.md' \
-    --glob '!scripts/check-public-ready.sh' \
+    --glob '!infra/scripts/check-public-ready.sh' \
     "${pattern}" .; then
     echo "[FAIL] ${label}"
     fail=1
@@ -62,11 +62,20 @@ else
   fail=1
 fi
 
-if docker compose -f docker/docker-compose.yml --profile optional config >/tmp/homelab-ai-compose-config.yml; then
+if docker compose --env-file .env.media-pipeline.example \
+  -f infra/docker/docker-compose.yml \
+  --profile optional --profile media-pipeline config >/tmp/homelab-ai-compose-config.yml; then
   echo "[OK] docker compose config renders"
 else
   echo "[FAIL] docker compose config failed"
   fail=1
+fi
+
+if rg -n 'image: .*:(latest|main|main-stable)(@|$)' infra/docker/docker-compose.yml; then
+  echo "[FAIL] mutable container image tags are present"
+  fail=1
+else
+  echo "[OK] mutable container image tags are absent"
 fi
 
 for port in 11434 3000 8188 5678; do

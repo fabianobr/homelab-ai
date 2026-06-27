@@ -2,7 +2,7 @@ ollama_url: "http://localhost:11434"
 ollama_model: "qwen2.5-coder:14b"
 ollama_fallback_model: "llama3.2:latest"
 searxng_url: "http://localhost:8080"
-backlog_path: "../../docs/sdlc-agentico/backlog.md"
+backlog_path: "../../research/sdlc-agentico/backlog.md"
 reports_dir: "./reports"
 log_file: "./research.log"
 
