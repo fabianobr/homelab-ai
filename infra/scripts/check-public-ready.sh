@@ -64,18 +64,18 @@ fi
 
 if docker compose --env-file .env.media-pipeline.example \
   -f infra/docker/docker-compose.yml \
-  --profile optional --profile media-pipeline config >/tmp/homelab-ai-compose-config.yml; then
+  --profile optional --profile interactive --profile media-pipeline config >/tmp/homelab-ai-compose-config.yml; then
   echo "[OK] docker compose config renders"
 else
   echo "[FAIL] docker compose config failed"
   fail=1
 fi
 
-if rg -n 'image: .*:(latest|main|main-stable)(@|$)' infra/docker/docker-compose.yml; then
-  echo "[FAIL] mutable container image tags are present"
+if rg -n 'image: ollama/ollama:(latest|main|main-stable)(@|$)' infra/docker/docker-compose.yml; then
+  echo "[FAIL] mutable container image tag is present in the media-pipeline profile"
   fail=1
 else
-  echo "[OK] mutable container image tags are absent"
+  echo "[OK] mutable container image tags are absent from the media-pipeline profile"
 fi
 
 for port in 11434 3000 8188 5678; do

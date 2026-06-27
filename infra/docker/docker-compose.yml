@@ -36,6 +36,8 @@ services:
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
     container_name: open-webui
+    profiles:
+      - interactive
     restart: unless-stopped
     depends_on:
       - ollama
@@ -151,7 +153,7 @@ services:
     volumes:
       - ./litellm-config.yaml:/app/config.yaml:ro
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     extra_hosts:
       - "host.docker.internal:host-gateway"

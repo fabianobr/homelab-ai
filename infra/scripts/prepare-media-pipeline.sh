@@ -10,7 +10,7 @@ if [[ ! -f "${LOCK_FILE}" ]]; then
 fi
 
 # Recuse conteúdo executável antes de carregar o lock file versionado.
-if grep -Ev '^(#|[[:space:]]*$|[A-Z0-9_]+=[A-Za-z0-9._:/@+-]+)$' "${LOCK_FILE}" | grep -q .; then
+if grep -Ev '^(#[[:print:]]*|[[:space:]]*$|[A-Z0-9_]+=[A-Za-z0-9._:/@+-]+)$' "${LOCK_FILE}" | grep -q .; then
   echo "[MISSING] invalid content in ${LOCK_FILE}" >&2
   exit 1
 fi
@@ -29,6 +29,7 @@ require_command() {
 clone_at_commit() {
   local name="$1" repository="$2" commit="$3" destination="$4"
   local current=""
+  local created=false
 
   if [[ -e "${destination}" && ! -d "${destination}/.git" ]]; then
     echo "[MISSING] ${destination} exists but is not a Git checkout" >&2
@@ -37,20 +38,23 @@ clone_at_commit() {
   if [[ ! -d "${destination}/.git" ]]; then
     mkdir -p "$(dirname "${destination}")"
     git clone --filter=blob:none --no-checkout "${repository}" "${destination}"
+    created=true
   fi
   current="$(git -C "${destination}" remote get-url origin)"
   if [[ "${current%.git}" != "${repository%.git}" ]]; then
     echo "[MISSING] ${name} origin differs from the public lock file: ${destination}" >&2
     exit 1
   fi
-  git -C "${destination}" diff --quiet --ignore-submodules -- || {
-    echo "[MISSING] ${name} has local changes; preserve or remove them manually" >&2
-    exit 1
-  }
-  git -C "${destination}" diff --cached --quiet --ignore-submodules -- || {
-    echo "[MISSING] ${name} has staged changes; preserve or remove them manually" >&2
-    exit 1
-  }
+  if [[ "${created}" == false ]]; then
+    git -C "${destination}" diff --quiet --ignore-submodules -- || {
+      echo "[MISSING] ${name} has local changes; preserve or remove them manually" >&2
+      exit 1
+    }
+    git -C "${destination}" diff --cached --quiet --ignore-submodules -- || {
+      echo "[MISSING] ${name} has staged changes; preserve or remove them manually" >&2
+      exit 1
+    }
+  fi
   if ! git -C "${destination}" cat-file -e "${commit}^{commit}" 2>/dev/null; then
     git -C "${destination}" fetch --depth 1 origin "${commit}"
   fi
