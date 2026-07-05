@@ -1,0 +1,10 @@
+# Falsos positivos do scan de worktree (gitleaks detect --no-git) em
+# infra/scripts/check-public-ready.sh. Todos são arquivos gitignored que
+# nunca entram no Git; o scan de histórico (modo git) não é afetado por
+# estes fingerprints e continua acusando se algum for commitado.
+#
+# Se um fingerprint mudar (linha/versão), regenerar com:
+#   gitleaks detect --no-git --source . --redact --report-format json
+agents/weekly-sdlc-research/.venv/lib/python3.14/site-packages/ddgs-9.14.4.dist-info/METADATA:generic-api-key:499
+homelab.env:generic-api-key:13
+infra/docker/.env:generic-api-key:2
