@@ -180,7 +180,8 @@ services:
           memory: 512m
 
   searxng:
-    image: searxng/searxng:latest
+    # Digest da imagem validada em 2026-07-05; atualizar deliberadamente, não via :latest
+    image: searxng/searxng:latest@sha256:7e2b1ef32b8510c4b2e595a056164df747a1c053079463d3cc13d7c08fdf2d9d
     container_name: searxng
     profiles:
       - optional
