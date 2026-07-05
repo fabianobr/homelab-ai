@@ -21,6 +21,23 @@ Sempre:
 - Fazer backup antes de mudanças grandes
 - Usar usuários sem privilégios quando possível
 
+## Divulgação de vulnerabilidades (MUST)
+
+Este repositório é público. Vulnerabilidades encontradas na infraestrutura, nos
+scripts ou nos produtos deste repo:
+
+- **MUST**: ser reportadas em privado via
+  [GitHub Private Vulnerability Reporting](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability)
+  (aba *Security* → *Report a vulnerability*).
+- **MUST NOT**: ser descritas em issues públicas, PRs, mensagens de commit,
+  logs commitados ou documentação antes de a correção estar publicada.
+- **MUST**: detalhes de exploração (payloads, caminhos internos, versões
+  vulneráveis em uso) permanecerem fora do Git mesmo após a correção; a
+  mensagem de commit da correção descreve o efeito, não a exploração.
+- **MUST**: correções de vulnerabilidade serem verificadas com
+  `pre-commit run --all-files` e `infra/scripts/check-public-ready.sh` antes
+  do push, como qualquer commit.
+
 ## Integração pública do media pipeline
 
 - O bootstrap não recebe nem persiste segredos. `HF_TOKEN` pertence somente ao
