@@ -1,0 +1,12 @@
+[Unit]
+Description=Dispara o weekly-sdlc-research toda segunda 09:00 (com catch-up)
+
+[Timer]
+OnCalendar=Mon 09:00
+# Se a máquina estava desligada no horário, roda assim que ligar —
+# motivo da migração do cron (runs de 22/06 e 29/06 perdidos).
+Persistent=true
+RandomizedDelaySec=2min
+
+[Install]
+WantedBy=timers.target
