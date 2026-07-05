@@ -16,6 +16,7 @@ from pathlib import Path
 
 import requests
 import yaml
+from ddgs import DDGS
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -82,71 +83,18 @@ def search_searxng(query: str, base_url: str, logger: logging.Logger) -> list[di
 
 
 def search_duckduckgo(query: str, logger: logging.Logger) -> list[dict]:
-    """Search via DuckDuckGo Instant Answer API (no key required)."""
-    url = "https://api.duckduckgo.com/"
-    params = {"q": query, "format": "json", "no_html": "1", "skip_disambig": "1"}
-    headers = {"User-Agent": "homelab-research-agent/1.0"}
+    """Search via duckduckgo-search library."""
     try:
-        resp = requests.get(url, params=params, headers=headers, timeout=15)
-        resp.raise_for_status()
-        data = resp.json()
-        results = []
-
-        # Abstract result
-        if data.get("AbstractText") and data.get("AbstractURL"):
-            results.append(
-                {
-                    "title": data.get("Heading", query),
-                    "url": data.get("AbstractURL", ""),
-                    "snippet": data.get("AbstractText", ""),
-                }
-            )
-
-        # Related topics
-        for topic in data.get("RelatedTopics", [])[:6]:
-            if isinstance(topic, dict) and topic.get("Text"):
-                results.append(
-                    {
-                        "title": topic.get("Text", "")[:80],
-                        "url": topic.get("FirstURL", ""),
-                        "snippet": topic.get("Text", ""),
-                    }
-                )
+        with DDGS() as ddgs:
+            hits = list(ddgs.text(query, max_results=8, timelimit="y"))
+        results = [
+            {"title": h.get("title", ""), "url": h.get("href", ""), "snippet": h.get("body", "")}
+            for h in hits
+        ]
+        logger.debug("DDGS returned %d results for '%s'", len(results), query)
         return results
     except Exception as exc:
         logger.warning("DuckDuckGo search failed for '%s': %s", query, exc)
-        return []
-
-
-def search_duckduckgo_html(query: str, logger: logging.Logger) -> list[dict]:
-    """Fallback: scrape DuckDuckGo HTML lite endpoint."""
-    url = "https://html.duckduckgo.com/html/"
-    params = {"q": query}
-    headers = {
-        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-    try:
-        resp = requests.post(url, data=params, headers=headers, timeout=20)
-        resp.raise_for_status()
-        html = resp.text
-
-        # Simple regex extraction of result snippets (no external libs)
-        results = []
-        # Match result blocks: title in <a class="result__a"> and snippet in .result__snippet
-        titles = re.findall(r'class="result__a"[^>]*>(.*?)</a>', html)
-        urls_raw = re.findall(r'class="result__url"[^>]*>(.*?)</span>', html)
-        snippets = re.findall(r'class="result__snippet"[^>]*>(.*?)</a>', html, re.DOTALL)
-
-        for i in range(min(len(titles), len(snippets), 8)):
-            title = re.sub(r"<[^>]+>", "", titles[i]).strip()
-            snippet = re.sub(r"<[^>]+>", "", snippets[i]).strip()
-            url_hint = urls_raw[i].strip() if i < len(urls_raw) else ""
-            if title and snippet:
-                results.append({"title": title, "url": url_hint, "snippet": snippet})
-        return results
-    except Exception as exc:
-        logger.warning("DuckDuckGo HTML search failed for '%s': %s", query, exc)
         return []
 
 
@@ -168,17 +116,9 @@ def run_searches(
             if results:
                 logger.debug("SearXNG returned %d results for '%s'", len(results), query)
 
-        # Fall back to DuckDuckGo Instant Answer
+        # Fall back to DuckDuckGo
         if not results:
             results = search_duckduckgo(query, logger)
-            if results:
-                logger.debug("DDG IA returned %d results for '%s'", len(results), query)
-
-        # Fall back to DDG HTML scrape
-        if not results:
-            time.sleep(2)  # be polite
-            results = search_duckduckgo_html(query, logger)
-            logger.debug("DDG HTML returned %d results for '%s'", len(results), query)
 
         for r in results:
             url = r.get("url", "")
