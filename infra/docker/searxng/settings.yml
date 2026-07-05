@@ -1,0 +1,12 @@
+# Config mínima do SearXNG para uso como backend de busca do
+# agents/weekly-sdlc-research (consome /search?format=json).
+# secret_key vem de SEARXNG_SECRET no .env — nunca commitar aqui.
+use_default_settings: true
+
+server:
+  limiter: false # só escuta em 127.0.0.1; limiter bloquearia chamadas de API locais
+
+search:
+  formats:
+    - html
+    - json
