@@ -91,7 +91,7 @@ jobs:
           username: ${{ secrets.HOMELAB_USER }}
           key: ${{ secrets.HOMELAB_SSH_KEY }}
           script: |
-            cd /home/fabiano/homelab-ai
+            cd ~/homelab-ai
             git pull origin main
             docker compose up -d --build --remove-orphans
             docker compose ps
@@ -224,7 +224,7 @@ Se o LLM detectar anomalia critica, o n8n pode executar rollback:
 
 ```bash
 # Script de rollback executado via Execute Command node
-cd /home/fabiano/homelab-ai && \
+cd ~/homelab-ai && \
 git log --oneline -5 && \
 PREV_COMMIT=$(git rev-parse HEAD~1) && \
 echo "Rollback para: $PREV_COMMIT" && \

@@ -9,7 +9,7 @@ Phase 1 completed in 13s
   [PASS] Phase 1 response time < 120s
 
 --- Phase 2: Spec to Code (from cached output) ---
-Reading Phase 2 from cached output: /home/fabiano/homelab-ai/agents/sdlc-poc/tests/output-02-code.json
+Reading Phase 2 from cached output: ~/homelab-ai/agents/sdlc-poc/tests/output-02-code.json
 Phase 2 (cached) — original run time: 252s
   Files generated: 4
     - models.py (387 chars)
@@ -17,11 +17,11 @@ Phase 2 (cached) — original run time: 252s
     - main.py (116 chars)
     - test_main.py (2391 chars)
 
---- Extracting generated files to /home/fabiano/homelab-ai/agents/sdlc-poc/tests/generated-code ---
-  Saved: /home/fabiano/homelab-ai/agents/sdlc-poc/tests/generated-code/models.py
-  Saved: /home/fabiano/homelab-ai/agents/sdlc-poc/tests/generated-code/routes.py
-  Saved: /home/fabiano/homelab-ai/agents/sdlc-poc/tests/generated-code/main.py
-  Saved: /home/fabiano/homelab-ai/agents/sdlc-poc/tests/generated-code/test_main.py
+--- Extracting generated files to ~/homelab-ai/agents/sdlc-poc/tests/generated-code ---
+  Saved: ~/homelab-ai/agents/sdlc-poc/tests/generated-code/models.py
+  Saved: ~/homelab-ai/agents/sdlc-poc/tests/generated-code/routes.py
+  Saved: ~/homelab-ai/agents/sdlc-poc/tests/generated-code/main.py
+  Saved: ~/homelab-ai/agents/sdlc-poc/tests/generated-code/test_main.py
   [PASS] Phase 2 generates >= 3 files
   [PASS] Phase 2 response time < 300s
 

@@ -24,7 +24,7 @@ para o hardware do homelab e atualiza o backlog em `research/sdlc-agentico/backl
 ## Como rodar manualmente
 
 ```bash
-cd /home/fabiano/homelab-ai
+cd ~/homelab-ai
 ./agents/weekly-sdlc-research/run.sh
 ```
 
@@ -59,7 +59,7 @@ Edite `agents/weekly-sdlc-research/config.yaml` para:
 Executa toda segunda-feira às 9h:
 
 ```cron
-0 9 * * 1 cd /home/fabiano/homelab-ai && ./agents/weekly-sdlc-research/run.sh >> /tmp/weekly-research.log 2>&1
+0 9 * * 1 cd ~/homelab-ai && ./agents/weekly-sdlc-research/run.sh >> /tmp/weekly-research.log 2>&1
 ```
 
 Para verificar o cron instalado:

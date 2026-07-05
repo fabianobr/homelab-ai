@@ -39,7 +39,7 @@ This should display your configuration and confirm that the Ollama provider is a
 If `opencode` command is not found, use the full path:
 
 ```bash
-/home/fabiano/.opencode/bin/opencode debug config
+~/.opencode/bin/opencode debug config
 ```
 
 Or source bashrc to update your PATH:
@@ -122,4 +122,4 @@ opencode run \
 - **Config not loading:** Ensure the file is at `~/.config/opencode/opencode.jsonc` (case-sensitive, JSONC format)
 - **Ollama not responding:** Verify Ollama is running (`curl http://localhost:11434/api/tags`)
 - **Model not found:** Pull the model with `ollama pull qwen2.5-coder:32b`
-- **Command not in PATH:** Use the full path `/home/fabiano/.opencode/bin/opencode` or run `source ~/.bashrc`
+- **Command not in PATH:** Use the full path `~/.opencode/bin/opencode` or run `source ~/.bashrc`
