@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly cost-benefit agent (custo-beneficio de ambientes de dev com LLMs)
+# Dá tempo do Docker subir Ollama/SearXNG quando o timer dispara logo após o boot
+# (Persistent=true executa runs perdidos na primeira oportunidade).
+
+[Service]
+Type=oneshot
+ExecStartPre=/bin/sleep 60
+ExecStart=%h/homelab-ai/agents/weekly-cost-benefit/run-with-notify.sh
+WorkingDirectory=%h/homelab-ai/agents/weekly-cost-benefit
+TimeoutStartSec=30min

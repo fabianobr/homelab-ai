@@ -1,0 +1,57 @@
+ollama_url: "http://localhost:11434"
+ollama_model: "qwen2.5-coder:14b"
+ollama_fallback_model: "llama3.2:latest"
+searxng_url: "http://localhost:8080"
+ledger_path: "../../research/sdlc-agentico/cost-benefit.md"
+reports_dir: "./reports"
+log_file: "./cost-benefit.log"
+
+search_queries:
+  - "vibe coding setup cost 2026 hardware requirements"
+  - "Claude Code subscription vs local LLM cost comparison"
+  - "agentic coding local GPU vs cloud API cost 2026"
+  - "AI coding assistant pricing comparison Cursor Copilot Claude 2026"
+  - "OpenAI Codex Google Antigravity pricing developer 2026"
+  - "self-hosted LLM coding total cost of ownership"
+  - "is local LLM coding worth it vs subscription 2026"
+  - "AI software development environment setup cost benchmark"
+
+hardware_context: "RTX 5060 Ti 16GB VRAM, 32GB RAM. Roda modelos até 14B Q4 confortavelmente, ~24B Q4_K_M apertado (13GB). 1 GPU = sem paralelismo de inferência."
+
+# Tabela de preços de referência usada como base da análise.
+# ATUALIZAR periodicamente — preços mudam; a análise cita esta tabela como fonte.
+pricing_reference:
+  reference_date: "2026-07"
+  energy_cost_kwh_brl: 0.95
+  usd_brl: 5.5
+  local_hardware:
+    - name: "RTX 5060 Ti 16GB (setup atual)"
+      capex_usd: 430
+      opex_month_usd: 15   # energia ~200W em uso intenso
+    - name: "RTX 4090 24GB usada"
+      capex_usd: 1500
+      opex_month_usd: 25
+    - name: "Mac Studio M4 Max 64GB"
+      capex_usd: 2500
+      opex_month_usd: 8
+  paid_licenses:
+    - name: "Claude Pro (Anthropic)"
+      opex_month_usd: 20
+    - name: "Claude Max 5x (Anthropic)"
+      opex_month_usd: 100
+    - name: "Claude Max 20x (Anthropic)"
+      opex_month_usd: 200
+    - name: "ChatGPT Plus / Codex (OpenAI)"
+      opex_month_usd: 20
+    - name: "ChatGPT Pro (OpenAI)"
+      opex_month_usd: 200
+    - name: "GitHub Copilot Pro"
+      opex_month_usd: 10
+    - name: "GitHub Copilot Pro+"
+      opex_month_usd: 39
+    - name: "Cursor Pro"
+      opex_month_usd: 20
+    - name: "Google AI Pro (Gemini / Antigravity)"
+      opex_month_usd: 20
+
+known_evaluated: []
