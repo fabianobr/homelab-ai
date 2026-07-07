@@ -1,0 +1,11 @@
+[Unit]
+Description=Dispara o weekly-cost-benefit toda segunda 10:00 (com catch-up)
+
+[Timer]
+# 10:00 para não concorrer com o weekly-sdlc-research (09:00) pela GPU/Ollama.
+OnCalendar=Mon 10:00
+Persistent=true
+RandomizedDelaySec=2min
+
+[Install]
+WantedBy=timers.target
