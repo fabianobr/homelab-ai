@@ -9,6 +9,7 @@ Mirrors the pipeline of agents/weekly-sdlc-research, with a different output.
 
 import json
 import logging
+import math
 import os
 import re
 import sys
@@ -152,6 +153,18 @@ def read_ledger(ledger_path: Path, logger: logging.Logger) -> str:
         return ""
 
 
+def _is_noise_capture(name: str) -> bool:
+    """True for captures that are markdown structure, not setup names
+    (field labels like 'Tipo:', table separators like '---')."""
+    if not name:
+        return True
+    if name.endswith(":"):
+        return True
+    if re.fullmatch(r"[-\s]+", name):
+        return True
+    return False
+
+
 def extract_known_items(ledger_text: str, known_evaluated: list[str]) -> set[str]:
     """Extract setup names already in the ledger (lowercased)."""
     known: set[str] = set()
@@ -165,7 +178,10 @@ def extract_known_items(ledger_text: str, known_evaluated: list[str]) -> set[str
     ]
     for pat in patterns:
         for match in re.finditer(pat, ledger_text, re.MULTILINE):
-            known.add(match.group(1).strip().lower())
+            name = match.group(1).strip()
+            if _is_noise_capture(name):
+                continue
+            known.add(name.lower())
     return known
 
 
@@ -291,12 +307,13 @@ For each NEW and relevant setup you find, output a JSON array. Each element must
   "opex_month_usd": <integer, monthly cost in USD (licenses, API, energy)>,
   "velocity_score": <integer 1-5, speed of software output>,
   "quality_score": <integer 1-5, quality of software output>,
-  "breakeven_months": <integer, months until the local option pays off vs the
-    cheapest comparable paid option; 0 if the paid option is always cheaper>,
   "verdict": "local | paid | hybrid",
   "rationale": "One or two sentences: why this verdict, cost vs benefit.",
   "source_url": "URL from the search results if available, else empty string"
 }}
+
+Do NOT compute breakeven_months yourself — it is derived deterministically
+from capex_usd/opex_month_usd after your response, so omit it.
 
 velocity_score: 5 = ships features very fast, 1 = slow/manual.
 quality_score: 5 = production-grade output, 1 = prototype-only.
@@ -371,6 +388,48 @@ def analyze_results(
 
 
 # ---------------------------------------------------------------------------
+# Deterministic breakeven calculation
+# ---------------------------------------------------------------------------
+def compute_breakeven_months(item: dict, pricing: dict) -> int:
+    """Months until capex_usd pays off vs the cheapest paid license, given the
+    monthly savings (cheapest_paid - opex_month_usd). Returns -1 when the local
+    option never pays off (no monthly savings, or no capex to recoup against a
+    pricier opex).
+
+    Computed in Python rather than trusted from the LLM, since arithmetic like
+    this is a common failure mode for smaller local models.
+    """
+    capex = item.get("capex_usd") or 0
+    opex_local = item.get("opex_month_usd") or 0
+    licenses = pricing.get("paid_licenses", [])
+    if not licenses:
+        return -1
+    cheapest_paid = min(lic["opex_month_usd"] for lic in licenses)
+
+    if capex <= 0:
+        return 0 if opex_local <= cheapest_paid else -1
+
+    monthly_savings = cheapest_paid - opex_local
+    if monthly_savings <= 0:
+        return -1
+    return math.ceil(capex / monthly_savings)
+
+
+def _format_breakeven(value) -> str:
+    """'nunca' for -1 (never pays off), '<N>m' otherwise."""
+    try:
+        v = int(value)
+    except (TypeError, ValueError):
+        return "-"
+    return "nunca" if v < 0 else f"{v}m"
+
+
+def _escape_md_cell(value) -> str:
+    """Escape pipe characters so free-text values can't break a Markdown table row."""
+    return str(value).replace("|", "\\|")
+
+
+# ---------------------------------------------------------------------------
 # Deduplication against ledger
 # ---------------------------------------------------------------------------
 def filter_new_items(
@@ -398,7 +457,7 @@ def format_item_markdown(item: dict) -> str:
     opex = item.get("opex_month_usd", "-")
     velocity = item.get("velocity_score", "-")
     quality = item.get("quality_score", "-")
-    breakeven = item.get("breakeven_months", "-")
+    breakeven = _format_breakeven(item.get("breakeven_months", "-"))
     verdict = item.get("verdict", "-")
     rationale = item.get("rationale", "")
     url = item.get("source_url", "")
@@ -409,7 +468,7 @@ def format_item_markdown(item: dict) -> str:
         f"- **CAPEX:** US$ {capex}",
         f"- **OPEX:** US$ {opex}/mes",
         f"- **Velocidade:** {velocity}/5 | **Qualidade:** {quality}/5",
-        f"- **Breakeven local vs pago:** {breakeven} meses",
+        f"- **Breakeven local vs pago:** {breakeven}",
         f"- **Veredito:** {verdict}",
         f"- **Justificativa:** {rationale}",
     ]
@@ -426,14 +485,14 @@ def format_summary_table(items: list[dict]) -> list[str]:
     ]
     for item in items:
         lines.append(
-            f"| {item.get('name', '?')} "
-            f"| {item.get('setup_type', '-')} "
+            f"| {_escape_md_cell(item.get('name', '?'))} "
+            f"| {_escape_md_cell(item.get('setup_type', '-'))} "
             f"| {item.get('capex_usd', '-')} "
             f"| {item.get('opex_month_usd', '-')} "
             f"| {item.get('velocity_score', '-')}/5 "
             f"| {item.get('quality_score', '-')}/5 "
-            f"| {item.get('breakeven_months', '-')}m "
-            f"| {item.get('verdict', '-')} |"
+            f"| {_format_breakeven(item.get('breakeven_months', '-'))} "
+            f"| {_escape_md_cell(item.get('verdict', '-'))} |"
         )
     return lines
 
@@ -604,10 +663,10 @@ def send_telegram(new_items: list[dict], today: str, logger: logging.Logger) -> 
             capex = item.get("capex_usd", "-")
             opex = item.get("opex_month_usd", "-")
             verdict = item.get("verdict", "-")
-            breakeven = item.get("breakeven_months", "-")
+            breakeven = _format_breakeven(item.get("breakeven_months", "-"))
             lines.append(f"{i}. {name} ({stype})")
             lines.append(f"   CAPEX US$ {capex} | OPEX US$ {opex}/mes")
-            lines.append(f"   Breakeven {breakeven}m | Veredito: {verdict}")
+            lines.append(f"   Breakeven {breakeven} | Veredito: {verdict}")
         lines.append("\nVer ledger: research/sdlc-agentico/cost-benefit.md")
         text = "\n".join(lines)
 
@@ -671,6 +730,11 @@ def main() -> None:
 
     # 6. Filter duplicates
     new_items = filter_new_items(raw_items, known_items, logger)
+
+    # 6b. Recompute breakeven deterministically (do not trust LLM arithmetic)
+    pricing_cfg = cfg.get("pricing_reference", {})
+    for item in new_items:
+        item["breakeven_months"] = compute_breakeven_months(item, pricing_cfg)
 
     # 7. Write report
     report_path = write_report(
