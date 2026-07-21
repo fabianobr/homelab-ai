@@ -1,0 +1,389 @@
+{
+  "id": "youtube-etl-wf01",
+  "name": "YouTube ETL — Mercado Automotivo",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "weeksInterval": 1,
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 8,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "d4e5f6a7-0001-0000-0000-000000000001",
+      "name": "Cron Semanal",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Canais monitorados — lista pública, edite aqui para adicionar/remover canais.\n// Para descobrir o channelId (formato UC...): abra o canal no YouTube → aba\n// \"Sobre\" → \"Compartilhar canal\" → \"Copiar ID do canal\".\nconst CANAIS = [\n  { channelId: 'UC_SUBSTITUA_PELO_ID_REAL_1', channelName: 'Brian Pasch' },\n  { channelId: 'UC_SUBSTITUA_PELO_ID_REAL_2', channelName: 'Autoline Network' },\n];\n\n// Janela de busca: 7 dias (semanal). Para bi-semanal, use 14 e ajuste o trigger.\nconst DIAS_JANELA = 7;\n\n// Fail-fast: sem credenciais não há o que executar.\nfor (const nome of ['YOUTUBE_API_KEY', 'RAPIDAPI_KEY', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID']) {\n  if (!$env[nome]) {\n    throw new Error('Variável de ambiente ausente no container n8n: ' + nome + ' (ver agents/youtube-etl/README.md)');\n  }\n}\n\nconst publishedAfter = new Date(Date.now() - DIAS_JANELA * 24 * 60 * 60 * 1000).toISOString();\nreturn CANAIS.map((c) => ({ json: { ...c, publishedAfter } }));"
+      },
+      "id": "d4e5f6a7-0001-0000-0000-000000000002",
+      "name": "Config Canais",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/youtube/v3/search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "part",
+              "value": "snippet"
+            },
+            {
+              "name": "channelId",
+              "value": "={{ $json.channelId }}"
+            },
+            {
+              "name": "order",
+              "value": "date"
+            },
+            {
+              "name": "type",
+              "value": "video"
+            },
+            {
+              "name": "publishedAfter",
+              "value": "={{ $json.publishedAfter }}"
+            },
+            {
+              "name": "maxResults",
+              "value": "5"
+            },
+            {
+              "name": "key",
+              "value": "={{ $env.YOUTUBE_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "d4e5f6a7-0001-0000-0000-000000000003",
+      "name": "Buscar Videos (YouTube)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        640,
+        300
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Achata as respostas da search.list em 1 item por vídeo.\n// Canal com erro na API não derruba o run: vira entrada em `falhas`.\nconst videos = [];\nconst falhas = [];\nconst entradas = $input.all();\n\nfor (let i = 0; i < entradas.length; i++) {\n  const r = entradas[i].json;\n  const canal = $('Config Canais').itemMatching(i).json.channelName;\n  if (r.error) {\n    const detalhe = (r.error.message || JSON.stringify(r.error)).slice(0, 200);\n    falhas.push(canal + ': erro na YouTube API — ' + detalhe);\n    continue;\n  }\n  for (const v of r.items || []) {\n    const videoId = v.id && v.id.videoId;\n    if (!videoId) continue;\n    videos.push({\n      videoId,\n      titulo: (v.snippet && v.snippet.title) || '(sem título)',\n      canal: (v.snippet && v.snippet.channelTitle) || canal,\n      publicadoEm: (v.snippet && v.snippet.publishedAt) || '',\n    });\n  }\n}\n\nif (videos.length === 0) {\n  // Sentinela: mantém o fluxo vivo até o relatório/notificação de semana vazia.\n  return [{ json: { semVideos: true, falhas } }];\n}\n\nvideos[0].falhas = falhas;\nreturn videos.map((v) => ({ json: v }));"
+      },
+      "id": "d4e5f6a7-0001-0000-0000-000000000004",
+      "name": "Extrair VideoIds",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://youtube-transcript3.p.rapidapi.com/api/transcript",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "videoId",
+              "value": "={{ $json.videoId }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-rapidapi-key",
+              "value": "={{ $env.RAPIDAPI_KEY }}"
+            },
+            {
+              "name": "x-rapidapi-host",
+              "value": "youtube-transcript3.p.rapidapi.com"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1000
+            }
+          },
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "d4e5f6a7-0001-0000-0000-000000000005",
+      "name": "Obter Transcricao (RapidAPI)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1040,
+        300
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const SYSTEM_PROMPT = [\n  'Você é um Engenheiro de Dados e Estrategista de Mercado Automotivo.',\n  'Sua tarefa é analisar a transcrição de um vídeo e extrair métricas e tendências críticas, descartando todo o ruído, opiniões não fundamentadas e introduções.',\n  '',\n  'Regras de Extração:',\n  '1. Extraia apenas dados factuais relacionados a: Demanda global/regional, Incentivos/Subsídios, Números de vendas, e Métricas de Performance (CVR, CTR, CPA, margens).',\n  '2. Se um dado ou métrica específica não for mencionado no texto fornecido, você DEVE retornar null. Não infira, não invente.',\n  '3. Mantenha os resumos extremamente concisos (máximo de 2 frases por campo).',\n  '',\n  'Regra de Formatação (CRÍTICA):',\n  'O seu output DEVE ser ÚNICA e EXCLUSIVAMENTE um objeto JSON válido. Não inclua nenhuma formatação markdown (como ```json), explicações, saudações ou texto antes ou depois do JSON.',\n  '',\n  'Estrutura obrigatória do JSON:',\n  '{',\n  '  \"assunto_principal\": \"string\",',\n  '  \"demanda_estoque\": \"string ou null\",',\n  '  \"incentivos_subsidios\": \"string ou null\",',\n  '  \"metricas_performance\": {',\n  '    \"cvr_taxa_conversao\": \"string ou null\",',\n  '    \"ctr_cliques\": \"string ou null\",',\n  '    \"vendas_volume\": \"string ou null\"',\n  '  },',\n  '  \"insight_estrategico\": \"string (Apenas se houver uma oportunidade clara de produto ou negócio baseada nos dados)\"',\n  '}',\n].join('\\n');\n\n// Margem confortável para OLLAMA_CONTEXT_LENGTH=65536 (~6k tokens de entrada).\nconst MAX_CHARS = 24000;\n\n// Tolerante aos formatos de resposta mais comuns das APIs de transcript do\n// RapidAPI: { transcript: [...] }, { data: [...] }, { text: '...' } etc.\nfunction extrairTranscricao(j) {\n  if (!j || j.error) return '';\n  const cand = j.transcript ?? j.data ?? j.text ?? j.content ?? null;\n  if (typeof cand === 'string') return cand.trim();\n  if (Array.isArray(cand)) {\n    return cand\n      .map((t) => (typeof t === 'string' ? t : (t && (t.text || t.snippet)) || ''))\n      .join(' ')\n      .trim();\n  }\n  return '';\n}\n\nconst entradas = $input.all();\nconst saida = [];\nconst semTranscricao = [];\nlet falhas = [];\nlet semVideos = false;\n\nfor (let i = 0; i < entradas.length; i++) {\n  const origem = $('Extrair VideoIds').itemMatching(i).json;\n  if (origem.falhas) falhas = origem.falhas;\n  if (origem.semVideos) {\n    semVideos = true;\n    continue;\n  }\n\n  const transcricao = extrairTranscricao(entradas[i].json);\n  if (!transcricao) {\n    semTranscricao.push(origem.canal + ': \"' + origem.titulo + '\" (https://youtu.be/' + origem.videoId + ')');\n    continue;\n  }\n\n  saida.push({\n    json: {\n      videoId: origem.videoId,\n      titulo: origem.titulo,\n      canal: origem.canal,\n      publicadoEm: origem.publicadoEm,\n      ollamaBody: JSON.stringify({\n        model: 'llama3.2',\n        stream: false,\n        format: 'json', // força a API do Ollama a emitir JSON válido\n        options: { temperature: 0.2 },\n        messages: [\n          { role: 'system', content: SYSTEM_PROMPT },\n          { role: 'user', content: 'TRANSCRIÇÃO DO VÍDEO \"' + origem.titulo + '\" (canal ' + origem.canal + '):\\n\\n' + transcricao.slice(0, MAX_CHARS) },\n        ],\n      }),\n    },\n  });\n}\n\nif (saida.length === 0) {\n  // Semana sem nada analisável: chamada mínima ao Ollama só para manter o fluxo\n  // linear vivo até o relatório/notificação (custo local desprezível).\n  saida.push({\n    json: {\n      pularAnalise: true,\n      ollamaBody: JSON.stringify({\n        model: 'llama3.2',\n        stream: false,\n        format: 'json',\n        options: { num_predict: 5 },\n        messages: [{ role: 'user', content: 'Responda apenas {}' }],\n      }),\n    },\n  });\n}\n\nsaida[0].json.semTranscricao = semTranscricao;\nsaida[0].json.falhas = falhas;\nsaida[0].json.semVideos = semVideos;\nreturn saida;"
+      },
+      "id": "d4e5f6a7-0001-0000-0000-000000000006",
+      "name": "Montar Prompt Ollama",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ollama:11434/api/chat",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.ollamaBody }}",
+        "options": {
+          "timeout": 1200000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 0
+            }
+          },
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "d4e5f6a7-0001-0000-0000-000000000007",
+      "name": "Analisar com Llama3.2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        300
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const CAMPOS_TEXTO = ['demanda_estoque', 'incentivos_subsidios'];\nconst CAMPOS_METRICAS = ['cvr_taxa_conversao', 'ctr_cliques', 'vendas_volume'];\n\nfunction validarSchema(obj) {\n  const erros = [];\n  if (typeof obj.assunto_principal !== 'string' || !obj.assunto_principal.trim()) {\n    erros.push('assunto_principal ausente ou vazio');\n  }\n  for (const campo of CAMPOS_TEXTO) {\n    if (obj[campo] !== null && obj[campo] !== undefined && typeof obj[campo] !== 'string') {\n      erros.push(campo + ' deve ser string ou null');\n    }\n  }\n  const mp = obj.metricas_performance;\n  if (!mp || typeof mp !== 'object' || Array.isArray(mp)) {\n    erros.push('metricas_performance ausente ou inválido');\n  } else {\n    for (const campo of CAMPOS_METRICAS) {\n      if (mp[campo] !== null && mp[campo] !== undefined && typeof mp[campo] !== 'string') {\n        erros.push('metricas_performance.' + campo + ' deve ser string ou null');\n      }\n    }\n  }\n  if (obj.insight_estrategico !== null && obj.insight_estrategico !== undefined && typeof obj.insight_estrategico !== 'string') {\n    erros.push('insight_estrategico deve ser string');\n  }\n  return erros;\n}\n\nconst entradas = $input.all();\nconst saida = [];\n\nfor (let i = 0; i < entradas.length; i++) {\n  const origem = $('Montar Prompt Ollama').itemMatching(i).json;\n  const meta = {\n    videoId: origem.videoId,\n    titulo: origem.titulo,\n    canal: origem.canal,\n    publicadoEm: origem.publicadoEm,\n    pularAnalise: origem.pularAnalise || false,\n    semTranscricao: origem.semTranscricao,\n    falhas: origem.falhas,\n    semVideos: origem.semVideos,\n  };\n\n  if (meta.pularAnalise) {\n    saida.push({ json: { ...meta, ok: false } });\n    continue;\n  }\n\n  const bruto = entradas[i].json.message && entradas[i].json.message.content;\n  if (!bruto) {\n    const detalhe = JSON.stringify(entradas[i].json).slice(0, 200);\n    saida.push({ json: { ...meta, ok: false, erro: 'Ollama não retornou conteúdo (' + detalhe + ')' } });\n    continue;\n  }\n\n  // Mesmo com format:json, remove cercas markdown defensivamente.\n  const limpo = bruto.replace(/```(?:json)?/g, '').trim();\n  let analise;\n  try {\n    analise = JSON.parse(limpo);\n  } catch (e) {\n    saida.push({ json: { ...meta, ok: false, erro: 'JSON inválido: ' + e.message, bruto: limpo.slice(0, 500) } });\n    continue;\n  }\n\n  const errosSchema = validarSchema(analise);\n  if (errosSchema.length > 0) {\n    saida.push({ json: { ...meta, ok: false, erro: 'Schema inválido: ' + errosSchema.join('; '), bruto: limpo.slice(0, 500) } });\n    continue;\n  }\n\n  saida.push({ json: { ...meta, ok: true, analise } });\n}\n\nreturn saida;"
+      },
+      "id": "d4e5f6a7-0001-0000-0000-000000000008",
+      "name": "Validar JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1640,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const dataStr = new Date().toISOString().slice(0, 10);\nconst itens = $input.all().map((i) => i.json);\nconst meta = itens[0];\nconst analises = itens.filter((i) => i.ok);\nconst invalidos = itens.filter((i) => !i.ok && !i.pularAnalise);\nconst semTranscricao = meta.semTranscricao || [];\nconst falhas = meta.falhas || [];\n\nconst linhas = [];\nlinhas.push('# YouTube ETL — Mercado Automotivo — ' + dataStr);\nlinhas.push('');\nlinhas.push('Análise semanal de transcrições via Ollama (llama3.2).');\nlinhas.push('');\n\nif (analises.length === 0) {\n  linhas.push(meta.semVideos\n    ? 'Nenhum vídeo novo encontrado nos canais monitorados no período.'\n    : 'Nenhuma análise válida gerada no período (ver rodapé de execução).');\n  linhas.push('');\n}\n\nconst porCanal = {};\nfor (const a of analises) {\n  (porCanal[a.canal] = porCanal[a.canal] || []).push(a);\n}\nfor (const canal of Object.keys(porCanal).sort()) {\n  linhas.push('## ' + canal);\n  linhas.push('');\n  for (const a of porCanal[canal]) {\n    const m = a.analise.metricas_performance || {};\n    linhas.push('### ' + a.titulo);\n    linhas.push('');\n    linhas.push('- **Vídeo:** https://youtu.be/' + a.videoId + (a.publicadoEm ? ' (' + a.publicadoEm.slice(0, 10) + ')' : ''));\n    linhas.push('- **Assunto principal:** ' + a.analise.assunto_principal);\n    linhas.push('- **Demanda/estoque:** ' + (a.analise.demanda_estoque ?? '—'));\n    linhas.push('- **Incentivos/subsídios:** ' + (a.analise.incentivos_subsidios ?? '—'));\n    linhas.push('- **CVR (taxa de conversão):** ' + (m.cvr_taxa_conversao ?? '—'));\n    linhas.push('- **CTR (cliques):** ' + (m.ctr_cliques ?? '—'));\n    linhas.push('- **Vendas/volume:** ' + (m.vendas_volume ?? '—'));\n    if (a.analise.insight_estrategico) {\n      linhas.push('- **Insight estratégico:** ' + a.analise.insight_estrategico);\n    }\n    linhas.push('');\n  }\n}\n\nlinhas.push('---');\nlinhas.push('');\nlinhas.push('## Execução');\nlinhas.push('');\nlinhas.push('- Vídeos analisados: ' + analises.length);\nlinhas.push('- Sem transcrição disponível: ' + semTranscricao.length);\nlinhas.push('- Análises com JSON/schema inválido: ' + invalidos.length);\nlinhas.push('- Falhas de API: ' + falhas.length);\nfor (const s of semTranscricao) linhas.push('  - Sem transcrição — ' + s);\nfor (const inv of invalidos) linhas.push('  - Inválido — ' + (inv.canal || '?') + ': \"' + (inv.titulo || '?') + '\" (' + (inv.erro || '') + ')');\nfor (const f of falhas) linhas.push('  - Falha — ' + f);\n\nconst md = linhas.join('\\n') + '\\n';\nconst fileName = dataStr + '-youtube-etl.md';\n\n// Resumo para o Telegram (limite da API: 4096 chars).\nconst resumoLinhas = ['YouTube ETL — ' + dataStr, ''];\nif (analises.length === 0) {\n  resumoLinhas.push('Nenhuma análise nova esta semana' + (meta.semVideos ? ' (sem vídeos novos)' : '') + '.');\n} else {\n  for (const a of analises) {\n    resumoLinhas.push('• [' + a.canal + '] ' + a.titulo);\n    resumoLinhas.push('  ' + a.analise.assunto_principal);\n    if (a.analise.insight_estrategico) resumoLinhas.push('  Insight: ' + a.analise.insight_estrategico);\n  }\n}\nresumoLinhas.push('');\nresumoLinhas.push('Relatório completo: agents/youtube-etl/reports/' + fileName);\nlet resumo = resumoLinhas.join('\\n');\nif (resumo.length > 4000) resumo = resumo.slice(0, 4000) + '…';\n\nreturn [{\n  json: {\n    filePath: '/data/youtube-etl/reports/' + fileName,\n    fileName,\n    telegramBody: JSON.stringify({ chat_id: $env.TELEGRAM_CHAT_ID, text: resumo }),\n  },\n  binary: {\n    data: {\n      data: Buffer.from(md, 'utf8').toString('base64'),\n      mimeType: 'text/markdown',\n      fileName,\n    },\n  },\n}];"
+      },
+      "id": "d4e5f6a7-0001-0000-0000-000000000009",
+      "name": "Montar Relatorio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1840,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "={{ $json.filePath }}",
+        "dataPropertyName": "data",
+        "options": {}
+      },
+      "id": "d4e5f6a7-0001-0000-0000-000000000010",
+      "name": "Gravar Relatorio",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        2040,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $('Montar Relatorio').first().json.telegramBody }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "d4e5f6a7-0001-0000-0000-000000000011",
+      "name": "Enviar Telegram (Hermes)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2240,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Cron Semanal": {
+      "main": [
+        [
+          {
+            "node": "Config Canais",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config Canais": {
+      "main": [
+        [
+          {
+            "node": "Buscar Videos (YouTube)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Videos (YouTube)": {
+      "main": [
+        [
+          {
+            "node": "Extrair VideoIds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair VideoIds": {
+      "main": [
+        [
+          {
+            "node": "Obter Transcricao (RapidAPI)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Obter Transcricao (RapidAPI)": {
+      "main": [
+        [
+          {
+            "node": "Montar Prompt Ollama",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Prompt Ollama": {
+      "main": [
+        [
+          {
+            "node": "Analisar com Llama3.2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analisar com Llama3.2": {
+      "main": [
+        [
+          {
+            "node": "Validar JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar JSON": {
+      "main": [
+        [
+          {
+            "node": "Montar Relatorio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Relatorio": {
+      "main": [
+        [
+          {
+            "node": "Gravar Relatorio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gravar Relatorio": {
+      "main": [
+        [
+          {
+            "node": "Enviar Telegram (Hermes)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
