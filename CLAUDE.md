@@ -73,6 +73,7 @@ homelab-ai/
 │   └── marketplace/         ← trilha 3b: primeiro app gerado pelo pipeline
 ├── agents/                  ← configs de ferramentas (claude-code.md, codex.md)
 │   ├── weekly-sdlc-research/← job semanal de pesquisa via n8n
-│   └── weekly-cost-benefit/ ← job semanal de custo-benefício dos setups publicados
+│   ├── weekly-cost-benefit/ ← job semanal de custo-benefício dos setups publicados
+│   └── youtube-etl/         ← pipeline ETL n8n: YouTube automotivo → Ollama → relatório/Telegram
 └── docs/                    ← docs de serviços (comfyui, n8n, lm-studio, etc.)
 ```

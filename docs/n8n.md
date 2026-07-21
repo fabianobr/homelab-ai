@@ -23,6 +23,7 @@ https://flow.example.com
 - Monitoramento de preços
 - Integração com Telegram
 - Integração com Gmail/Calendar
+- Pipeline ETL YouTube → Ollama → relatório/Telegram (ver `agents/youtube-etl/README.md`)
 
 ## Segurança
 
