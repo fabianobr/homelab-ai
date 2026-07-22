@@ -138,6 +138,18 @@ agents/youtube-etl/reports/YYYY-MM-DD-youtube-etl.md
 Um arquivo por execução (gitignored, como nos demais agents). O diretório é
 montado no container n8n em `/data/youtube-etl/reports` via compose.
 
+## Testes
+
+```bash
+node agents/youtube-etl/tests/test-workflow.js
+```
+
+Executa o JavaScript real dos 5 Code nodes do workflow (extraído do próprio
+JSON) com respostas HTTP simuladas, cobrindo: caminho feliz, canal com erro de
+API, vídeo sem transcrição, JSON/schema inválido do modelo, semana vazia,
+credencial ausente (fail-fast) e truncamento de transcrição longa. Não precisa
+de n8n, Ollama nem chaves — só Node.js.
+
 ## Logs
 
 - Aba **Executions** na UI do n8n (histórico por nó, com payloads)
