@@ -1,0 +1,11 @@
+[Unit]
+Description=YouTube ETL — Mercado Automotivo (dispara o webhook do workflow n8n)
+# Dá tempo do Docker subir n8n/Ollama quando o timer dispara logo após o boot
+# (Persistent=true executa runs perdidos na primeira oportunidade).
+
+[Service]
+Type=oneshot
+ExecStartPre=/bin/sleep 60
+ExecStart=%h/homelab-ai/agents/youtube-etl/run.sh
+WorkingDirectory=%h/homelab-ai/agents/youtube-etl
+TimeoutStartSec=2min

@@ -1,0 +1,455 @@
+{
+  "id": "youtube-etl-wf01",
+  "name": "YouTube ETL — Mercado Automotivo",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "// Canais monitorados — lista pública, edite aqui para adicionar/remover canais.\n// Para descobrir o channelId (formato UC...): abra o canal no YouTube → aba\n// \"Sobre\" → \"Compartilhar canal\" → \"Copiar ID do canal\".\nconst CANAIS = [\n  { channelId: 'UCWg39NuCbNv26A3sV09m-ag', channelName: 'Brian Pasch' },\n  { channelId: 'UC61SJ883L5W8ACiM0XVPF5g', channelName: 'ASOTU' },\n  { channelId: 'UCzGxSaDv_5dgSe4RgJ99sfA', channelName: 'CarEdge' },\n  { channelId: 'UCoBaFUmLRgc_-d-rkBCFyfQ', channelName: 'Autoline Network' },\n  { channelId: 'UCagiBBx1prefrlsDzDxuA9A', channelName: 'Solving The Money Problem' },\n  { channelId: 'UCj--iMtToRO_cGG_fpmP5XQ', channelName: 'Munro Live' },\n  // LATAM\n  { channelId: 'UCVSmP_xSMQCi-DCpsLphUhA', channelName: 'Automotive Business' },\n  { channelId: 'UCKGEe_onHtps2aGf7FvMEwg', channelName: 'AutoData' },\n  { channelId: 'UCLI4tg1oh_oLiJJteExJdUQ', channelName: 'AutoForce' },\n  { channelId: 'UCnNYAprfJ53cwItWKePqB0A', channelName: 'MegaDealer' },\n  { channelId: 'UCnmWhWiag0PGQ1-C5F7Yq-Q', channelName: 'JATO Dynamics' },\n  // Europa\n  { channelId: 'UCntjlgM9ueAagCetcC1fAkA', channelName: 'Automotive News' },\n  { channelId: 'UCu_i0NkUjKzHVF1pzGfDARw', channelName: 'Fully Charged Show' },\n  { channelId: 'UC4A4rrTKKZJioiC1cXLzPBg', channelName: 'T&E' },\n  { channelId: 'UC29JbxEwr7q5bP7ANJMSqAg', channelName: 'Electrifying' },\n  // Varejo/operação de concessionárias (EUA)\n  { channelId: 'UCxVAdOU294AbW5P1IO5vGUQ', channelName: 'Car Dealership Guy' },\n  { channelId: 'UCb5pbAY6geG48o5mN796cvw', channelName: 'JM&A Group' },\n  { channelId: 'UCPKZSUgHnKOk0xz1Ywf6mlw', channelName: 'Dealer Tech Talk Podcast' },\n  { channelId: 'UC3xj69kUFavbRAb2MSd3Bmg', channelName: 'Selly Automotive' },\n  // China/global — mesma empresa da Autohome (汽车之家), rebrand internacional\n  { channelId: 'UCJkj4A_k8RYCebeguJU_zkQ', channelName: 'yesauto.' },\n];\n\n// Janela de busca: 7 dias (semanal). Para bi-semanal, use 14 e ajuste o trigger.\nconst DIAS_JANELA = 7;\n\n// Teto de vídeos mais recentes por canal, por rodada. yt-dlp não tem cota\n// paga (ao contrário da RapidAPI usada na v1 deste pipeline), mas o teto\n// continua valendo como limite de custo de GPU/tempo do Ollama — sem ele,\n// canais que postam quase diariamente sozinhos já geram dezenas de vídeos\n// por rodada.\nconst MAX_VIDEOS_POR_CANAL = 3;\n\n// Fail-fast: sem credenciais não há o que executar.\nfor (const nome of ['YOUTUBE_API_KEY', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID']) {\n  if (!$env[nome]) {\n    throw new Error('Variável de ambiente ausente no container n8n: ' + nome + ' (ver agents/youtube-etl/README.md)');\n  }\n}\n\nconst publishedAfter = new Date(Date.now() - DIAS_JANELA * 24 * 60 * 60 * 1000).toISOString();\nreturn CANAIS.map((c) => ({\n  json: {\n    ...c,\n    uploadsPlaylistId: 'UU' + c.channelId.slice(2), // uploads playlist = UC->UU\n    publishedAfter,\n    maxVideos: MAX_VIDEOS_POR_CANAL,\n  },\n}));"
+      },
+      "id": "d4e5f6a7-0001-0000-0000-000000000002",
+      "name": "Config Canais",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/youtube/v3/playlistItems",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "part",
+              "value": "snippet"
+            },
+            {
+              "name": "playlistId",
+              "value": "={{ $json.uploadsPlaylistId }}"
+            },
+            {
+              "name": "maxResults",
+              "value": "={{ $json.maxVideos }}"
+            },
+            {
+              "name": "key",
+              "value": "={{ $env.YOUTUBE_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "d4e5f6a7-0001-0000-0000-000000000003",
+      "name": "Buscar Videos (YouTube)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        640,
+        300
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Achata as respostas da search.list em 1 item por vídeo.\n// Canal com erro na API não derruba o run: vira entrada em `falhas`.\nconst videos = [];\nconst falhas = [];\nconst entradas = $input.all();\n\nfor (let i = 0; i < entradas.length; i++) {\n  const r = entradas[i].json;\n  const canal = $('Config Canais').itemMatching(i).json.channelName;\n  if (r.error) {\n    const detalhe = (r.error.message || JSON.stringify(r.error)).slice(0, 200);\n    falhas.push(canal + ': erro na YouTube API — ' + detalhe);\n    continue;\n  }\n  const publishedAfter = $('Config Canais').itemMatching(i).json.publishedAfter;\n  for (const v of r.items || []) {\n    const videoId = v.snippet && v.snippet.resourceId && v.snippet.resourceId.videoId;\n    if (!videoId) continue;\n    const publicadoEm = (v.snippet && v.snippet.publishedAt) || '';\n    if (publicadoEm && publishedAfter && publicadoEm < publishedAfter) continue; // fora da janela\n    videos.push({\n      videoId,\n      titulo: (v.snippet && v.snippet.title) || '(sem título)',\n      canal: (v.snippet && v.snippet.channelTitle) || canal,\n      publicadoEm,\n    });\n  }\n}\n\nif (videos.length === 0) {\n  // Sentinela: mantém o fluxo vivo até o relatório/notificação de semana vazia.\n  return [{ json: { semVideos: true, falhas } }];\n}\n\nvideos[0].falhas = falhas;\nreturn videos.map((v) => ({ json: v }));"
+      },
+      "id": "d4e5f6a7-0001-0000-0000-000000000004",
+      "name": "Extrair VideoIds",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "executeOnce": true,
+        "command": "=IDS=\"{{ $input.all().filter(i => i.json.videoId).map(i => i.json.videoId).join(' ') }}\"\necho \"$IDS\" | tr ' ' '\\n' | xargs -P4 -I{} sh -c 'yt-dlp --skip-download --write-auto-sub --write-sub --sub-langs en --sub-format vtt -o \"/tmp/yt-{}\" \"https://www.youtube.com/watch?v={}\" >/tmp/yt-{}.log 2>&1'\nfor id in $IDS; do\n  echo \"===VIDEO:$id===\"\n  cat /tmp/yt-$id*.vtt 2>/dev/null\n  echo \"===FIM===\"\ndone\nrm -f /tmp/yt-*"
+      },
+      "id": "d4e5f6a7-0001-0000-0000-000000000005",
+      "name": "Obter Transcricao (yt-dlp)",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1640,
+        300
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const SYSTEM_PROMPT = [\n  'Você é um Engenheiro de Dados e Estrategista de Mercado Automotivo.',\n  'Sua tarefa é analisar a transcrição de um vídeo e extrair métricas e tendências críticas, descartando todo o ruído, opiniões não fundamentadas e introduções.',\n  '',\n  'Regras de Extração:',\n  '1. Extraia apenas dados factuais relacionados a: Demanda global/regional, Incentivos/Subsídios, Números de vendas, e Métricas de Performance (CVR, CTR, CPA, margens).',\n  '2. Se um dado ou métrica específica não for mencionado no texto fornecido, você DEVE retornar null. Não infira, não invente.',\n  '3. Mantenha os resumos extremamente concisos (máximo de 2 frases por campo).',\n  '',\n  'Regra de Formatação (CRÍTICA):',\n  'O seu output DEVE ser ÚNICA e EXCLUSIVAMENTE um objeto JSON válido. Não inclua nenhuma formatação markdown (como ```json), explicações, saudações ou texto antes ou depois do JSON.',\n  '',\n  'Estrutura obrigatória do JSON:',\n  '{',\n  '  \"assunto_principal\": \"string\",',\n  '  \"demanda_estoque\": \"string ou null\",',\n  '  \"incentivos_subsidios\": \"string ou null\",',\n  '  \"metricas_performance\": {',\n  '    \"cvr_taxa_conversao\": \"string ou null\",',\n  '    \"ctr_cliques\": \"string ou null\",',\n  '    \"vendas_volume\": \"string ou null\"',\n  '  },',\n  '  \"insight_estrategico\": \"string (Apenas se houver uma oportunidade clara de produto ou negócio baseada nos dados)\"',\n  '}',\n].join('\\n');\n\n// Margem confortável para OLLAMA_CONTEXT_LENGTH=65536 (~6k tokens de entrada).\nconst MAX_CHARS = 24000;\n\n// yt-dlp escreve legenda .vtt em stdout (via `cat` no comando); sem legenda\n// disponível, stdout vem vazio. Extrai o texto puro, descartando cabeçalho,\n// timestamps e tags inline, com dedupe de linha consecutiva repetida (comum\n// em legenda automática).\nfunction extrairTranscricao(j) {\n  if (!j || j.error) return '';\n  const vtt = typeof j.stdout === 'string' ? j.stdout : '';\n  if (!vtt.trim()) return '';\n  const linhas = vtt.split(/\\r?\\n/);\n  const out = [];\n  let ultima = '';\n  for (const linha of linhas) {\n    const l = linha.trim();\n    if (!l) continue;\n    if (l.startsWith('WEBVTT')) continue;\n    if (/^\\d+$/.test(l)) continue; // número da cue\n    if (l.includes('-->')) continue; // linha de timestamp\n    if (/^(Kind|Language):/i.test(l)) continue; // metadado do cabeçalho vtt\n    const limpo = l.replace(/<[^>]+>/g, '').trim(); // tags inline (<c>, <00:00:01.000>)\n    if (!limpo || limpo === ultima) continue; // dedupe de linha repetida\n    out.push(limpo);\n    ultima = limpo;\n  }\n  return out.join(' ').replace(/\\s+/g, ' ').trim();\n}\n\nconst entradas = $input.all();\nconst saida = [];\nconst semTranscricao = [];\nlet falhas = [];\nlet semVideos = false;\nlet todosAbaixoDoLimiar = false;\nlet videosIgnorados = [];\n\nfor (let i = 0; i < entradas.length; i++) {\n  const origem = $('Mesclar Estatisticas').all()[i].json;\n  if (origem.falhas) falhas = origem.falhas;\n  if (origem.videosIgnorados) videosIgnorados = origem.videosIgnorados;\n  if (origem.semVideos) {\n    semVideos = true;\n    continue;\n  }\n  if (origem.todosAbaixoDoLimiar) {\n    todosAbaixoDoLimiar = true;\n    continue;\n  }\n\n  const transcricao = extrairTranscricao(entradas[i].json);\n  if (!transcricao) {\n    semTranscricao.push(origem.canal + ': \"' + origem.titulo + '\" (https://youtu.be/' + origem.videoId + ')');\n    continue;\n  }\n\n  saida.push({\n    json: {\n      videoId: origem.videoId,\n      titulo: origem.titulo,\n      canal: origem.canal,\n      publicadoEm: origem.publicadoEm,\n      views: origem.views,\n      likes: origem.likes,\n      ollamaBody: JSON.stringify({\n        model: 'llama3.2',\n        stream: false,\n        format: 'json', // força a API do Ollama a emitir JSON válido\n        options: { temperature: 0.2 },\n        messages: [\n          { role: 'system', content: SYSTEM_PROMPT },\n          { role: 'user', content: 'TRANSCRIÇÃO DO VÍDEO \"' + origem.titulo + '\" (canal ' + origem.canal + '):\\n\\n' + transcricao.slice(0, MAX_CHARS) },\n        ],\n      }),\n    },\n  });\n}\n\nif (saida.length === 0) {\n  // Semana sem nada analisável: chamada mínima ao Ollama só para manter o fluxo\n  // linear vivo até o relatório/notificação (custo local desprezível).\n  saida.push({\n    json: {\n      pularAnalise: true,\n      ollamaBody: JSON.stringify({\n        model: 'llama3.2',\n        stream: false,\n        format: 'json',\n        options: { num_predict: 5 },\n        messages: [{ role: 'user', content: 'Responda apenas {}' }],\n      }),\n    },\n  });\n}\n\nsaida[0].json.semTranscricao = semTranscricao;\nsaida[0].json.falhas = falhas;\nsaida[0].json.semVideos = semVideos;\nsaida[0].json.todosAbaixoDoLimiar = todosAbaixoDoLimiar;\nsaida[0].json.videosIgnorados = videosIgnorados;\nreturn saida;"
+      },
+      "id": "d4e5f6a7-0001-0000-0000-000000000006",
+      "name": "Montar Prompt Ollama",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2040,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ollama:11434/api/chat",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.ollamaBody }}",
+        "options": {
+          "timeout": 1200000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 0
+            }
+          },
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "d4e5f6a7-0001-0000-0000-000000000007",
+      "name": "Analisar com Llama3.2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2240,
+        300
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const CAMPOS_TEXTO = ['demanda_estoque', 'incentivos_subsidios'];\nconst CAMPOS_METRICAS = ['cvr_taxa_conversao', 'ctr_cliques', 'vendas_volume'];\n\nfunction validarSchema(obj) {\n  const erros = [];\n  if (typeof obj.assunto_principal !== 'string' || !obj.assunto_principal.trim()) {\n    erros.push('assunto_principal ausente ou vazio');\n  }\n  for (const campo of CAMPOS_TEXTO) {\n    if (obj[campo] !== null && obj[campo] !== undefined && typeof obj[campo] !== 'string') {\n      erros.push(campo + ' deve ser string ou null');\n    }\n  }\n  const mp = obj.metricas_performance;\n  if (!mp || typeof mp !== 'object' || Array.isArray(mp)) {\n    erros.push('metricas_performance ausente ou inválido');\n  } else {\n    for (const campo of CAMPOS_METRICAS) {\n      if (mp[campo] !== null && mp[campo] !== undefined && typeof mp[campo] !== 'string') {\n        erros.push('metricas_performance.' + campo + ' deve ser string ou null');\n      }\n    }\n  }\n  if (obj.insight_estrategico !== null && obj.insight_estrategico !== undefined && typeof obj.insight_estrategico !== 'string') {\n    erros.push('insight_estrategico deve ser string');\n  }\n  return erros;\n}\n\nconst entradas = $input.all();\nconst saida = [];\n\nfor (let i = 0; i < entradas.length; i++) {\n  const origem = $('Montar Prompt Ollama').itemMatching(i).json;\n  const meta = {\n    videoId: origem.videoId,\n    titulo: origem.titulo,\n    canal: origem.canal,\n    publicadoEm: origem.publicadoEm,\n    views: origem.views,\n    likes: origem.likes,\n    pularAnalise: origem.pularAnalise || false,\n    semTranscricao: origem.semTranscricao,\n    falhas: origem.falhas,\n    semVideos: origem.semVideos,\n    todosAbaixoDoLimiar: origem.todosAbaixoDoLimiar,\n    videosIgnorados: origem.videosIgnorados,\n  };\n\n  if (meta.pularAnalise) {\n    saida.push({ json: { ...meta, ok: false } });\n    continue;\n  }\n\n  const bruto = entradas[i].json.message && entradas[i].json.message.content;\n  if (!bruto) {\n    const detalhe = JSON.stringify(entradas[i].json).slice(0, 200);\n    saida.push({ json: { ...meta, ok: false, erro: 'Ollama não retornou conteúdo (' + detalhe + ')' } });\n    continue;\n  }\n\n  // Mesmo com format:json, remove cercas markdown defensivamente.\n  const limpo = bruto.replace(/```(?:json)?/g, '').trim();\n  let analise;\n  try {\n    analise = JSON.parse(limpo);\n  } catch (e) {\n    saida.push({ json: { ...meta, ok: false, erro: 'JSON inválido: ' + e.message, bruto: limpo.slice(0, 500) } });\n    continue;\n  }\n\n  const errosSchema = validarSchema(analise);\n  if (errosSchema.length > 0) {\n    saida.push({ json: { ...meta, ok: false, erro: 'Schema inválido: ' + errosSchema.join('; '), bruto: limpo.slice(0, 500) } });\n    continue;\n  }\n\n  saida.push({ json: { ...meta, ok: true, analise } });\n}\n\nreturn saida;"
+      },
+      "id": "d4e5f6a7-0001-0000-0000-000000000008",
+      "name": "Validar JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const dataStr = new Date().toISOString().slice(0, 10);\nconst itens = $input.all().map((i) => i.json);\nconst meta = itens[0];\nconst analises = itens.filter((i) => i.ok).sort((a, b) => (b.views ?? -1) - (a.views ?? -1));\nconst invalidos = itens.filter((i) => !i.ok && !i.pularAnalise);\nconst videosIgnorados = meta.videosIgnorados || [];\n\n// Formato compacto (1k, 100k, 1MM, 10MM) em vez de separador de milhar cheio.\nfunction fmtNum(n) {\n  if (typeof n !== 'number') return '—';\n  if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\\.0$/, '') + 'MM';\n  if (n >= 1000) return (n / 1000).toFixed(1).replace(/\\.0$/, '') + 'k';\n  return String(n);\n}\nconst semTranscricao = meta.semTranscricao || [];\nconst falhas = meta.falhas || [];\n\nconst linhas = [];\nlinhas.push('# YouTube ETL — Mercado Automotivo — ' + dataStr);\nlinhas.push('');\nlinhas.push('Análise semanal de transcrições via Ollama (llama3.2). Ordenado por engajamento (views).');\nlinhas.push('');\n\nif (analises.length === 0) {\n  let msg;\n  if (meta.semVideos) msg = 'Nenhum vídeo novo encontrado nos canais monitorados no período.';\n  else if (meta.todosAbaixoDoLimiar) msg = 'Vídeos novos encontrados, mas nenhum passou do piso de 1.000 views (ver rodapé).';\n  else msg = 'Nenhuma análise válida gerada no período (ver rodapé de execução).';\n  linhas.push(msg);\n  linhas.push('');\n}\n\nfor (const a of analises) {\n  const m = a.analise.metricas_performance || {};\n  linhas.push('## ' + a.titulo);\n  linhas.push('');\n  linhas.push('- **Canal:** ' + a.canal);\n  linhas.push('- **Vídeo:** https://youtu.be/' + a.videoId + (a.publicadoEm ? ' (' + a.publicadoEm.slice(0, 10) + ')' : ''));\n  linhas.push('- **Views:** ' + fmtNum(a.views) + ' · **Likes:** ' + fmtNum(a.likes));\n  linhas.push('- **Assunto principal:** ' + a.analise.assunto_principal);\n  linhas.push('- **Demanda/estoque:** ' + (a.analise.demanda_estoque ?? '—'));\n  linhas.push('- **Incentivos/subsídios:** ' + (a.analise.incentivos_subsidios ?? '—'));\n  linhas.push('- **CVR (taxa de conversão):** ' + (m.cvr_taxa_conversao ?? '—'));\n  linhas.push('- **CTR (cliques):** ' + (m.ctr_cliques ?? '—'));\n  linhas.push('- **Vendas/volume:** ' + (m.vendas_volume ?? '—'));\n  if (a.analise.insight_estrategico) {\n    linhas.push('- **Insight estratégico:** ' + a.analise.insight_estrategico);\n  }\n  linhas.push('');\n}\n\nlinhas.push('---');\nlinhas.push('');\nlinhas.push('## Execução');\nlinhas.push('');\nlinhas.push('- Vídeos analisados: ' + analises.length);\nlinhas.push('- Sem transcrição disponível: ' + semTranscricao.length);\nlinhas.push('- Análises com JSON/schema inválido: ' + invalidos.length);\nlinhas.push('- Falhas de API: ' + falhas.length);\nlinhas.push('- Ignorados por baixo engajamento (< 1.000 views): ' + videosIgnorados.length);\nfor (const s of semTranscricao) linhas.push('  - Sem transcrição — ' + s);\nfor (const inv of invalidos) linhas.push('  - Inválido — ' + (inv.canal || '?') + ': \"' + (inv.titulo || '?') + '\" (' + (inv.erro || '') + ')');\nfor (const f of falhas) linhas.push('  - Falha — ' + f);\nfor (const vi of videosIgnorados) linhas.push('  - Ignorado — ' + vi);\n\nconst md = linhas.join('\\n') + '\\n';\nconst fileName = dataStr + '-youtube-etl.md';\n\n// Resumo para o Telegram (limite da API: 4096 chars).\nconst resumoLinhas = ['YouTube ETL — ' + dataStr, ''];\nif (analises.length === 0) {\n  resumoLinhas.push('Nenhuma análise nova esta semana' + (meta.semVideos ? ' (sem vídeos novos)' : '') + '.');\n} else {\n  for (const a of analises) {\n    resumoLinhas.push('• [' + a.canal + '] ' + a.titulo + ' (' + fmtNum(a.views) + ' views)');\n    resumoLinhas.push('  https://youtu.be/' + a.videoId);\n    resumoLinhas.push('  ' + a.analise.assunto_principal);\n    if (a.analise.insight_estrategico) resumoLinhas.push('  Insight: ' + a.analise.insight_estrategico);\n  }\n}\nresumoLinhas.push('');\nresumoLinhas.push('Relatório completo: agents/youtube-etl/reports/' + fileName);\nlet resumo = resumoLinhas.join('\\n');\nif (resumo.length > 4000) resumo = resumo.slice(0, 4000) + '…';\n\nreturn [{\n  json: {\n    filePath: '/data/youtube-etl/reports/' + fileName,\n    fileName,\n    telegramBody: JSON.stringify({ chat_id: $env.TELEGRAM_CHAT_ID, text: resumo }),\n  },\n  binary: {\n    data: {\n      data: Buffer.from(md, 'utf8').toString('base64'),\n      mimeType: 'text/markdown',\n      fileName,\n    },\n  },\n}];"
+      },
+      "id": "d4e5f6a7-0001-0000-0000-000000000009",
+      "name": "Montar Relatorio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "={{ $json.filePath }}",
+        "dataPropertyName": "data",
+        "options": {}
+      },
+      "id": "d4e5f6a7-0001-0000-0000-000000000010",
+      "name": "Gravar Relatorio",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        2840,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $('Montar Relatorio').first().json.telegramBody }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "d4e5f6a7-0001-0000-0000-000000000011",
+      "name": "Enviar Telegram (Hermes)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3040,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "youtube-etl-run",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "1a34eca7-c343-4daf-9c7f-abaf5eeafe93",
+      "name": "Trigger Manual (Webhook)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        240,
+        460
+      ],
+      "webhookId": "f8248f6a-dcf6-4eb1-81b0-695959028adc"
+    },
+    {
+      "parameters": {
+        "jsCode": "const videos = $input.all();\nif (videos.length === 1 && videos[0].json.semVideos) {\n  return videos; // sentinela de semana vazia — sem estatísticas a buscar\n}\nconst ids = videos.map((v) => v.json.videoId).join(',');\nreturn [{ json: { videoIdsCsv: ids } }];"
+      },
+      "id": "443cafd3-f840-49f6-80a2-3450492759e4",
+      "name": "Agrupar VideoIds",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/youtube/v3/videos",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "part",
+              "value": "statistics"
+            },
+            {
+              "name": "id",
+              "value": "={{ $json.videoIdsCsv }}"
+            },
+            {
+              "name": "key",
+              "value": "={{ $env.YOUTUBE_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "ec16ebe4-656e-41eb-8670-8852fa00c769",
+      "name": "Buscar Estatisticas (YouTube)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const resp = $input.first().json;\nconst videos = $('Extrair VideoIds').all();\n\nif (videos.length === 1 && videos[0].json.semVideos) {\n  return videos;\n}\n\nconst falhas = videos[0].json.falhas || [];\n\nconst stats = {};\nfor (const it of (resp.items || [])) {\n  const s = it.statistics || {};\n  stats[it.id] = {\n    views: s.viewCount !== undefined ? Number(s.viewCount) : null,\n    likes: s.likeCount !== undefined ? Number(s.likeCount) : null,\n  };\n}\n\n// Vídeo com pouco alcance não compensa o custo de transcrição/análise —\n// ignorado, não contado como falha (fica registrado à parte no rodapé).\nconst VIEWS_MINIMO = 1000;\nconst ignorados = [];\nconst mantidos = [];\nfor (const v of videos) {\n  const s = stats[v.json.videoId];\n  const views = s ? s.views : null;\n  const likes = s ? s.likes : null;\n  if (views !== null && views < VIEWS_MINIMO) {\n    ignorados.push(v.json.canal + ': \"' + v.json.titulo + '\" (' + views + ' views)');\n    continue;\n  }\n  mantidos.push({ json: { ...v.json, views, likes } });\n}\n\nif (mantidos.length === 0) {\n  return [{ json: { todosAbaixoDoLimiar: true, falhas, videosIgnorados: ignorados } }];\n}\nmantidos[0].json.falhas = falhas;\nmantidos[0].json.videosIgnorados = ignorados;\nreturn mantidos;"
+      },
+      "id": "331c7199-cc91-43b8-9e3d-e2891e1f1341",
+      "name": "Mesclar Estatisticas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const stdout = ($input.first().json && $input.first().json.stdout) || '';\nconst videos = $('Mesclar Estatisticas').all();\n\nif (videos.length === 1 && (videos[0].json.semVideos || videos[0].json.todosAbaixoDoLimiar)) {\n  return videos;\n}\n\n// Cada vídeo delimitado por ===VIDEO:<id>=== ... ===FIM=== no stdout combinado\n// (o comando do yt-dlp roda os downloads em paralelo com xargs -P4).\nconst mapa = {};\nfor (const bloco of stdout.split('===VIDEO:')) {\n  if (!bloco.trim()) continue;\n  const fimId = bloco.indexOf('===');\n  if (fimId === -1) continue;\n  const id = bloco.slice(0, fimId);\n  const resto = bloco.slice(fimId + 3);\n  const fimMarcador = resto.indexOf('===FIM===');\n  mapa[id] = fimMarcador === -1 ? resto : resto.slice(0, fimMarcador);\n}\n\nreturn videos.map((v) => ({\n  json: { ...v.json, stdout: mapa[v.json.videoId] || '' },\n}));"
+      },
+      "id": "bb3515ad-8bdc-4f41-b06a-5833df56466f",
+      "name": "Dividir Transcricoes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1640,
+        460
+      ]
+    }
+  ],
+  "connections": {
+    "Config Canais": {
+      "main": [
+        [
+          {
+            "node": "Buscar Videos (YouTube)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Videos (YouTube)": {
+      "main": [
+        [
+          {
+            "node": "Extrair VideoIds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair VideoIds": {
+      "main": [
+        [
+          {
+            "node": "Agrupar VideoIds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Prompt Ollama": {
+      "main": [
+        [
+          {
+            "node": "Analisar com Llama3.2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analisar com Llama3.2": {
+      "main": [
+        [
+          {
+            "node": "Validar JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar JSON": {
+      "main": [
+        [
+          {
+            "node": "Montar Relatorio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Relatorio": {
+      "main": [
+        [
+          {
+            "node": "Gravar Relatorio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gravar Relatorio": {
+      "main": [
+        [
+          {
+            "node": "Enviar Telegram (Hermes)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger Manual (Webhook)": {
+      "main": [
+        [
+          {
+            "node": "Config Canais",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Obter Transcricao (yt-dlp)": {
+      "main": [
+        [
+          {
+            "node": "Dividir Transcricoes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agrupar VideoIds": {
+      "main": [
+        [
+          {
+            "node": "Buscar Estatisticas (YouTube)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Estatisticas (YouTube)": {
+      "main": [
+        [
+          {
+            "node": "Mesclar Estatisticas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mesclar Estatisticas": {
+      "main": [
+        [
+          {
+            "node": "Obter Transcricao (yt-dlp)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dividir Transcricoes": {
+      "main": [
+        [
+          {
+            "node": "Montar Prompt Ollama",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

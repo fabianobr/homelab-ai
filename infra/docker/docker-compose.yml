@@ -114,7 +114,9 @@ services:
           memory: 2g
 
   n8n:
-    image: docker.n8n.io/n8nio/n8n:latest
+    build:
+      context: ./n8n
+    image: homelab-ai/n8n-ytdlp:latest
     container_name: n8n
     profiles:
       - optional
@@ -123,11 +125,27 @@ services:
       - "127.0.0.1:5678:5678"
     volumes:
       - n8n:/home/node/.n8n
+      # Relatórios do pipeline agents/youtube-etl; dar permissão ao uid 1000 (usuário node)
+      - ${HOMELAB_ROOT:?set HOMELAB_ROOT in .env}/agents/youtube-etl/reports:/data/youtube-etl/reports
     environment:
       - N8N_HOST=localhost
       - N8N_PORT=5678
       - N8N_PROTOCOL=http
       - TZ=${TZ:-Etc/UTC}
+      # Necessário para Code nodes lerem $env.* (ex.: agents/youtube-etl); nome da flag
+      # mudou de N8N_BLOCK_ENV_ACCESS_IN_NODE_JS para N8N_BLOCK_ENV_ACCESS_IN_NODE.
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      # Default do n8n restringe nós Read/Write File a ~/.n8n-files; libera
+      # explicitamente o volume de relatórios do agents/youtube-etl.
+      - N8N_RESTRICT_FILE_ACCESS_TO=/data/youtube-etl/reports
+      # n8n desabilita o nó Execute Command por padrão desde a v2 (hardening).
+      # Reabilitado porque agents/youtube-etl usa yt-dlp via Execute Command —
+      # é workflow nosso versionado no repo, não carga de terceiro.
+      - NODES_EXCLUDE=[]
+      # Pipeline agents/youtube-etl — valores reais só no .env untracked
+      - YOUTUBE_API_KEY=${YOUTUBE_API_KEY:-}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
