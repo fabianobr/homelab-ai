@@ -8,14 +8,19 @@ container n8n), estrutura os dados com **Ollama local (`llama3.2`)** e entrega:
 - um **relatório markdown** por execução em `reports/YYYY-MM-DD-youtube-etl.md`;
 - um **resumo via Telegram** (bot Hermes).
 
-Diferente dos agents irmãos (`weekly-sdlc-research`, `weekly-cost-benefit`),
-que são scripts Python agendados por cron/systemd, este vive como workflow
-dentro do n8n — o agendamento é o Schedule Trigger do próprio workflow.
+Como os agents irmãos (`weekly-sdlc-research`, `weekly-cost-benefit`), o
+agendamento é um **systemd timer** — `agents/youtube-etl/systemd/`. O
+workflow em si vive dentro do n8n, mas só tem um trigger de webhook; quem
+dispara toda semana é o timer chamando `run.sh` (`POST
+/webhook/youtube-etl-run`). Motivo: o Schedule Trigger nativo do n8n não
+tem catch-up — se o container estivesse parado no horário, perdia o run da
+semana, igual ao que já tinha acontecido com o `weekly-sdlc-research`
+quando ainda usava cron puro.
 
 ## O que faz
 
 ```
-Cron (segunda 08:00) / Webhook manual (POST /webhook/youtube-etl-run)
+Webhook (POST /webhook/youtube-etl-run) — systemd timer, segunda 08:00, ou manual
   → Config Canais            (channelIds + uploadsPlaylistId derivado + validação de env vars)
   → YouTube Data API v3      (playlistItems.list na playlist de uploads; filtro de 7 dias no Code node)
   → Extrair VideoIds         (1 item por vídeo; falhas de API e fora-da-janela viram rodapé)
@@ -175,13 +180,14 @@ Requisitos, já configurados no `docker-compose.yml` do compose deste repo:
 
 - `CANAIS`: lista de `{channelId, channelName}` — não é segredo, fica
   versionada no JSON do workflow.
-- `DIAS_JANELA`: 7 (semanal). Para bi-semanal: 14 + `weeksInterval: 2` no
-  Schedule Trigger.
+- `DIAS_JANELA`: 7 (semanal). Para bi-semanal: 14 + ajustar
+  `OnCalendar=Mon 08:00` pra `*-*-* 08:00:00/14d` (ou equivalente) no
+  `youtube-etl.timer`.
 - `MAX_VIDEOS_POR_CANAL`: 3. Teto dos vídeos mais recentes analisados por
   canal a cada rodada. Não é mais uma proteção de cota paga (yt-dlp não tem
-  cota), mas continua valendo como limite de custo de GPU/tempo: 6 canais
-  postando quase diariamente sem teto geram dezenas de chamadas ao Ollama
-  numa única rodada semanal.
+  cota), mas continua valendo como limite de custo de GPU/tempo: com 20
+  canais monitorados, mesmo com o teto uma rodada semanal já processa
+  dezenas de vídeos no Ollama.
 
 ### Transcrição via yt-dlp
 
@@ -204,19 +210,33 @@ chamadas crescer muito; não observado neste uso pessoal de baixo volume.
 
 ## Agendamento
 
-Schedule Trigger interno: **toda segunda-feira às 08:00 no fuso `TZ` do
-container n8n** (uma hora antes do `weekly-sdlc-research`, que roda às 9h
-horário local da máquina — sem disputa de GPU). **`TZ` precisa estar setado
-no `.env`** (`TZ=America/Sao_Paulo` neste homelab) — o default do compose é
-`Etc/UTC`, e sem ajustar o disparo real vira 08:00 UTC = 05:00 no horário de
-Brasília, silenciosamente 4h fora do combinado com o `weekly-sdlc-research`.
-O n8n precisa estar de pé no horário; diferente dos systemd timers dos
-outros agents, não há catch-up se o container estiver parado.
+**systemd timer** (`agents/youtube-etl/systemd/`), mesmo padrão dos agents
+irmãos: `youtube-etl.timer` dispara `youtube-etl.service` toda
+**segunda-feira às 08:00** (horário local da máquina — uma hora antes do
+`weekly-sdlc-research`, que roda às 9h, sem disputa de GPU). O service roda
+`run.sh`, que só faz `POST /webhook/youtube-etl-run` — o n8n cuida do resto
+de forma assíncrona.
 
-O workflow também tem um segundo trigger, `Trigger Manual (Webhook)`, ligado
-ao mesmo `Config Canais` — serve só para disparar uma execução sob demanda
-(`POST /webhook/youtube-etl-run`, ver seção "Como importar e rodar"). Não
-substitui o Schedule Trigger, só evita depender da UI para testar.
+```bash
+ln -sf ~/homelab-ai/agents/youtube-etl/systemd/youtube-etl.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now youtube-etl.timer
+```
+
+`Persistent=true` no timer: se a máquina estiver desligada às 08h de
+segunda, roda assim que ligar de novo (`RandomizedDelaySec=2min` evita
+disputa exata de horário com os outros dois timers no boot).
+
+O workflow em si só tem **um** trigger — `Trigger Manual (Webhook)` — usado
+tanto pelo timer quanto por disparos manuais (ver seção "Como importar e
+rodar"). Não existe mais um Schedule Trigger nativo do n8n dentro do
+workflow: ele não tem catch-up (se o container estivesse parado no horário,
+perdia o run da semana — exatamente o problema que já tinha feito o
+`weekly-sdlc-research` migrar de cron pra systemd), e ainda dependia do
+`TZ` do container estar certo (`TZ=America/Sao_Paulo` no `.env`; o default
+do compose é `Etc/UTC` — motivo real de uma sessão de debug: o disparo saía
+às 05h de Brasília em vez de 08h). Com o systemd chamando o webhook, o fuso
+que importa é o da própria máquina, já correto.
 
 ## Relatórios
 

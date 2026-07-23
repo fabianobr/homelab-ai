@@ -4,31 +4,6 @@
   "nodes": [
     {
       "parameters": {
-        "rule": {
-          "interval": [
-            {
-              "field": "weeks",
-              "weeksInterval": 1,
-              "triggerAtDay": [
-                1
-              ],
-              "triggerAtHour": 8,
-              "triggerAtMinute": 0
-            }
-          ]
-        }
-      },
-      "id": "d4e5f6a7-0001-0000-0000-000000000001",
-      "name": "Cron Semanal",
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.2,
-      "position": [
-        240,
-        300
-      ]
-    },
-    {
-      "parameters": {
         "jsCode": "// Canais monitorados — lista pública, edite aqui para adicionar/remover canais.\n// Para descobrir o channelId (formato UC...): abra o canal no YouTube → aba\n// \"Sobre\" → \"Compartilhar canal\" → \"Copiar ID do canal\".\nconst CANAIS = [\n  { channelId: 'UCWg39NuCbNv26A3sV09m-ag', channelName: 'Brian Pasch' },\n  { channelId: 'UC61SJ883L5W8ACiM0XVPF5g', channelName: 'ASOTU' },\n  { channelId: 'UCzGxSaDv_5dgSe4RgJ99sfA', channelName: 'CarEdge' },\n  { channelId: 'UCoBaFUmLRgc_-d-rkBCFyfQ', channelName: 'Autoline Network' },\n  { channelId: 'UCagiBBx1prefrlsDzDxuA9A', channelName: 'Solving The Money Problem' },\n  { channelId: 'UCj--iMtToRO_cGG_fpmP5XQ', channelName: 'Munro Live' },\n  // LATAM\n  { channelId: 'UCVSmP_xSMQCi-DCpsLphUhA', channelName: 'Automotive Business' },\n  { channelId: 'UCKGEe_onHtps2aGf7FvMEwg', channelName: 'AutoData' },\n  { channelId: 'UCLI4tg1oh_oLiJJteExJdUQ', channelName: 'AutoForce' },\n  { channelId: 'UCnNYAprfJ53cwItWKePqB0A', channelName: 'MegaDealer' },\n  { channelId: 'UCnmWhWiag0PGQ1-C5F7Yq-Q', channelName: 'JATO Dynamics' },\n  // Europa\n  { channelId: 'UCntjlgM9ueAagCetcC1fAkA', channelName: 'Automotive News' },\n  { channelId: 'UCu_i0NkUjKzHVF1pzGfDARw', channelName: 'Fully Charged Show' },\n  { channelId: 'UC4A4rrTKKZJioiC1cXLzPBg', channelName: 'T&E' },\n  { channelId: 'UC29JbxEwr7q5bP7ANJMSqAg', channelName: 'Electrifying' },\n  // Varejo/operação de concessionárias (EUA)\n  { channelId: 'UCxVAdOU294AbW5P1IO5vGUQ', channelName: 'Car Dealership Guy' },\n  { channelId: 'UCb5pbAY6geG48o5mN796cvw', channelName: 'JM&A Group' },\n  { channelId: 'UCPKZSUgHnKOk0xz1Ywf6mlw', channelName: 'Dealer Tech Talk Podcast' },\n  { channelId: 'UC3xj69kUFavbRAb2MSd3Bmg', channelName: 'Selly Automotive' },\n  // China/global — mesma empresa da Autohome (汽车之家), rebrand internacional\n  { channelId: 'UCJkj4A_k8RYCebeguJU_zkQ', channelName: 'yesauto.' },\n];\n\n// Janela de busca: 7 dias (semanal). Para bi-semanal, use 14 e ajuste o trigger.\nconst DIAS_JANELA = 7;\n\n// Teto de vídeos mais recentes por canal, por rodada. yt-dlp não tem cota\n// paga (ao contrário da RapidAPI usada na v1 deste pipeline), mas o teto\n// continua valendo como limite de custo de GPU/tempo do Ollama — sem ele,\n// canais que postam quase diariamente sozinhos já geram dezenas de vídeos\n// por rodada.\nconst MAX_VIDEOS_POR_CANAL = 3;\n\n// Fail-fast: sem credenciais não há o que executar.\nfor (const nome of ['YOUTUBE_API_KEY', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID']) {\n  if (!$env[nome]) {\n    throw new Error('Variável de ambiente ausente no container n8n: ' + nome + ' (ver agents/youtube-etl/README.md)');\n  }\n}\n\nconst publishedAfter = new Date(Date.now() - DIAS_JANELA * 24 * 60 * 60 * 1000).toISOString();\nreturn CANAIS.map((c) => ({\n  json: {\n    ...c,\n    uploadsPlaylistId: 'UU' + c.channelId.slice(2), // uploads playlist = UC->UU\n    publishedAfter,\n    maxVideos: MAX_VIDEOS_POR_CANAL,\n  },\n}));"
       },
       "id": "d4e5f6a7-0001-0000-0000-000000000002",
@@ -318,17 +293,6 @@
     }
   ],
   "connections": {
-    "Cron Semanal": {
-      "main": [
-        [
-          {
-            "node": "Config Canais",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Config Canais": {
       "main": [
         [
