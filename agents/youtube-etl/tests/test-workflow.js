@@ -91,7 +91,7 @@ console.log('\n=== CENÁRIO A: misto (2 canais, 1 erro de API; 4 vídeos: ok / s
 
   // 1. Config Canais
   const cfg = comRelogioFixo(() => runCode('Config Canais', [], out));
-  assert(cfg.length === 6, `Config Canais emite 1 item por canal (${cfg.length})`);
+  assert(cfg.length === 11, `Config Canais emite 1 item por canal (${cfg.length})`);
   assert(/\d{4}-\d{2}-\d{2}T/.test(cfg[0].json.publishedAfter), 'publishedAfter é ISO-8601');
   assert(cfg[0].json.uploadsPlaylistId === 'UU' + cfg[0].json.channelId.slice(2), 'uploadsPlaylistId derivado do channelId (UC→UU)');
 
@@ -193,7 +193,7 @@ console.log('\n=== CENÁRIO B: semana vazia (nenhum vídeo novo) ===');
 {
   const out = {};
   comRelogioFixo(() => runCode('Config Canais', [], out));
-  out['Buscar Videos (YouTube)'] = Array(6).fill({ json: { items: [] } });
+  out['Buscar Videos (YouTube)'] = Array(11).fill({ json: { items: [] } });
   const vids = runCode('Extrair VideoIds', out['Buscar Videos (YouTube)'], out);
   assert(vids.length === 1 && vids[0].json.semVideos === true, 'sentinela semVideos emitida');
 
@@ -241,7 +241,7 @@ console.log('\n=== CENÁRIO D: truncamento de transcrição longa ===');
   comRelogioFixo(() => runCode('Config Canais', [], out));
   out['Buscar Videos (YouTube)'] = [
     { json: { items: [{ snippet: { resourceId: { videoId: 'vidlongo0001' }, title: 'Longo', channelTitle: 'Brian Pasch', publishedAt: '2026-07-20T00:00:00Z' } }] } },
-    ...Array(5).fill({ json: { items: [] } }),
+    ...Array(10).fill({ json: { items: [] } }),
   ];
   const vidsD = runCode('Extrair VideoIds', out['Buscar Videos (YouTube)'], out);
   runCode('Agrupar VideoIds', vidsD, out);
@@ -280,7 +280,7 @@ console.log('\n=== CENÁRIO F: todos os vídeos da semana abaixo do piso de 1.00
   comRelogioFixo(() => runCode('Config Canais', [], out));
   out['Buscar Videos (YouTube)'] = [
     { json: { items: [{ snippet: { resourceId: { videoId: 'vidbaixo1' }, title: 'Pouco visto 1', channelTitle: 'CarEdge', publishedAt: '2026-07-20T00:00:00Z' } }] } },
-    ...Array(5).fill({ json: { items: [] } }),
+    ...Array(10).fill({ json: { items: [] } }),
   ];
   const vids = runCode('Extrair VideoIds', out['Buscar Videos (YouTube)'], out);
   runCode('Agrupar VideoIds', vids, out);
