@@ -204,10 +204,14 @@ chamadas crescer muito; não observado neste uso pessoal de baixo volume.
 
 ## Agendamento
 
-Schedule Trigger interno: **toda segunda-feira às 08:00** (uma hora antes do
-`weekly-sdlc-research`, que roda às 9h — sem disputa de GPU). O n8n precisa
-estar de pé no horário; diferente dos systemd timers dos outros agents, não há
-catch-up se o container estiver parado.
+Schedule Trigger interno: **toda segunda-feira às 08:00 no fuso `TZ` do
+container n8n** (uma hora antes do `weekly-sdlc-research`, que roda às 9h
+horário local da máquina — sem disputa de GPU). **`TZ` precisa estar setado
+no `.env`** (`TZ=America/Sao_Paulo` neste homelab) — o default do compose é
+`Etc/UTC`, e sem ajustar o disparo real vira 08:00 UTC = 05:00 no horário de
+Brasília, silenciosamente 4h fora do combinado com o `weekly-sdlc-research`.
+O n8n precisa estar de pé no horário; diferente dos systemd timers dos
+outros agents, não há catch-up se o container estiver parado.
 
 O workflow também tem um segundo trigger, `Trigger Manual (Webhook)`, ligado
 ao mesmo `Config Canais` — serve só para disparar uma execução sob demanda
