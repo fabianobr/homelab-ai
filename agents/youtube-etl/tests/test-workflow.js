@@ -26,7 +26,7 @@ const ENV = {
 // nodeOutputs guarda a saída de cada nó já executado; como o fluxo é linear e
 // os nós HTTP preservam pareamento 1:1, itemMatching(i) == items[i].
 function runCode(name, inputItems, nodeOutputs, env = ENV) {
-  const $input = { all: () => inputItems };
+  const $input = { all: () => inputItems, first: () => inputItems[0] };
   const $ = (ref) => {
     if (!nodeOutputs[ref]) throw new Error(`Nó referenciado não executado: ${ref}`);
     return {
@@ -104,6 +104,18 @@ console.log('\n=== CENÁRIO A: misto (2 canais, 1 erro de API; 3 vídeos: ok / s
   assert(vids.length === 3, `3 vídeos extraídos, fora-da-janela e sem videoId descartados (${vids.length})`);
   assert(vids[0].json.falhas.length === 1 && /ASOTU/.test(vids[0].json.falhas[0]), 'falha do canal 2 registrada com nome do canal');
 
+  // 3.5. Agrupar VideoIds + Buscar Estatisticas (mock, formato videos.list) + Mesclar Estatisticas
+  const agrupado = runCode('Agrupar VideoIds', vids, out);
+  assert(agrupado.length === 1 && agrupado[0].json.videoIdsCsv === 'vid00000001,vid00000002,vid00000003', 'Agrupar VideoIds junta os ids extraídos num csv só');
+  out['Buscar Estatisticas (YouTube)'] = [{ json: { items: [
+    { id: 'vid00000001', statistics: { viewCount: '542000', likeCount: '12300' } },
+    { id: 'vid00000002', statistics: { viewCount: '89000', likeCount: '900' } },
+    { id: 'vid00000003', statistics: { viewCount: '15000' } }, // sem likeCount (curtidas ocultas pelo criador)
+  ] } }];
+  const merged = runCode('Mesclar Estatisticas', out['Buscar Estatisticas (YouTube)'], out);
+  assert(merged.length === 3 && merged[0].json.views === 542000 && merged[0].json.likes === 12300, 'Mesclar Estatisticas junta views/likes por videoId');
+  assert(merged[2].json.likes === null, 'likeCount ausente na API vira null (curtidas ocultas)');
+
   // 4. Obter Transcricao (mock, saída do Execute Command/yt-dlp): vid1 e vid2 com
   // legenda .vtt em stdout, vid3 sem legenda (yt-dlp falha → onError vira {error})
   out['Obter Transcricao (yt-dlp)'] = [
@@ -142,8 +154,9 @@ console.log('\n=== CENÁRIO A: misto (2 canais, 1 erro de API; 3 vídeos: ok / s
   const md = Buffer.from(rel[0].binary.data.data, 'base64').toString('utf8');
   const tg = JSON.parse(rel[0].json.telegramBody);
   assert(/^\/data\/youtube-etl\/reports\/\d{4}-\d{2}-\d{2}-youtube-etl\.md$/.test(rel[0].json.filePath), `filePath correto (${rel[0].json.filePath})`);
-  assert(/## Brian Pasch/.test(md) && /EV Demand Collapse\?/.test(md), 'relatório agrupado por canal com título do vídeo');
+  assert(/## EV Demand Collapse\?/.test(md) && /\*\*Canal:\*\* Brian Pasch/.test(md), 'relatório com título do vídeo e canal indicado');
   assert(/https:\/\/youtu\.be\/vid00000001/.test(md), 'link do vídeo no relatório');
+  assert(/Views:\*\* 542\.000.*Likes:\*\* 12\.300/.test(md), 'views/likes do vídeo aparecem formatados com separador de milhar');
   assert(/Vídeos analisados: 1/.test(md) && /Sem transcrição disponível: 1/.test(md) && /JSON\/schema inválido: 1/.test(md) && /Falhas de API: 1/.test(md), 'rodapé de execução com os 4 contadores corretos');
   assert(/Insight estratégico:/.test(md) && /precificação dinâmica/.test(md), 'insight estratégico presente');
   assert(tg.chat_id === '123456' && /Brian Pasch/.test(tg.text) && tg.text.length <= 4096, 'payload do Telegram com chat_id e resumo dentro do limite');
@@ -162,6 +175,11 @@ console.log('\n=== CENÁRIO B: semana vazia (nenhum vídeo novo) ===');
   out['Buscar Videos (YouTube)'] = Array(6).fill({ json: { items: [] } });
   const vids = runCode('Extrair VideoIds', out['Buscar Videos (YouTube)'], out);
   assert(vids.length === 1 && vids[0].json.semVideos === true, 'sentinela semVideos emitida');
+
+  runCode('Agrupar VideoIds', vids, out);
+  out['Buscar Estatisticas (YouTube)'] = [{ json: { error: { message: 'id parameter is required' } } }];
+  const merged = runCode('Mesclar Estatisticas', out['Buscar Estatisticas (YouTube)'], out);
+  assert(merged.length === 1 && merged[0].json.semVideos === true, 'Mesclar Estatisticas repassa a sentinela sem tentar buscar stats');
 
   // Transcript da sentinela falha (videoId undefined) → item de erro
   out['Obter Transcricao (yt-dlp)'] = [{ json: { error: 'yt-dlp: videoId ausente' } }];
@@ -202,12 +220,31 @@ console.log('\n=== CENÁRIO D: truncamento de transcrição longa ===');
     { json: { items: [{ snippet: { resourceId: { videoId: 'vidlongo0001' }, title: 'Longo', channelTitle: 'Brian Pasch', publishedAt: '2026-07-20T00:00:00Z' } }] } },
     ...Array(5).fill({ json: { items: [] } }),
   ];
-  runCode('Extrair VideoIds', out['Buscar Videos (YouTube)'], out);
+  const vidsD = runCode('Extrair VideoIds', out['Buscar Videos (YouTube)'], out);
+  runCode('Agrupar VideoIds', vidsD, out);
+  out['Buscar Estatisticas (YouTube)'] = [{ json: { items: [{ id: 'vidlongo0001', statistics: { viewCount: '100', likeCount: '5' } }] } }];
+  runCode('Mesclar Estatisticas', out['Buscar Estatisticas (YouTube)'], out);
   const vttLongo = 'WEBVTT\n\n00:00:00.000 --> 01:00:00.000\n' + 'palavra '.repeat(10000); // ~80k chars
   out['Obter Transcricao (yt-dlp)'] = [{ json: { exitCode: 0, stdout: vttLongo } }];
   const prompts = runCode('Montar Prompt Ollama', out['Obter Transcricao (yt-dlp)'], out);
   const body = JSON.parse(prompts[0].json.ollamaBody);
   assert(body.messages[1].content.length < 25000, `transcrição truncada em ~24k chars (${body.messages[1].content.length})`);
+}
+
+// ---------------------------------------------------------------------------
+console.log('\n=== CENÁRIO E: relatório ordena vídeos por engajamento (views desc) ===');
+{
+  const out = {};
+  const valFake = [
+    { json: { videoId: 'vidA', titulo: 'Menos visto', canal: 'Canal X', publicadoEm: '2026-07-20T00:00:00Z', views: 1000, likes: 50, ok: true, analise: ANALISE_VALIDA } },
+    { json: { videoId: 'vidB', titulo: 'Mais visto', canal: 'Canal Y', publicadoEm: '2026-07-19T00:00:00Z', views: 999000, likes: 40000, ok: true, analise: ANALISE_VALIDA } },
+  ];
+  const rel = runCode('Montar Relatorio', valFake, out);
+  const md = Buffer.from(rel[0].binary.data.data, 'base64').toString('utf8');
+  const tg = JSON.parse(rel[0].json.telegramBody);
+  assert(md.indexOf('Mais visto') < md.indexOf('Menos visto'), 'vídeo com mais views aparece primeiro no relatório');
+  assert(/Views:\*\* 999\.000.*Likes:\*\* 40\.000/.test(md), 'views/likes formatados com separador de milhar (pt-BR)');
+  assert(tg.text.indexOf('Mais visto') < tg.text.indexOf('Menos visto'), 'resumo do Telegram também respeita a ordem por engajamento');
 }
 
 console.log(falhou ? '\n>>> RESULTADO: FALHOU' : '\n>>> RESULTADO: TODOS OS CENÁRIOS PASSARAM');

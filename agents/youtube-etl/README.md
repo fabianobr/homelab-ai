@@ -19,13 +19,21 @@ Cron (segunda 08:00) / Webhook manual (POST /webhook/youtube-etl-run)
   → Config Canais            (channelIds + uploadsPlaylistId derivado + validação de env vars)
   → YouTube Data API v3      (playlistItems.list na playlist de uploads; filtro de 7 dias no Code node)
   → Extrair VideoIds         (1 item por vídeo; falhas de API e fora-da-janela viram rodapé)
+  → Agrupar VideoIds         (junta os ids extraídos num csv só, 1 item)
+  → YouTube Data API v3      (videos.list?part=statistics — views/likes de até 50 vídeos, 1 chamada)
+  → Mesclar Estatisticas     (views/likes de volta em cada vídeo, por videoId)
   → yt-dlp (Execute Command) (legenda .vtt em inglês; sem legenda → pula)
   → Ollama /api/chat         (llama3.2, format: json — saída JSON forçada)
   → Validar JSON             (parse + schema; inválido → rodapé, não derruba)
-  → Montar Relatório         (markdown + resumo Telegram)
+  → Montar Relatório         (ordenado por views desc; markdown + resumo Telegram)
   → Gravar em reports/       (volume montado no container)
   → Telegram (Hermes)
 ```
+
+O relatório apresenta os vídeos em ordem decrescente de **views** (não mais
+agrupados por canal) — o vídeo mais assistido da semana vem primeiro,
+independente do canal. Cada vídeo mostra `views` e `likes` (quando o criador
+não os oculta; nesse caso vira `—`).
 
 `search.list?channelId=...` está bloqueado nesta chave (e aparentemente em chaves de API
 "puras" em geral) com `403 accountDelegationForbidden` — bug/restrição do lado do Google,
