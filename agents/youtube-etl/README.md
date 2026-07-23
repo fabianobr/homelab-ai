@@ -21,8 +21,9 @@ Cron (segunda 08:00) / Webhook manual (POST /webhook/youtube-etl-run)
   → Extrair VideoIds         (1 item por vídeo; falhas de API e fora-da-janela viram rodapé)
   → Agrupar VideoIds         (junta os ids extraídos num csv só, 1 item)
   → YouTube Data API v3      (videos.list?part=statistics — views/likes de até 50 vídeos, 1 chamada)
-  → Mesclar Estatisticas     (views/likes de volta em cada vídeo, por videoId)
-  → yt-dlp (Execute Command) (legenda .vtt em inglês; sem legenda → pula)
+  → Mesclar Estatisticas     (views/likes de volta em cada vídeo; < 1.000 views → ignorado, não analisado)
+  → yt-dlp (Execute Command) (legenda .vtt em inglês; TODOS os vídeos em paralelo, até 4 por vez)
+  → Dividir Transcricoes     (reexpande o stdout combinado em 1 item por vídeo)
   → Ollama /api/chat         (llama3.2, format: json — saída JSON forçada)
   → Validar JSON             (parse + schema; inválido → rodapé, não derruba)
   → Montar Relatório         (ordenado por views desc; markdown + resumo Telegram)
@@ -32,8 +33,34 @@ Cron (segunda 08:00) / Webhook manual (POST /webhook/youtube-etl-run)
 
 O relatório apresenta os vídeos em ordem decrescente de **views** (não mais
 agrupados por canal) — o vídeo mais assistido da semana vem primeiro,
-independente do canal. Cada vídeo mostra `views` e `likes` (quando o criador
-não os oculta; nesse caso vira `—`).
+independente do canal. Cada vídeo mostra `views`/`likes` em formato compacto
+(`1.2k`, `542k`, `3.1MM`) e o link direto (`youtu.be/<id>`), tanto no
+markdown quanto no resumo do Telegram. Vídeos com **menos de 1.000 views**
+são ignorados antes de gastar yt-dlp/Ollama neles — ficam listados à parte
+no rodapé "Execução", não contam como falha.
+
+### Download de legendas em paralelo
+
+O nó `Obter Transcricao (yt-dlp)` roda **uma única vez por execução**
+(`executeOnce`), disparando o yt-dlp de todos os vídeos ao mesmo tempo via
+`xargs -P4` (até 4 downloads simultâneos — paralelo total foi
+deliberadamente limitado pra reduzir o risco de bloqueio temporário por IP
+no YouTube; ver "Transcrição via yt-dlp" abaixo). Cada resultado vem
+delimitado (`===VIDEO:<id>===...===FIM===`) no stdout combinado; o nó
+`Dividir Transcricoes` reexpande isso em 1 item por vídeo antes de seguir
+pro Ollama.
+
+**Armadilha real encontrada:** o campo `command` do nó Execute Command
+precisa começar com `=` pra n8n tratar `{{ ... }}` como expressão — sem o
+`=`, o texto vira literal e é passado cru pro shell (gerou erro de sintaxe
+puro no bash na primeira tentativa).
+
+**Armadilha real #2:** depois de inserir nós Code com fan-in/fan-out
+(N itens → 1 → N) no meio do fluxo, o `itemMatching(i)` do n8n (que depende
+do rastreamento automático de `pairedItem`) passou a resolver sempre o
+**mesmo** item pra todo `i` — o relatório saiu com o mesmo vídeo repetido
+várias vezes. Troca por indexação posicional direta (`$('Nó').all()[i]`)
+resolveu, já que a ordem é garantida por construção nesses nós.
 
 `search.list?channelId=...` está bloqueado nesta chave (e aparentemente em chaves de API
 "puras" em geral) com `403 accountDelegationForbidden` — bug/restrição do lado do Google,
