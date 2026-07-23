@@ -29,7 +29,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Canais monitorados — lista pública, edite aqui para adicionar/remover canais.\n// Para descobrir o channelId (formato UC...): abra o canal no YouTube → aba\n// \"Sobre\" → \"Compartilhar canal\" → \"Copiar ID do canal\".\nconst CANAIS = [\n  { channelId: 'UC_SUBSTITUA_PELO_ID_REAL_1', channelName: 'Brian Pasch' },\n  { channelId: 'UC_SUBSTITUA_PELO_ID_REAL_2', channelName: 'Autoline Network' },\n];\n\n// Janela de busca: 7 dias (semanal). Para bi-semanal, use 14 e ajuste o trigger.\nconst DIAS_JANELA = 7;\n\n// Fail-fast: sem credenciais não há o que executar.\nfor (const nome of ['YOUTUBE_API_KEY', 'RAPIDAPI_KEY', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID']) {\n  if (!$env[nome]) {\n    throw new Error('Variável de ambiente ausente no container n8n: ' + nome + ' (ver agents/youtube-etl/README.md)');\n  }\n}\n\nconst publishedAfter = new Date(Date.now() - DIAS_JANELA * 24 * 60 * 60 * 1000).toISOString();\nreturn CANAIS.map((c) => ({ json: { ...c, publishedAfter } }));"
+        "jsCode": "// Canais monitorados — lista pública, edite aqui para adicionar/remover canais.\n// Para descobrir o channelId (formato UC...): abra o canal no YouTube → aba\n// \"Sobre\" → \"Compartilhar canal\" → \"Copiar ID do canal\".\nconst CANAIS = [\n  { channelId: 'UCWg39NuCbNv26A3sV09m-ag', channelName: 'Brian Pasch' },\n  { channelId: 'UC61SJ883L5W8ACiM0XVPF5g', channelName: 'ASOTU' },\n  { channelId: 'UCzGxSaDv_5dgSe4RgJ99sfA', channelName: 'CarEdge' },\n  { channelId: 'UCoBaFUmLRgc_-d-rkBCFyfQ', channelName: 'Autoline Network' },\n  { channelId: 'UCagiBBx1prefrlsDzDxuA9A', channelName: 'Solving The Money Problem' },\n  { channelId: 'UCj--iMtToRO_cGG_fpmP5XQ', channelName: 'Munro Live' },\n];\n\n// Janela de busca: 7 dias (semanal). Para bi-semanal, use 14 e ajuste o trigger.\nconst DIAS_JANELA = 7;\n\n// Teto de vídeos mais recentes por canal, por rodada. Existe para proteger a\n// cota da API de transcrição (RapidAPI free tier: 100 chamadas/mês — 1 chamada\n// por vídeo). Com 6 canais que postam quase diariamente, sem teto uma única\n// rodada semanal já estourou os 100/mês (46 chamadas numa execução real).\n// 3/canal = até 18 vídeos/semana ≈ 78/mês no pior caso.\nconst MAX_VIDEOS_POR_CANAL = 3;\n\n// Fail-fast: sem credenciais não há o que executar.\nfor (const nome of ['YOUTUBE_API_KEY', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID']) {\n  if (!$env[nome]) {\n    throw new Error('Variável de ambiente ausente no container n8n: ' + nome + ' (ver agents/youtube-etl/README.md)');\n  }\n}\n\nconst publishedAfter = new Date(Date.now() - DIAS_JANELA * 24 * 60 * 60 * 1000).toISOString();\nreturn CANAIS.map((c) => ({\n  json: {\n    ...c,\n    uploadsPlaylistId: 'UU' + c.channelId.slice(2), // uploads playlist = UC->UU\n    publishedAfter,\n    maxVideos: MAX_VIDEOS_POR_CANAL,\n  },\n}));"
       },
       "id": "d4e5f6a7-0001-0000-0000-000000000002",
       "name": "Config Canais",
@@ -43,7 +43,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "https://www.googleapis.com/youtube/v3/search",
+        "url": "https://www.googleapis.com/youtube/v3/playlistItems",
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
@@ -52,24 +52,12 @@
               "value": "snippet"
             },
             {
-              "name": "channelId",
-              "value": "={{ $json.channelId }}"
-            },
-            {
-              "name": "order",
-              "value": "date"
-            },
-            {
-              "name": "type",
-              "value": "video"
-            },
-            {
-              "name": "publishedAfter",
-              "value": "={{ $json.publishedAfter }}"
+              "name": "playlistId",
+              "value": "={{ $json.uploadsPlaylistId }}"
             },
             {
               "name": "maxResults",
-              "value": "5"
+              "value": "={{ $json.maxVideos }}"
             },
             {
               "name": "key",
@@ -98,7 +86,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Achata as respostas da search.list em 1 item por vídeo.\n// Canal com erro na API não derruba o run: vira entrada em `falhas`.\nconst videos = [];\nconst falhas = [];\nconst entradas = $input.all();\n\nfor (let i = 0; i < entradas.length; i++) {\n  const r = entradas[i].json;\n  const canal = $('Config Canais').itemMatching(i).json.channelName;\n  if (r.error) {\n    const detalhe = (r.error.message || JSON.stringify(r.error)).slice(0, 200);\n    falhas.push(canal + ': erro na YouTube API — ' + detalhe);\n    continue;\n  }\n  for (const v of r.items || []) {\n    const videoId = v.id && v.id.videoId;\n    if (!videoId) continue;\n    videos.push({\n      videoId,\n      titulo: (v.snippet && v.snippet.title) || '(sem título)',\n      canal: (v.snippet && v.snippet.channelTitle) || canal,\n      publicadoEm: (v.snippet && v.snippet.publishedAt) || '',\n    });\n  }\n}\n\nif (videos.length === 0) {\n  // Sentinela: mantém o fluxo vivo até o relatório/notificação de semana vazia.\n  return [{ json: { semVideos: true, falhas } }];\n}\n\nvideos[0].falhas = falhas;\nreturn videos.map((v) => ({ json: v }));"
+        "jsCode": "// Achata as respostas da search.list em 1 item por vídeo.\n// Canal com erro na API não derruba o run: vira entrada em `falhas`.\nconst videos = [];\nconst falhas = [];\nconst entradas = $input.all();\n\nfor (let i = 0; i < entradas.length; i++) {\n  const r = entradas[i].json;\n  const canal = $('Config Canais').itemMatching(i).json.channelName;\n  if (r.error) {\n    const detalhe = (r.error.message || JSON.stringify(r.error)).slice(0, 200);\n    falhas.push(canal + ': erro na YouTube API — ' + detalhe);\n    continue;\n  }\n  const publishedAfter = $('Config Canais').itemMatching(i).json.publishedAfter;\n  for (const v of r.items || []) {\n    const videoId = v.snippet && v.snippet.resourceId && v.snippet.resourceId.videoId;\n    if (!videoId) continue;\n    const publicadoEm = (v.snippet && v.snippet.publishedAt) || '';\n    if (publicadoEm && publishedAfter && publicadoEm < publishedAfter) continue; // fora da janela\n    videos.push({\n      videoId,\n      titulo: (v.snippet && v.snippet.title) || '(sem título)',\n      canal: (v.snippet && v.snippet.channelTitle) || canal,\n      publicadoEm,\n    });\n  }\n}\n\nif (videos.length === 0) {\n  // Sentinela: mantém o fluxo vivo até o relatório/notificação de semana vazia.\n  return [{ json: { semVideos: true, falhas } }];\n}\n\nvideos[0].falhas = falhas;\nreturn videos.map((v) => ({ json: v }));"
       },
       "id": "d4e5f6a7-0001-0000-0000-000000000004",
       "name": "Extrair VideoIds",
@@ -111,49 +99,13 @@
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "https://youtube-transcript3.p.rapidapi.com/api/transcript",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            {
-              "name": "videoId",
-              "value": "={{ $json.videoId }}"
-            }
-          ]
-        },
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "x-rapidapi-key",
-              "value": "={{ $env.RAPIDAPI_KEY }}"
-            },
-            {
-              "name": "x-rapidapi-host",
-              "value": "youtube-transcript3.p.rapidapi.com"
-            }
-          ]
-        },
-        "options": {
-          "timeout": 60000,
-          "batching": {
-            "batch": {
-              "batchSize": 1,
-              "batchInterval": 1000
-            }
-          },
-          "response": {
-            "response": {
-              "neverError": true
-            }
-          }
-        }
+        "executeOnce": false,
+        "command": "yt-dlp --skip-download --write-auto-sub --write-sub --sub-langs en --sub-format vtt -o \"/tmp/yt-{{ $json.videoId }}\" \"https://www.youtube.com/watch?v={{ $json.videoId }}\" >/tmp/yt-{{ $json.videoId }}.log 2>&1; cat /tmp/yt-{{ $json.videoId }}*.vtt 2>/dev/null; rm -f /tmp/yt-{{ $json.videoId }}* 2>/dev/null"
       },
       "id": "d4e5f6a7-0001-0000-0000-000000000005",
-      "name": "Obter Transcricao (RapidAPI)",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "name": "Obter Transcricao (yt-dlp)",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
       "position": [
         1040,
         300
@@ -162,7 +114,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const SYSTEM_PROMPT = [\n  'Você é um Engenheiro de Dados e Estrategista de Mercado Automotivo.',\n  'Sua tarefa é analisar a transcrição de um vídeo e extrair métricas e tendências críticas, descartando todo o ruído, opiniões não fundamentadas e introduções.',\n  '',\n  'Regras de Extração:',\n  '1. Extraia apenas dados factuais relacionados a: Demanda global/regional, Incentivos/Subsídios, Números de vendas, e Métricas de Performance (CVR, CTR, CPA, margens).',\n  '2. Se um dado ou métrica específica não for mencionado no texto fornecido, você DEVE retornar null. Não infira, não invente.',\n  '3. Mantenha os resumos extremamente concisos (máximo de 2 frases por campo).',\n  '',\n  'Regra de Formatação (CRÍTICA):',\n  'O seu output DEVE ser ÚNICA e EXCLUSIVAMENTE um objeto JSON válido. Não inclua nenhuma formatação markdown (como ```json), explicações, saudações ou texto antes ou depois do JSON.',\n  '',\n  'Estrutura obrigatória do JSON:',\n  '{',\n  '  \"assunto_principal\": \"string\",',\n  '  \"demanda_estoque\": \"string ou null\",',\n  '  \"incentivos_subsidios\": \"string ou null\",',\n  '  \"metricas_performance\": {',\n  '    \"cvr_taxa_conversao\": \"string ou null\",',\n  '    \"ctr_cliques\": \"string ou null\",',\n  '    \"vendas_volume\": \"string ou null\"',\n  '  },',\n  '  \"insight_estrategico\": \"string (Apenas se houver uma oportunidade clara de produto ou negócio baseada nos dados)\"',\n  '}',\n].join('\\n');\n\n// Margem confortável para OLLAMA_CONTEXT_LENGTH=65536 (~6k tokens de entrada).\nconst MAX_CHARS = 24000;\n\n// Tolerante aos formatos de resposta mais comuns das APIs de transcript do\n// RapidAPI: { transcript: [...] }, { data: [...] }, { text: '...' } etc.\nfunction extrairTranscricao(j) {\n  if (!j || j.error) return '';\n  const cand = j.transcript ?? j.data ?? j.text ?? j.content ?? null;\n  if (typeof cand === 'string') return cand.trim();\n  if (Array.isArray(cand)) {\n    return cand\n      .map((t) => (typeof t === 'string' ? t : (t && (t.text || t.snippet)) || ''))\n      .join(' ')\n      .trim();\n  }\n  return '';\n}\n\nconst entradas = $input.all();\nconst saida = [];\nconst semTranscricao = [];\nlet falhas = [];\nlet semVideos = false;\n\nfor (let i = 0; i < entradas.length; i++) {\n  const origem = $('Extrair VideoIds').itemMatching(i).json;\n  if (origem.falhas) falhas = origem.falhas;\n  if (origem.semVideos) {\n    semVideos = true;\n    continue;\n  }\n\n  const transcricao = extrairTranscricao(entradas[i].json);\n  if (!transcricao) {\n    semTranscricao.push(origem.canal + ': \"' + origem.titulo + '\" (https://youtu.be/' + origem.videoId + ')');\n    continue;\n  }\n\n  saida.push({\n    json: {\n      videoId: origem.videoId,\n      titulo: origem.titulo,\n      canal: origem.canal,\n      publicadoEm: origem.publicadoEm,\n      ollamaBody: JSON.stringify({\n        model: 'llama3.2',\n        stream: false,\n        format: 'json', // força a API do Ollama a emitir JSON válido\n        options: { temperature: 0.2 },\n        messages: [\n          { role: 'system', content: SYSTEM_PROMPT },\n          { role: 'user', content: 'TRANSCRIÇÃO DO VÍDEO \"' + origem.titulo + '\" (canal ' + origem.canal + '):\\n\\n' + transcricao.slice(0, MAX_CHARS) },\n        ],\n      }),\n    },\n  });\n}\n\nif (saida.length === 0) {\n  // Semana sem nada analisável: chamada mínima ao Ollama só para manter o fluxo\n  // linear vivo até o relatório/notificação (custo local desprezível).\n  saida.push({\n    json: {\n      pularAnalise: true,\n      ollamaBody: JSON.stringify({\n        model: 'llama3.2',\n        stream: false,\n        format: 'json',\n        options: { num_predict: 5 },\n        messages: [{ role: 'user', content: 'Responda apenas {}' }],\n      }),\n    },\n  });\n}\n\nsaida[0].json.semTranscricao = semTranscricao;\nsaida[0].json.falhas = falhas;\nsaida[0].json.semVideos = semVideos;\nreturn saida;"
+        "jsCode": "const SYSTEM_PROMPT = [\n  'Você é um Engenheiro de Dados e Estrategista de Mercado Automotivo.',\n  'Sua tarefa é analisar a transcrição de um vídeo e extrair métricas e tendências críticas, descartando todo o ruído, opiniões não fundamentadas e introduções.',\n  '',\n  'Regras de Extração:',\n  '1. Extraia apenas dados factuais relacionados a: Demanda global/regional, Incentivos/Subsídios, Números de vendas, e Métricas de Performance (CVR, CTR, CPA, margens).',\n  '2. Se um dado ou métrica específica não for mencionado no texto fornecido, você DEVE retornar null. Não infira, não invente.',\n  '3. Mantenha os resumos extremamente concisos (máximo de 2 frases por campo).',\n  '',\n  'Regra de Formatação (CRÍTICA):',\n  'O seu output DEVE ser ÚNICA e EXCLUSIVAMENTE um objeto JSON válido. Não inclua nenhuma formatação markdown (como ```json), explicações, saudações ou texto antes ou depois do JSON.',\n  '',\n  'Estrutura obrigatória do JSON:',\n  '{',\n  '  \"assunto_principal\": \"string\",',\n  '  \"demanda_estoque\": \"string ou null\",',\n  '  \"incentivos_subsidios\": \"string ou null\",',\n  '  \"metricas_performance\": {',\n  '    \"cvr_taxa_conversao\": \"string ou null\",',\n  '    \"ctr_cliques\": \"string ou null\",',\n  '    \"vendas_volume\": \"string ou null\"',\n  '  },',\n  '  \"insight_estrategico\": \"string (Apenas se houver uma oportunidade clara de produto ou negócio baseada nos dados)\"',\n  '}',\n].join('\\n');\n\n// Margem confortável para OLLAMA_CONTEXT_LENGTH=65536 (~6k tokens de entrada).\nconst MAX_CHARS = 24000;\n\n// yt-dlp escreve legenda .vtt em stdout (via `cat` no comando); sem legenda\n// disponível, stdout vem vazio. Extrai o texto puro, descartando cabeçalho,\n// timestamps e tags inline, com dedupe de linha consecutiva repetida (comum\n// em legenda automática).\nfunction extrairTranscricao(j) {\n  if (!j || j.error) return '';\n  const vtt = typeof j.stdout === 'string' ? j.stdout : '';\n  if (!vtt.trim()) return '';\n  const linhas = vtt.split(/\\r?\\n/);\n  const out = [];\n  let ultima = '';\n  for (const linha of linhas) {\n    const l = linha.trim();\n    if (!l) continue;\n    if (l.startsWith('WEBVTT')) continue;\n    if (/^\\d+$/.test(l)) continue; // número da cue\n    if (l.includes('-->')) continue; // linha de timestamp\n    if (/^(Kind|Language):/i.test(l)) continue; // metadado do cabeçalho vtt\n    const limpo = l.replace(/<[^>]+>/g, '').trim(); // tags inline (<c>, <00:00:01.000>)\n    if (!limpo || limpo === ultima) continue; // dedupe de linha repetida\n    out.push(limpo);\n    ultima = limpo;\n  }\n  return out.join(' ').replace(/\\s+/g, ' ').trim();\n}\n\nconst entradas = $input.all();\nconst saida = [];\nconst semTranscricao = [];\nlet falhas = [];\nlet semVideos = false;\n\nfor (let i = 0; i < entradas.length; i++) {\n  const origem = $('Extrair VideoIds').itemMatching(i).json;\n  if (origem.falhas) falhas = origem.falhas;\n  if (origem.semVideos) {\n    semVideos = true;\n    continue;\n  }\n\n  const transcricao = extrairTranscricao(entradas[i].json);\n  if (!transcricao) {\n    semTranscricao.push(origem.canal + ': \"' + origem.titulo + '\" (https://youtu.be/' + origem.videoId + ')');\n    continue;\n  }\n\n  saida.push({\n    json: {\n      videoId: origem.videoId,\n      titulo: origem.titulo,\n      canal: origem.canal,\n      publicadoEm: origem.publicadoEm,\n      ollamaBody: JSON.stringify({\n        model: 'llama3.2',\n        stream: false,\n        format: 'json', // força a API do Ollama a emitir JSON válido\n        options: { temperature: 0.2 },\n        messages: [\n          { role: 'system', content: SYSTEM_PROMPT },\n          { role: 'user', content: 'TRANSCRIÇÃO DO VÍDEO \"' + origem.titulo + '\" (canal ' + origem.canal + '):\\n\\n' + transcricao.slice(0, MAX_CHARS) },\n        ],\n      }),\n    },\n  });\n}\n\nif (saida.length === 0) {\n  // Semana sem nada analisável: chamada mínima ao Ollama só para manter o fluxo\n  // linear vivo até o relatório/notificação (custo local desprezível).\n  saida.push({\n    json: {\n      pularAnalise: true,\n      ollamaBody: JSON.stringify({\n        model: 'llama3.2',\n        stream: false,\n        format: 'json',\n        options: { num_predict: 5 },\n        messages: [{ role: 'user', content: 'Responda apenas {}' }],\n      }),\n    },\n  });\n}\n\nsaida[0].json.semTranscricao = semTranscricao;\nsaida[0].json.falhas = falhas;\nsaida[0].json.semVideos = semVideos;\nreturn saida;"
       },
       "id": "d4e5f6a7-0001-0000-0000-000000000006",
       "name": "Montar Prompt Ollama",
@@ -268,6 +220,23 @@
         2240,
         300
       ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "youtube-etl-run",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "1a34eca7-c343-4daf-9c7f-abaf5eeafe93",
+      "name": "Trigger Manual (Webhook)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        240,
+        460
+      ],
+      "webhookId": "f8248f6a-dcf6-4eb1-81b0-695959028adc"
     }
   ],
   "connections": {
@@ -308,18 +277,7 @@
       "main": [
         [
           {
-            "node": "Obter Transcricao (RapidAPI)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Obter Transcricao (RapidAPI)": {
-      "main": [
-        [
-          {
-            "node": "Montar Prompt Ollama",
+            "node": "Obter Transcricao (yt-dlp)",
             "type": "main",
             "index": 0
           }
@@ -375,6 +333,28 @@
         [
           {
             "node": "Enviar Telegram (Hermes)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger Manual (Webhook)": {
+      "main": [
+        [
+          {
+            "node": "Config Canais",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Obter Transcricao (yt-dlp)": {
+      "main": [
+        [
+          {
+            "node": "Montar Prompt Ollama",
             "type": "main",
             "index": 0
           }

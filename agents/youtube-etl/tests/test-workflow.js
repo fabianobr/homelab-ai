@@ -3,9 +3,10 @@
  * Harness de teste do workflow agents/youtube-etl/workflows/01-youtube-etl.json.
  *
  * Executa o JavaScript REAL dos 5 Code nodes (extraído do JSON do workflow),
- * encadeado na mesma ordem do n8n, simulando os nós HTTP (YouTube, RapidAPI,
- * Ollama) com respostas mockadas — incluindo a semântica de pareamento
- * itemMatching(i) e o comportamento neverError (erro vira item com {error}).
+ * encadeado na mesma ordem do n8n, simulando os nós HTTP (YouTube, Ollama) e
+ * o Execute Command (yt-dlp) com respostas mockadas — incluindo a semântica
+ * de pareamento itemMatching(i) e o comportamento onError:continueRegularOutput
+ * (erro vira item com {error}).
  */
 const fs = require('fs');
 
@@ -17,7 +18,6 @@ for (const n of WF.nodes.filter((n) => n.type === 'n8n-nodes-base.code')) {
 
 const ENV = {
   YOUTUBE_API_KEY: 'fake-key',
-  RAPIDAPI_KEY: 'fake-key',
   TELEGRAM_BOT_TOKEN: 'fake-token',
   TELEGRAM_CHAT_ID: '123456',
 };
@@ -62,41 +62,62 @@ const ANALISE_SEM_METRICAS = {
   insight_estrategico: 'n/a',
 };
 
+// Config Canais usa Date.now() para calcular publishedAfter (janela de 7 dias);
+// fixamos o relógio para os fixtures de vídeo (datas de 07-2026) não expirarem
+// conforme o tempo passa.
+const NOW_FIXED = new Date('2026-07-21T00:00:00Z').getTime();
+function comRelogioFixo(fn) {
+  const original = Date.now;
+  Date.now = () => NOW_FIXED;
+  try {
+    return fn();
+  } finally {
+    Date.now = original;
+  }
+}
+
 // ---------------------------------------------------------------------------
 console.log('\n=== CENÁRIO A: misto (2 canais, 1 erro de API; 3 vídeos: ok / sem transcrição / JSON inválido / schema inválido) ===');
 {
   const out = {};
 
   // 1. Config Canais
-  const cfg = runCode('Config Canais', [], out);
-  assert(cfg.length === 2, `Config Canais emite 1 item por canal (${cfg.length})`);
+  const cfg = comRelogioFixo(() => runCode('Config Canais', [], out));
+  assert(cfg.length === 6, `Config Canais emite 1 item por canal (${cfg.length})`);
   assert(/\d{4}-\d{2}-\d{2}T/.test(cfg[0].json.publishedAfter), 'publishedAfter é ISO-8601');
+  assert(cfg[0].json.uploadsPlaylistId === 'UU' + cfg[0].json.channelId.slice(2), 'uploadsPlaylistId derivado do channelId (UC→UU)');
 
-  // 2. Buscar Videos (mock): canal 1 responde com 3 vídeos, canal 2 falha (quota)
+  // 2. Buscar Videos (mock, formato playlistItems.list): canal 1 responde com 3 vídeos, canal 2 falha
   out['Buscar Videos (YouTube)'] = [
     { json: { items: [
-      { id: { videoId: 'vid00000001' }, snippet: { title: 'EV Demand Collapse?', channelTitle: 'Brian Pasch', publishedAt: '2026-07-20T10:00:00Z' } },
-      { id: { videoId: 'vid00000002' }, snippet: { title: 'Dealer CVR Deep Dive', channelTitle: 'Brian Pasch', publishedAt: '2026-07-19T10:00:00Z' } },
-      { id: { videoId: 'vid00000003' }, snippet: { title: 'Shorts sem legenda', channelTitle: 'Brian Pasch', publishedAt: '2026-07-18T10:00:00Z' } },
-      { id: { playlistId: 'PL123' }, snippet: { title: 'não é vídeo' } },
+      { snippet: { resourceId: { videoId: 'vid00000001' }, title: 'EV Demand Collapse?', channelTitle: 'Brian Pasch', publishedAt: '2026-07-20T10:00:00Z' } },
+      { snippet: { resourceId: { videoId: 'vid00000002' }, title: 'Dealer CVR Deep Dive', channelTitle: 'Brian Pasch', publishedAt: '2026-07-19T10:00:00Z' } },
+      { snippet: { resourceId: { videoId: 'vid00000003' }, title: 'Shorts sem legenda', channelTitle: 'Brian Pasch', publishedAt: '2026-07-18T10:00:00Z' } },
+      { snippet: { resourceId: { videoId: 'vid00000004' }, title: 'Fora da janela (10 dias atrás)', channelTitle: 'Brian Pasch', publishedAt: '2026-07-11T10:00:00Z' } },
+      { snippet: { title: 'não é vídeo (sem resourceId)' } },
     ] } },
     { json: { error: { message: 'quotaExceeded: daily limit reached' } } },
   ];
 
   // 3. Extrair VideoIds
   const vids = runCode('Extrair VideoIds', out['Buscar Videos (YouTube)'], out);
-  assert(vids.length === 3, `3 vídeos extraídos, item sem videoId descartado (${vids.length})`);
-  assert(vids[0].json.falhas.length === 1 && /Autoline/.test(vids[0].json.falhas[0]), 'falha do canal 2 registrada com nome do canal');
+  assert(vids.length === 3, `3 vídeos extraídos, fora-da-janela e sem videoId descartados (${vids.length})`);
+  assert(vids[0].json.falhas.length === 1 && /ASOTU/.test(vids[0].json.falhas[0]), 'falha do canal 2 registrada com nome do canal');
 
-  // 4. Obter Transcricao (mock): vid1 formato {transcript:[{text}]}, vid2 formato {data:'string'}, vid3 sem transcrição
-  out['Obter Transcricao (RapidAPI)'] = [
-    { json: { success: true, transcript: [{ text: 'EV inventory hit 120 days supply.' }, { text: 'Lead CVR dropped from twelve to nine percent.' }] } },
-    { json: { data: 'Dealers are changing their digital retail process end to end this year.' } },
-    { json: { error: 'No captions available for this video' } },
+  // 4. Obter Transcricao (mock, saída do Execute Command/yt-dlp): vid1 e vid2 com
+  // legenda .vtt em stdout, vid3 sem legenda (yt-dlp falha → onError vira {error})
+  out['Obter Transcricao (yt-dlp)'] = [
+    { json: { exitCode: 0, stdout:
+      'WEBVTT\nKind: captions\nLanguage: en\n\n' +
+      '00:00:00.000 --> 00:00:02.000\nEV inventory hit 120 days supply.\n\n' +
+      '00:00:02.000 --> 00:00:05.000\nLead CVR dropped from twelve to nine percent.\n' } },
+    { json: { exitCode: 0, stdout:
+      'WEBVTT\n\n00:00:00.000 --> 00:00:03.000\nDealers are changing their digital retail process end to end this year.\n' } },
+    { json: { error: 'Command failed: yt-dlp ... exit code 1' } },
   ];
 
   // 5. Montar Prompt Ollama
-  const prompts = runCode('Montar Prompt Ollama', out['Obter Transcricao (RapidAPI)'], out);
+  const prompts = runCode('Montar Prompt Ollama', out['Obter Transcricao (yt-dlp)'], out);
   assert(prompts.length === 2, `2 itens analisáveis (${prompts.length})`);
   assert(prompts[0].json.semTranscricao.length === 1 && /vid00000003/.test(prompts[0].json.semTranscricao[0]), 'vídeo sem transcrição contabilizado');
   const body0 = JSON.parse(prompts[0].json.ollamaBody);
@@ -137,17 +158,14 @@ console.log('\n=== CENÁRIO A: misto (2 canais, 1 erro de API; 3 vídeos: ok / s
 console.log('\n=== CENÁRIO B: semana vazia (nenhum vídeo novo) ===');
 {
   const out = {};
-  runCode('Config Canais', [], out);
-  out['Buscar Videos (YouTube)'] = [
-    { json: { items: [] } },
-    { json: { items: [] } },
-  ];
+  comRelogioFixo(() => runCode('Config Canais', [], out));
+  out['Buscar Videos (YouTube)'] = Array(6).fill({ json: { items: [] } });
   const vids = runCode('Extrair VideoIds', out['Buscar Videos (YouTube)'], out);
   assert(vids.length === 1 && vids[0].json.semVideos === true, 'sentinela semVideos emitida');
 
   // Transcript da sentinela falha (videoId undefined) → item de erro
-  out['Obter Transcricao (RapidAPI)'] = [{ json: { error: 'videoId is required' } }];
-  const prompts = runCode('Montar Prompt Ollama', out['Obter Transcricao (RapidAPI)'], out);
+  out['Obter Transcricao (yt-dlp)'] = [{ json: { error: 'yt-dlp: videoId ausente' } }];
+  const prompts = runCode('Montar Prompt Ollama', out['Obter Transcricao (yt-dlp)'], out);
   assert(prompts.length === 1 && prompts[0].json.pularAnalise === true, 'chamada mínima ao Ollama para manter o fluxo vivo');
 
   out['Analisar com Llama3.2'] = [{ json: { message: { role: 'assistant', content: '{}' } } }];
@@ -168,25 +186,26 @@ console.log('\n=== CENÁRIO C: credencial ausente → fail-fast ===');
   const out = {};
   let erro = null;
   try {
-    runCode('Config Canais', [], out, { ...ENV, RAPIDAPI_KEY: '' });
+    runCode('Config Canais', [], out, { ...ENV, YOUTUBE_API_KEY: '' });
   } catch (e) {
     erro = e;
   }
-  assert(erro !== null && /RAPIDAPI_KEY/.test(erro.message), `Config Canais aborta com mensagem clara (${erro && erro.message})`);
+  assert(erro !== null && /YOUTUBE_API_KEY/.test(erro.message), `Config Canais aborta com mensagem clara (${erro && erro.message})`);
 }
 
 // ---------------------------------------------------------------------------
 console.log('\n=== CENÁRIO D: truncamento de transcrição longa ===');
 {
   const out = {};
-  runCode('Config Canais', [], out);
+  comRelogioFixo(() => runCode('Config Canais', [], out));
   out['Buscar Videos (YouTube)'] = [
-    { json: { items: [{ id: { videoId: 'vidlongo0001' }, snippet: { title: 'Longo', channelTitle: 'Brian Pasch', publishedAt: '2026-07-20T00:00:00Z' } }] } },
-    { json: { items: [] } },
+    { json: { items: [{ snippet: { resourceId: { videoId: 'vidlongo0001' }, title: 'Longo', channelTitle: 'Brian Pasch', publishedAt: '2026-07-20T00:00:00Z' } }] } },
+    ...Array(5).fill({ json: { items: [] } }),
   ];
   runCode('Extrair VideoIds', out['Buscar Videos (YouTube)'], out);
-  out['Obter Transcricao (RapidAPI)'] = [{ json: { text: 'palavra '.repeat(10000) } }]; // 80k chars
-  const prompts = runCode('Montar Prompt Ollama', out['Obter Transcricao (RapidAPI)'], out);
+  const vttLongo = 'WEBVTT\n\n00:00:00.000 --> 01:00:00.000\n' + 'palavra '.repeat(10000); // ~80k chars
+  out['Obter Transcricao (yt-dlp)'] = [{ json: { exitCode: 0, stdout: vttLongo } }];
+  const prompts = runCode('Montar Prompt Ollama', out['Obter Transcricao (yt-dlp)'], out);
   const body = JSON.parse(prompts[0].json.ollamaBody);
   assert(body.messages[1].content.length < 25000, `transcrição truncada em ~24k chars (${body.messages[1].content.length})`);
 }

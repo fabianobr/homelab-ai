@@ -28,5 +28,5 @@ docker logs n8n --tail 10 2>&1 | grep -i "activated workflow" || echo "(nenhuma 
 echo ""
 echo "Agendamento: toda segunda-feira às 08:00 (TZ do container) via Schedule Trigger."
 echo "Antes do primeiro run: preencha os channelIds no nó 'Config Canais' (UI do n8n)"
-echo "e as variáveis YOUTUBE_API_KEY / RAPIDAPI_KEY / TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID"
+echo "e as variáveis YOUTUBE_API_KEY / TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID"
 echo "no .env do compose (ver README.md)."
