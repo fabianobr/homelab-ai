@@ -1,10 +1,10 @@
 [Unit]
-Description=Dispara o youtube-etl toda segunda 08:00 (com catch-up)
+Description=Dispara o youtube-etl toda sexta 18:00 (com catch-up)
 
 [Timer]
-# 08:00 — uma hora antes do weekly-sdlc-research (09:00), pra não concorrer
+# 18:00 — uma hora antes do weekly-sdlc-research (19:00), pra não concorrer
 # pela GPU/Ollama.
-OnCalendar=Mon 08:00
+OnCalendar=Fri 18:00
 Persistent=true
 RandomizedDelaySec=2min
 
