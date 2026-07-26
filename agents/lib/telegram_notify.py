@@ -37,15 +37,20 @@ def send_telegram_message(text: str, logger=None) -> bool:
         if logger:
             logger.info("Telegram message sent to chat_id %s.", chat_id)
         return True
-    except Exception as exc:
+    except requests.exceptions.RequestException as exc:
+        # Network error, bad token/chat_id, message too long (>4096 chars), etc.
         if logger:
-            logger.warning("Telegram sendMessage failed: %s", exc)
+            logger.error("Telegram sendMessage failed — notification NOT delivered: %s", exc)
         return False
 
 
 def send_telegram_document(file_path, caption: str = "", logger=None) -> bool:
     token, chat_id = get_telegram_credentials()
     if not token or not chat_id:
+        if logger:
+            logger.info(
+                "Telegram not configured (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set) — skipping document."
+            )
         return False
     try:
         with open(file_path, "rb") as f:
@@ -59,7 +64,13 @@ def send_telegram_document(file_path, caption: str = "", logger=None) -> bool:
         if logger:
             logger.info("Telegram document sent to chat_id %s: %s", chat_id, file_path)
         return True
-    except Exception as exc:
+    except requests.exceptions.RequestException as exc:
+        # Network error, bad token/chat_id, file too large (>50MB), etc.
         if logger:
-            logger.warning("Telegram sendDocument failed: %s", exc)
+            logger.error("Telegram sendDocument failed — attachment NOT delivered: %s", exc)
+        return False
+    except OSError as exc:
+        # File missing/unreadable — a bug in the caller, distinct from a delivery failure.
+        if logger:
+            logger.error("Could not open report file '%s' to send: %s", file_path, exc)
         return False

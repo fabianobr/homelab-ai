@@ -172,14 +172,14 @@ def extract_known_items(backlog_text: str, known_discarded: list[str]) -> set[st
 # ---------------------------------------------------------------------------
 # Ollama interface
 # ---------------------------------------------------------------------------
-def check_ollama(ollama_url: str, logger: logging.Logger) -> str | None:
-    """Return the first available model name or None."""
+def check_ollama(ollama_url: str, logger: logging.Logger) -> list[str] | None:
+    """Return the list of available model names, or None if Ollama is unreachable."""
     try:
         resp = requests.get(f"{ollama_url}/api/tags", timeout=8)
         resp.raise_for_status()
         models = [m["name"] for m in resp.json().get("models", [])]
         logger.info("Ollama available models: %s", models)
-        return models[0] if models else None
+        return models
     except Exception as exc:
         logger.warning("Ollama not reachable: %s", exc)
         return None
@@ -188,15 +188,9 @@ def check_ollama(ollama_url: str, logger: logging.Logger) -> str | None:
 def pick_model(cfg: dict, logger: logging.Logger) -> str | None:
     """Pick preferred model, fallback, or whatever is installed."""
     ollama_url = cfg["ollama_url"]
-    available = check_ollama(ollama_url, logger)
-    if available is None:
+    models = check_ollama(ollama_url, logger)
+    if not models:
         return None
-
-    try:
-        resp = requests.get(f"{ollama_url}/api/tags", timeout=8)
-        models = [m["name"] for m in resp.json().get("models", [])]
-    except Exception:
-        models = []
 
     preferred = cfg.get("ollama_model", "")
     fallback = cfg.get("ollama_fallback_model", "")
@@ -227,7 +221,11 @@ def pick_model(cfg: dict, logger: logging.Logger) -> str | None:
                 return installed
 
     if models:
-        logger.info("Preferred models not found; using first available: %s", models[0])
+        logger.warning(
+            "Preferred model '%s' (or fallback '%s') not found; using first available "
+            "as last resort: %s — may be unsuitable for this task (e.g. embedding/vision model).",
+            preferred, fallback, models[0],
+        )
         return models[0]
     return None
 
@@ -240,7 +238,7 @@ def ollama_chat(
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
-        "options": {"temperature": 0.2, "num_predict": 1024},
+        "options": {"temperature": 0.2, "num_predict": 4096},
     }
     try:
         resp = requests.post(
@@ -565,6 +563,7 @@ def send_telegram(
     raw_result_count: int,
     model: str,
     report_path=None,
+    llm_error: str = "",
 ) -> None:
     """Send a Telegram message via the Hermes bot, with run metadata and the report attached."""
     params_block = (
@@ -576,7 +575,13 @@ def send_telegram(
         f"Modelo de análise: {model or '(nenhum — Ollama indisponível)'}"
     )
 
-    if not new_items:
+    if llm_error:
+        text = (
+            f"⚠️ Weekly LLM Research — {today}\n\n"
+            f"FALHA na análise LLM: {llm_error}\n"
+            f"{params_block}"
+        )
+    elif not new_items:
         text = (
             f"Weekly LLM Research — {today}\n\n"
             "Nenhum item novo encontrado esta semana.\n"
@@ -596,17 +601,33 @@ def send_telegram(
         lines.append(params_block)
         text = "\n".join(lines)
 
-    send_telegram_message(text, logger)
-    if report_path is not None:
-        send_telegram_document(
-            report_path, caption=f"Relatório completo — {today}", logger=logger
+    if not send_telegram_message(text, logger):
+        logger.error(
+            "Falha ao enviar a notificação Telegram — ninguém será avisado do resultado desta execução."
         )
+    if report_path is not None:
+        caption = f"⚠️ Relatório com erro — {today}" if llm_error else f"Relatório completo — {today}"
+        if not send_telegram_document(report_path, caption=caption, logger=logger):
+            logger.error("Falha ao anexar o relatório no Telegram.")
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 def main() -> None:
+    """Run the agent, guaranteeing a Telegram alert even on an unhandled crash."""
+    try:
+        _run()
+    except Exception as exc:
+        logging.getLogger("research_agent").exception("Agent crashed unexpectedly.")
+        send_telegram_message(
+            f"🔥 Weekly LLM Research — CRASH\n\nO agente quebrou antes de terminar: {exc}",
+            logger=None,
+        )
+        raise
+
+
+def _run() -> None:
     cfg = load_config()
     logger = setup_logging(cfg.get("log_file", "research.log"))
     today = datetime.now().strftime("%Y-%m-%d")
@@ -629,14 +650,26 @@ def main() -> None:
     # 3. Check Ollama
     model = pick_model(cfg, logger)
     if model is None:
+        no_model_error = "Ollama indisponível ou sem modelos instalados."
         logger.error(
             "Ollama not available or no models installed. "
             "Writing raw results to report without LLM analysis."
         )
-        write_report(
+        report_path = write_report(
             [], all_results, queries, reports_dir, today, logger,
-            llm_error="Ollama indisponível ou sem modelos instalados.",
+            llm_error=no_model_error,
             llm_model="",
+        )
+        send_telegram(
+            [],
+            today,
+            logger,
+            queries=queries,
+            known_count=len(known_items),
+            raw_result_count=len(all_results),
+            model="",
+            report_path=report_path,
+            llm_error=no_model_error,
         )
         logger.info("Done (no LLM analysis).")
         return
@@ -674,6 +707,7 @@ def main() -> None:
         raw_result_count=len(all_results),
         model=model,
         report_path=report_path,
+        llm_error=llm_error,
     )
 
     logger.info("=== Agent finished. Report: %s ===", report_path)
