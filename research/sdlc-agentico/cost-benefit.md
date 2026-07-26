@@ -10,6 +10,205 @@ Gerado pelo agente semanal em `agents/weekly-cost-benefit/`.
 
 ## Setups avaliados
 
+### Analise de 2026-07-24
+
+| Setup | Tipo | CAPEX (US$) | OPEX (US$/mes) | Vel. | Qual. | Breakeven | Veredito |
+|---|---|---|---|---|---|---|---|
+| Cursor Pro | paid | 0 | 20 | 4/5 | 4/5 | nunca | paid |
+| GitHub Copilot Pro | paid | 0 | 10 | 3/5 | 3/5 | 0m | paid |
+| GitHub Copilot Pro+ | paid | 0 | 39 | 4/5 | 4/5 | nunca | paid |
+| Claude Pro | paid | 0 | 20 | 4/5 | 4/5 | nunca | paid |
+| Claude Max 5x | paid | 0 | 100 | 5/5 | 5/5 | nunca | paid |
+| Claude Max 20x | paid | 0 | 200 | 5/5 | 5/5 | nunca | paid |
+| ChatGPT Plus / Codex | paid | 0 | 20 | 4/5 | 4/5 | nunca | paid |
+| ChatGPT Pro | paid | 0 | 200 | 5/5 | 5/5 | nunca | paid |
+| Google AI Pro (Gemini / Antigravity) | paid | 0 | 20 | 4/5 | 4/5 | nunca | paid |
+| Local AI Development Setup (Ollama + LM Studio) | local | 430 | 15 | 4/5 | 4/5 | nunca | local |
+| Local LLM Rig (RTX 4090 24GB) | local | 1500 | 25 | 5/5 | 5/5 | nunca | local |
+| Mac Studio M4 Max 64GB | local | 2500 | 8 | 5/5 | 5/5 | 1250m | local |
+
+### Cursor Pro
+- **Tipo:** paid
+- **CAPEX:** US$ 0
+- **OPEX:** US$ 20/mes
+- **Velocidade:** 4/5 | **Qualidade:** 4/5
+- **Breakeven local vs pago:** nunca
+- **Veredito:** paid
+- **Justificativa:** Paid option offers consistent performance and integration with development tools, though local setups may offer better long-term cost efficiency.
+- **Fonte:** https://www.cosmicjs.com/blog/claude-code-vs-github-copilot-vs-cursor-which-ai-coding-agent-should-you-use-2026
+
+### GitHub Copilot Pro
+- **Tipo:** paid
+- **CAPEX:** US$ 0
+- **OPEX:** US$ 10/mes
+- **Velocidade:** 3/5 | **Qualidade:** 3/5
+- **Breakeven local vs pago:** 0m
+- **Veredito:** paid
+- **Justificativa:** Lower cost but less advanced than Cursor, making it suitable for basic coding assistance needs.
+- **Fonte:** https://www.cosmicjs.com/blog/claude-code-vs-github-copilot-vs-cursor-which-ai-coding-agent-should-you-use-2026
+
+### GitHub Copilot Pro+
+- **Tipo:** paid
+- **CAPEX:** US$ 0
+- **OPEX:** US$ 39/mes
+- **Velocidade:** 4/5 | **Qualidade:** 4/5
+- **Breakeven local vs pago:** nunca
+- **Veredito:** paid
+- **Justificativa:** Higher cost but provides more advanced features and better quality output compared to the standard Copilot plan.
+- **Fonte:** https://www.cosmicjs.com/blog/claude-code-vs-github-copilot-vs-cursor-which-ai-coding-agent-should-you-use-2026
+
+### Claude Pro
+- **Tipo:** paid
+- **CAPEX:** US$ 0
+- **OPEX:** US$ 20/mes
+- **Velocidade:** 4/5 | **Qualidade:** 4/5
+- **Breakeven local vs pago:** nunca
+- **Veredito:** paid
+- **Justificativa:** Balanced cost and performance, suitable for most coding tasks with good integration and reliability.
+- **Fonte:** https://www.cosmicjs.com/blog/claude-code-vs-github-copilot-vs-cursor-which-ai-coding-agent-should-you-use-2026
+
+### Claude Max 5x
+- **Tipo:** paid
+- **CAPEX:** US$ 0
+- **OPEX:** US$ 100/mes
+- **Velocidade:** 5/5 | **Qualidade:** 5/5
+- **Breakeven local vs pago:** nunca
+- **Veredito:** paid
+- **Justificativa:** Higher cost but provides superior performance and quality, ideal for complex and large-scale coding tasks.
+- **Fonte:** https://www.cosmicjs.com/blog/claude-code-vs-github-copilot-vs-cursor-which-ai-coding-agent-should-you-use-2026
+
+### Claude Max 20x
+- **Tipo:** paid
+- **CAPEX:** US$ 0
+- **OPEX:** US$ 200/mes
+- **Velocidade:** 5/5 | **Qualidade:** 5/5
+- **Breakeven local vs pago:** nunca
+- **Veredito:** paid
+- **Justificativa:** Highest tier with maximum performance and quality, suitable for enterprise-level coding needs.
+- **Fonte:** https://www.cosmicjs.com/blog/claude-code-vs-github-copilot-vs-cursor-which-ai-coding-agent-should-you-use-2026
+
+### ChatGPT Plus / Codex
+- **Tipo:** paid
+- **CAPEX:** US$ 0
+- **OPEX:** US$ 20/mes
+- **Velocidade:** 4/5 | **Qualidade:** 4/5
+- **Breakeven local vs pago:** nunca
+- **Veredito:** paid
+- **Justificativa:** Moderate cost with good performance, suitable for general coding assistance and integration with existing tools.
+- **Fonte:** https://www.cosmicjs.com/blog/claude-code-vs-github-copilot-vs-cursor-which-ai-coding-agent-should-you-use-2026
+
+### ChatGPT Pro
+- **Tipo:** paid
+- **CAPEX:** US$ 0
+- **OPEX:** US$ 200/mes
+- **Velocidade:** 5/5 | **Qualidade:** 5/5
+- **Breakeven local vs pago:** nunca
+- **Veredito:** paid
+- **Justificativa:** Higher cost but offers top-tier performance and quality, ideal for advanced coding tasks and professional use.
+- **Fonte:** https://www.cosmicjs.com/blog/claude-code-vs-github-copilot-vs-cursor-which-ai-coding-agent-should-you-use-2026
+
+### Google AI Pro (Gemini / Antigravity)
+- **Tipo:** paid
+- **CAPEX:** US$ 0
+- **OPEX:** US$ 20/mes
+- **Velocidade:** 4/5 | **Qualidade:** 4/5
+- **Breakeven local vs pago:** nunca
+- **Veredito:** paid
+- **Justificativa:** Balanced cost and performance, suitable for most coding tasks with good integration and reliability.
+- **Fonte:** https://www.cosmicjs.com/blog/claude-code-vs-github-copilot-vs-cursor-which-ai-coding-agent-should-you-use-2026
+
+### Local AI Development Setup (Ollama + LM Studio)
+- **Tipo:** local
+- **CAPEX:** US$ 430
+- **OPEX:** US$ 15/mes
+- **Velocidade:** 4/5 | **Qualidade:** 4/5
+- **Breakeven local vs pago:** nunca
+- **Veredito:** local
+- **Justificativa:** Lower long-term cost with good performance, suitable for developers who prefer control and customization.
+- **Fonte:** https://www.kunalganglani.com/blog/local-llm-vs-claude-coding-benchmark
+
+### Local LLM Rig (RTX 4090 24GB)
+- **Tipo:** local
+- **CAPEX:** US$ 1500
+- **OPEX:** US$ 25/mes
+- **Velocidade:** 5/5 | **Qualidade:** 5/5
+- **Breakeven local vs pago:** nunca
+- **Veredito:** local
+- **Justificativa:** Higher upfront cost but offers superior performance and quality, ideal for heavy usage and complex tasks.
+- **Fonte:** https://www.kunalganglani.com/blog/local-llm-vs-claude-coding-benchmark
+
+### Mac Studio M4 Max 64GB
+- **Tipo:** local
+- **CAPEX:** US$ 2500
+- **OPEX:** US$ 8/mes
+- **Velocidade:** 5/5 | **Qualidade:** 5/5
+- **Breakeven local vs pago:** 1250m
+- **Veredito:** local
+- **Justificativa:** High upfront cost but offers excellent performance and quality, suitable for professional and enterprise use.
+- **Fonte:** https://www.kunalganglani.com/blog/local-llm-vs-claude-coding-benchmark
+
+
+### Analise de 2026-07-07
+
+| Setup | Tipo | CAPEX (US$) | OPEX (US$/mes) | Vel. | Qual. | Breakeven | Veredito |
+|---|---|---|---|---|---|---|---|
+| Local AI Development Setup (AMD Ryzen 7, RTX 4070) | local | 2500 | 0 | 5/5 | 5/5 | 250m | local |
+| Google Antigravity 2.0 (Free Tier) | paid | 0 | 0 | 4/5 | 5/5 | 0m | paid |
+| Google Antigravity 2.0 (Ultra Tier) | paid | 0 | 100 | 4/5 | 5/5 | nunca | paid |
+| Claude Code (Pro Plan) | paid | 0 | 20 | 4/5 | 5/5 | nunca | paid |
+| Local LLM Setup (Ollama + LM Studio) | local | 0 | 0 | 5/5 | 5/5 | 0m | local |
+
+### Local AI Development Setup (AMD Ryzen 7, RTX 4070)
+- **Tipo:** local
+- **CAPEX:** US$ 2500
+- **OPEX:** US$ 0/mes
+- **Velocidade:** 5/5 | **Qualidade:** 5/5
+- **Breakeven local vs pago:** 250m
+- **Veredito:** local
+- **Justificativa:** High upfront cost but no recurring fees; modern hardware enables fast, high-quality local model training/inference.
+- **Fonte:** https://www.kunalganglani.com/blog/local-llms-complete-guide
+
+### Google Antigravity 2.0 (Free Tier)
+- **Tipo:** paid
+- **CAPEX:** US$ 0
+- **OPEX:** US$ 0/mes
+- **Velocidade:** 4/5 | **Qualidade:** 5/5
+- **Breakeven local vs pago:** 0m
+- **Veredito:** paid
+- **Justificativa:** Free tier offers basic access with low monthly costs; suitable for light use but limited by quotas.
+- **Fonte:** https://vibecoding.app/blog/google-antigravity-pricing-2026
+
+### Google Antigravity 2.0 (Ultra Tier)
+- **Tipo:** paid
+- **CAPEX:** US$ 0
+- **OPEX:** US$ 100/mes
+- **Velocidade:** 4/5 | **Qualidade:** 5/5
+- **Breakeven local vs pago:** nunca
+- **Veredito:** paid
+- **Justificativa:** Mid-tier subscription provides balanced performance for daily developers without excessive costs.
+- **Fonte:** https://vibecoding.app/blog/google-antigravity-pricing-2026
+
+### Claude Code (Pro Plan)
+- **Tipo:** paid
+- **CAPEX:** US$ 0
+- **OPEX:** US$ 20/mes
+- **Velocidade:** 4/5 | **Qualidade:** 5/5
+- **Breakeven local vs pago:** nunca
+- **Veredito:** paid
+- **Justificativa:** Low monthly cost with enterprise-grade quality; ideal for individual developers.
+- **Fonte:** https://www.getaiperks.com/en/blogs/34-claude-code-pricing-vs-alternatives
+
+### Local LLM Setup (Ollama + LM Studio)
+- **Tipo:** local
+- **CAPEX:** US$ 0
+- **OPEX:** US$ 0/mes
+- **Velocidade:** 5/5 | **Qualidade:** 5/5
+- **Breakeven local vs pago:** 0m
+- **Veredito:** local
+- **Justificativa:** Zero-cost software stack with no recurring fees; leverages existing hardware for maximum efficiency.
+- **Fonte:** https://www.kunalganglani.com/blog/local-llms-complete-guide
+
+
 _Setups avaliados pela analise semanal automatica._
 
 ---

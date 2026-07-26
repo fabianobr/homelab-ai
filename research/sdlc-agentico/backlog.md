@@ -270,6 +270,51 @@ Detalhes adicionais em [feedback.md](../feedback.md).
 
 ## Novos itens pendentes de avaliacao
 
+### Pesquisa de 2026-07-20
+
+### Kimi K2.6
+- **Tipo:** model
+- **Relevancia SDLC:** 4/5
+- **Viabilidade HW:** 3/5
+- **Descricao:** A strong local LLM for coding with a MoE architecture, suitable for agentic tasks.
+- **Fonte:** https://www.promptquorum.com/local-llms/best-local-llms-for-coding
+
+### Codestral 22B
+- **Tipo:** model
+- **Relevancia SDLC:** 3/5
+- **Viabilidade HW:** 4/5
+- **Descricao:** A dense model for IDE autocomplete, running locally with good performance.
+- **Fonte:** https://www.promptquorum.com/local-llms/best-local-llms-for-coding
+
+### DeepSeek V4
+- **Tipo:** model
+- **Relevancia SDLC:** 4/5
+- **Viabilidade HW:** 3/5
+- **Descricao:** A strong performer for agentic coding tasks, especially suitable for self-hosting teams.
+- **Fonte:** https://www.mindstudio.ai/blog/best-open-source-llms-agentic-coding-2026
+
+### Dify
+- **Tipo:** orchestrator
+- **Relevancia SDLC:** 5/5
+- **Viabilidade HW:** 4/5
+- **Descricao:** A platform combining visual workflow building, RAG pipelines, AI agents, and prompt engineering.
+- **Fonte:** https://blog.canadianwebhosting.com/open-source-ai-tools-self-hosting-2026/
+
+### OpenClaw
+- **Tipo:** coding_agent
+- **Relevancia SDLC:** 4/5
+- **Viabilidade HW:** 3/5
+- **Descricao:** A self-hosted AI agent that can use local models or cloud APIs, focusing on developer experience.
+- **Fonte:** https://getclawdbot.com/blog/self-hosted-ai-agent-complete-guide-2026/
+
+### Gemma 4 26B A4B
+- **Tipo:** model
+- **Relevancia SDLC:** 3/5
+- **Viabilidade HW:** 2/5
+- **Descricao:** A strong default for local coding, suitable for more powerful hardware setups.
+- **Fonte:** https://huggingface.co/blog/daya-shankar/open-source-llms
+
+
 ### Pesquisa de 2026-06-18
 
 ### KodeOps
