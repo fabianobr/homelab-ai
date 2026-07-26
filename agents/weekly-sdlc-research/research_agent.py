@@ -7,7 +7,6 @@ compares against the backlog and appends new discoveries.
 
 import json
 import logging
-import os
 import re
 import sys
 import time
@@ -23,6 +22,9 @@ from ddgs import DDGS
 # ---------------------------------------------------------------------------
 SCRIPT_DIR = Path(__file__).parent.resolve()
 CONFIG_PATH = SCRIPT_DIR / "config.yaml"
+
+sys.path.insert(0, str(SCRIPT_DIR.parent / "lib"))
+from telegram_notify import send_telegram_document, send_telegram_message  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -200,9 +202,28 @@ def pick_model(cfg: dict, logger: logging.Logger) -> str | None:
     fallback = cfg.get("ollama_fallback_model", "")
 
     for candidate in [preferred, fallback]:
+        if not candidate:
+            continue
+        # Exact match first
+        if candidate in models:
+            logger.info("Using model: %s", candidate)
+            return candidate
+        # Prefix match as fallback (e.g. "qwen2.5-coder:14b" prefix "qwen2.5-coder")
+        prefix = candidate.split(":")[0]
+        tag = candidate.split(":")[-1] if ":" in candidate else ""
         for installed in models:
-            if installed.startswith(candidate.split(":")[0]):
+            installed_prefix = installed.split(":")[0]
+            installed_tag = installed.split(":")[-1] if ":" in installed else ""
+            if installed_prefix == prefix and installed_tag == tag:
                 logger.info("Using model: %s", installed)
+                return installed
+        # Looser prefix match only if no tag-matching candidate found
+        for installed in models:
+            if installed.startswith(prefix + ":"):
+                logger.warning(
+                    "Exact model '%s' not found; using '%s' (prefix match).",
+                    candidate, installed,
+                )
                 return installed
 
     if models:
@@ -223,13 +244,13 @@ def ollama_chat(
     }
     try:
         resp = requests.post(
-            f"{ollama_url}/api/chat", json=payload, timeout=120
+            f"{ollama_url}/api/chat", json=payload, timeout=300
         )
         resp.raise_for_status()
         return resp.json()["message"]["content"].strip()
     except Exception as exc:
         logger.error("Ollama request failed: %s", exc)
-        return ""
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -276,11 +297,11 @@ def analyze_results(
     model: str,
     ollama_url: str,
     logger: logging.Logger,
-) -> list[dict]:
-    """Use LLM to filter and evaluate search results."""
+) -> tuple[list[dict], str]:
+    """Use LLM to filter and evaluate search results. Returns (items, error_message)."""
     if not search_results:
         logger.info("No search results to analyze.")
-        return []
+        return [], ""
 
     # Format results for prompt
     formatted = []
@@ -301,11 +322,14 @@ def analyze_results(
     )
 
     logger.info("Sending %d results to LLM for analysis...", len(search_results))
-    raw = ollama_chat(model, prompt, ollama_url, logger)
+    try:
+        raw = ollama_chat(model, prompt, ollama_url, logger)
+    except Exception as exc:
+        return [], f"LLM ({model}) falhou: {exc}"
 
     if not raw:
         logger.warning("LLM returned empty response.")
-        return []
+        return [], f"LLM ({model}) retornou resposta vazia — verifique se o modelo está disponível."
 
     # Extract JSON array robustly
     # Strip markdown fences if present
@@ -316,18 +340,18 @@ def analyze_results(
     match = re.search(r"\[.*\]", cleaned, re.DOTALL)
     if not match:
         logger.warning("Could not find JSON array in LLM response. Raw: %s", raw[:500])
-        return []
+        return [], "LLM não retornou JSON válido — resposta inesperada."
 
     try:
         items = json.loads(match.group(0))
         if not isinstance(items, list):
             logger.warning("LLM JSON was not a list.")
-            return []
+            return [], "LLM retornou JSON mas não como array."
         logger.info("LLM identified %d new items.", len(items))
-        return items
+        return items, ""
     except json.JSONDecodeError as exc:
         logger.error("JSON parse error: %s\nRaw snippet: %s", exc, match.group(0)[:500])
-        return []
+        return [], f"Erro ao parsear JSON do LLM: {exc}"
 
 
 # ---------------------------------------------------------------------------
@@ -378,10 +402,19 @@ def write_report(
     reports_dir: Path,
     today: str,
     logger: logging.Logger,
+    llm_error: str = "",
+    llm_model: str = "",
 ) -> Path:
     """Write the weekly report markdown file."""
     reports_dir.mkdir(parents=True, exist_ok=True)
     report_path = reports_dir / f"{today}-weekly-research.md"
+
+    if llm_error:
+        llm_status = f"ERRO — {llm_error}"
+    elif llm_model:
+        llm_status = f"OK — `{llm_model}` analisou {len(all_results)} resultados e identificou {len(new_items)} item(ns) novo(s)"
+    else:
+        llm_status = "não executada (Ollama indisponível)"
 
     lines = [
         f"# Weekly LLM Research Report — {today}",
@@ -389,6 +422,7 @@ def write_report(
         f"**Pesquisa executada em:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         f"**Queries executadas:** {len(queries)}",
         f"**Resultados brutos coletados:** {len(all_results)}",
+        f"**Análise LLM:** {llm_status}",
         f"**Novos itens identificados:** {len(new_items)}",
         "",
         "## Queries Executadas",
@@ -399,24 +433,41 @@ def write_report(
 
     lines += ["", "## Novos Itens Encontrados", ""]
 
-    if not new_items:
+    if llm_error:
+        lines.append(f"> **Erro na análise LLM:** {llm_error}")
+        lines.append(">")
+        lines.append("> Os resultados de busca foram coletados mas não puderam ser analisados.")
+        lines.append("> Verifique os logs e re-execute manualmente se necessário.")
+        lines.append("")
+    if not new_items and not llm_error:
         lines.append("_Nenhum item novo identificado nesta semana._")
+    elif not new_items:
+        lines.append("_Nenhum item extraído — ver erro acima._")
     else:
         for item in new_items:
             lines.append(format_item_markdown(item))
             lines.append("")
 
+    analyzed = all_results[:40]
     lines += [
-        "## Fontes Consultadas",
+        f"## Resultados Analisados pelo LLM ({len(analyzed)} de {len(all_results)})",
+        "",
+        "_Exatamente o que foi enviado ao modelo para análise:_",
         "",
     ]
-    seen_urls: set[str] = set()
-    for r in all_results[:20]:
+    for i, r in enumerate(analyzed, 1):
+        title = r.get("title", "(sem título)")
         url = r.get("url", "")
-        if url and url not in seen_urls:
-            seen_urls.add(url)
-            title = r.get("title", url)[:80]
-            lines.append(f"- [{title}]({url})")
+        snippet = r.get("snippet", "").strip()[:300]
+        query = r.get("query", "")
+        lines.append(f"**{i}. {title}**")
+        if url:
+            lines.append(f"<{url}>")
+        if query:
+            lines.append(f"_Query: `{query}`_")
+        if snippet:
+            lines.append(f"> {snippet}")
+        lines.append("")
 
     content = "\n".join(lines) + "\n"
     report_path.write_text(content, encoding="utf-8")
@@ -504,20 +555,33 @@ def update_backlog(
 # ---------------------------------------------------------------------------
 # Telegram notification
 # ---------------------------------------------------------------------------
-def send_telegram(new_items: list[dict], today: str, logger: logging.Logger) -> None:
-    """Send a Telegram message via the Hermes bot. Reads token and chat_id from env."""
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-    # TELEGRAM_ALLOWED_USERS is a comma-separated list of user IDs.
-    # For private chats, user_id == chat_id, so we use the first entry.
-    raw_users = os.environ.get("TELEGRAM_ALLOWED_USERS", "").strip()
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID", raw_users.split(",")[0].strip() if raw_users else "").strip()
-
-    if not token or not chat_id:
-        logger.info("Telegram not configured (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set) — skipping notification.")
-        return
+def send_telegram(
+    new_items: list[dict],
+    today: str,
+    logger: logging.Logger,
+    *,
+    queries: list[str],
+    known_count: int,
+    raw_result_count: int,
+    model: str,
+    report_path=None,
+) -> None:
+    """Send a Telegram message via the Hermes bot, with run metadata and the report attached."""
+    params_block = (
+        "\n--- Parâmetros desta execução ---\n"
+        "Período de busca: último ano (SearXNG time_range=year), "
+        f"deduplicado contra {known_count} item(ns) já no backlog\n"
+        f"Queries ({len(queries)}):\n" + "\n".join(f"  • {q}" for q in queries) + "\n"
+        f"Resultados brutos coletados: {raw_result_count}\n"
+        f"Modelo de análise: {model or '(nenhum — Ollama indisponível)'}"
+    )
 
     if not new_items:
-        text = f"Weekly LLM Research — {today}\n\nNenhum item novo encontrado esta semana."
+        text = (
+            f"Weekly LLM Research — {today}\n\n"
+            "Nenhum item novo encontrado esta semana.\n"
+            f"{params_block}"
+        )
     else:
         lines = [f"Weekly LLM Research — {today}", f"\n{len(new_items)} novo(s) item(ns) encontrado(s):\n"]
         for i, item in enumerate(new_items, 1):
@@ -529,16 +593,14 @@ def send_telegram(new_items: list[dict], today: str, logger: logging.Logger) -> 
             lines.append(f"{i}. {name} ({itype})")
             lines.append(f"   SDLC {sdlc}/5 | HW {hw}/5")
             lines.append(f"   {desc}")
-        lines.append("\nVer backlog: research/sdlc-agentico/backlog.md")
+        lines.append(params_block)
         text = "\n".join(lines)
 
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    try:
-        resp = requests.post(url, json={"chat_id": chat_id, "text": text}, timeout=15)
-        resp.raise_for_status()
-        logger.info("Telegram notification sent to chat_id %s.", chat_id)
-    except Exception as exc:
-        logger.warning("Telegram notification failed: %s", exc)
+    send_telegram_message(text, logger)
+    if report_path is not None:
+        send_telegram_document(
+            report_path, caption=f"Relatório completo — {today}", logger=logger
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -571,13 +633,16 @@ def main() -> None:
             "Ollama not available or no models installed. "
             "Writing raw results to report without LLM analysis."
         )
-        # Write a minimal report and exit gracefully
-        write_report([], all_results, queries, reports_dir, today, logger)
+        write_report(
+            [], all_results, queries, reports_dir, today, logger,
+            llm_error="Ollama indisponível ou sem modelos instalados.",
+            llm_model="",
+        )
         logger.info("Done (no LLM analysis).")
         return
 
     # 4. LLM analysis
-    raw_items = analyze_results(
+    raw_items, llm_error = analyze_results(
         all_results,
         known_items,
         cfg.get("hardware_context", ""),
@@ -591,14 +656,25 @@ def main() -> None:
 
     # 6. Write report
     report_path = write_report(
-        new_items, all_results, queries, reports_dir, today, logger
+        new_items, all_results, queries, reports_dir, today, logger,
+        llm_error=llm_error,
+        llm_model=model,
     )
 
     # 7. Update backlog
     update_backlog(backlog_path, new_items, today, logger)
 
     # 8. Notify via Telegram
-    send_telegram(new_items, today, logger)
+    send_telegram(
+        new_items,
+        today,
+        logger,
+        queries=queries,
+        known_count=len(known_items),
+        raw_result_count=len(all_results),
+        model=model,
+        report_path=report_path,
+    )
 
     logger.info("=== Agent finished. Report: %s ===", report_path)
 
