@@ -10,7 +10,6 @@ Mirrors the pipeline of agents/weekly-sdlc-research, with a different output.
 import json
 import logging
 import math
-import os
 import re
 import sys
 import time
@@ -26,6 +25,9 @@ from ddgs import DDGS
 # ---------------------------------------------------------------------------
 SCRIPT_DIR = Path(__file__).parent.resolve()
 CONFIG_PATH = SCRIPT_DIR / "config.yaml"
+
+sys.path.insert(0, str(SCRIPT_DIR.parent / "lib"))
+from telegram_notify import send_telegram_document, send_telegram_message  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -218,9 +220,28 @@ def pick_model(cfg: dict, logger: logging.Logger) -> str | None:
     fallback = cfg.get("ollama_fallback_model", "")
 
     for candidate in [preferred, fallback]:
+        if not candidate:
+            continue
+        # Exact match first
+        if candidate in models:
+            logger.info("Using model: %s", candidate)
+            return candidate
+        # Prefix match as fallback (e.g. "qwen2.5-coder:14b" prefix "qwen2.5-coder")
+        prefix = candidate.split(":")[0]
+        tag = candidate.split(":")[-1] if ":" in candidate else ""
         for installed in models:
-            if installed.startswith(candidate.split(":")[0]):
+            installed_prefix = installed.split(":")[0]
+            installed_tag = installed.split(":")[-1] if ":" in installed else ""
+            if installed_prefix == prefix and installed_tag == tag:
                 logger.info("Using model: %s", installed)
+                return installed
+        # Looser prefix match only if no tag-matching candidate found
+        for installed in models:
+            if installed.startswith(prefix + ":"):
+                logger.warning(
+                    "Exact model '%s' not found; using '%s' (prefix match).",
+                    candidate, installed,
+                )
                 return installed
 
     if models:
@@ -237,11 +258,12 @@ def ollama_chat(
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
-        "options": {"temperature": 0.2, "num_predict": 2048},
+        "think": False,
+        "options": {"temperature": 0.2, "num_predict": 4096},
     }
     try:
         resp = requests.post(
-            f"{ollama_url}/api/chat", json=payload, timeout=180
+            f"{ollama_url}/api/chat", json=payload, timeout=300
         )
         resp.raise_for_status()
         return resp.json()["message"]["content"].strip()
@@ -641,20 +663,33 @@ def update_ledger(
 # ---------------------------------------------------------------------------
 # Telegram notification
 # ---------------------------------------------------------------------------
-def send_telegram(new_items: list[dict], today: str, logger: logging.Logger) -> None:
-    """Send a Telegram message via the Hermes bot. Reads token and chat_id from env."""
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-    # TELEGRAM_ALLOWED_USERS is a comma-separated list of user IDs.
-    # For private chats, user_id == chat_id, so we use the first entry.
-    raw_users = os.environ.get("TELEGRAM_ALLOWED_USERS", "").strip()
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID", raw_users.split(",")[0].strip() if raw_users else "").strip()
-
-    if not token or not chat_id:
-        logger.info("Telegram not configured (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set) — skipping notification.")
-        return
+def send_telegram(
+    new_items: list[dict],
+    today: str,
+    logger: logging.Logger,
+    *,
+    queries: list[str],
+    known_count: int,
+    raw_result_count: int,
+    model: str,
+    report_path=None,
+) -> None:
+    """Send a Telegram message via the Hermes bot, with run metadata and the report attached."""
+    params_block = (
+        "\n--- Parâmetros desta execução ---\n"
+        "Período de busca: último ano (SearXNG time_range=year), "
+        f"deduplicado contra {known_count} setup(s) já no ledger\n"
+        f"Queries ({len(queries)}):\n" + "\n".join(f"  • {q}" for q in queries) + "\n"
+        f"Resultados brutos coletados: {raw_result_count}\n"
+        f"Modelo de análise: {model or '(nenhum — Ollama indisponível)'}"
+    )
 
     if not new_items:
-        text = f"Weekly Cost-Benefit — {today}\n\nNenhum setup novo avaliado esta semana."
+        text = (
+            f"Weekly Cost-Benefit — {today}\n\n"
+            "Nenhum setup novo avaliado esta semana.\n"
+            f"{params_block}"
+        )
     else:
         lines = [f"Weekly Cost-Benefit — {today}", f"\n{len(new_items)} setup(s) avaliado(s):\n"]
         for i, item in enumerate(new_items, 1):
@@ -667,16 +702,14 @@ def send_telegram(new_items: list[dict], today: str, logger: logging.Logger) -> 
             lines.append(f"{i}. {name} ({stype})")
             lines.append(f"   CAPEX US$ {capex} | OPEX US$ {opex}/mes")
             lines.append(f"   Breakeven {breakeven} | Veredito: {verdict}")
-        lines.append("\nVer ledger: research/sdlc-agentico/cost-benefit.md")
+        lines.append(params_block)
         text = "\n".join(lines)
 
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    try:
-        resp = requests.post(url, json={"chat_id": chat_id, "text": text}, timeout=15)
-        resp.raise_for_status()
-        logger.info("Telegram notification sent to chat_id %s.", chat_id)
-    except Exception as exc:
-        logger.warning("Telegram notification failed: %s", exc)
+    send_telegram_message(text, logger)
+    if report_path is not None:
+        send_telegram_document(
+            report_path, caption=f"Relatório completo — {today}", logger=logger
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -745,7 +778,16 @@ def main() -> None:
     update_ledger(ledger_path, new_items, today, logger)
 
     # 9. Notify via Telegram
-    send_telegram(new_items, today, logger)
+    send_telegram(
+        new_items,
+        today,
+        logger,
+        queries=queries,
+        known_count=len(known_items),
+        raw_result_count=len(all_results),
+        model=model,
+        report_path=report_path,
+    )
 
     logger.info("=== Agent finished. Report: %s ===", report_path)
 

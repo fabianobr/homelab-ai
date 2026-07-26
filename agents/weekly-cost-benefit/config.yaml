@@ -1,6 +1,6 @@
 ollama_url: "http://localhost:11434"
-ollama_model: "qwen2.5-coder:14b"
-ollama_fallback_model: "llama3.2:latest"
+ollama_model: "qwen3:14b"
+ollama_fallback_model: "qwen2.5-coder:latest"
 searxng_url: "http://localhost:8080"
 ledger_path: "../../research/sdlc-agentico/cost-benefit.md"
 reports_dir: "./reports"
