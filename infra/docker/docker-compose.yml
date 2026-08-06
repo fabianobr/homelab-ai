@@ -1,6 +1,6 @@
 services:
   ollama:
-    image: ollama/ollama:0.30.10
+    image: ollama/ollama:0.32.6
     container_name: ollama
     profiles:
       - media-pipeline
@@ -99,16 +99,18 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
-    # memswap_limit=-1: sem teto de swap para o container (replica comportamento local).
-    # Localmente o processo usava os 32g de swap livremente; com teto restrito o
-    # OOM-killer global disparava mesmo após aumentar o limite de RAM para 27g.
-    memswap_limit: -1
+    # Pico observado do workflow LTX (encoder Gemma3-12B + LTXAV offloadados)
+    # é ~27GB combinado RAM+CUDA pinned (confirmado via docker events "oom" +
+    # exitCode=137 em 2026-08-02 com o teto de 22g/24g — matava o ComfyUI a
+    # cada execução desse workflow). memswap_limit é o total combinado de
+    # RAM + swap do container; mantido finito (29g, não -1/ilimitado) porque
+    # swap ilimitado já disparou o systemd-oomd contra a sessão gráfica do
+    # host antes.
+    memswap_limit: 29g
     deploy:
       resources:
         limits:
           cpus: "4.0"
-          # LTX Video offloada ~13GB para RAM do host + pinned memory CUDA → pico ~27GB.
-          # 24g causava OOM-kill (3x em <DATE>). 27g alinha com o pico observado.
           memory: 27g
         reservations:
           memory: 2g
@@ -204,8 +206,8 @@ services:
           memory: 512m
 
   searxng:
-    # Digest da imagem validada em 2026-07-05; atualizar deliberadamente, não via :latest
-    image: searxng/searxng:latest@sha256:7e2b1ef32b8510c4b2e595a056164df747a1c053079463d3cc13d7c08fdf2d9d
+    # Digest da imagem validada em 2026-08-06; atualizar deliberadamente, não via :latest
+    image: searxng/searxng:latest@sha256:dc5c10fda6818dfef7abfdf9f451b898242c3321514a9524af215cbedc79c89b
     container_name: searxng
     profiles:
       - optional
