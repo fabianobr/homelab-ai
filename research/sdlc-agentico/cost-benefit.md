@@ -10,6 +10,89 @@ Gerado pelo agente semanal em `agents/weekly-cost-benefit/`.
 
 ## Setups avaliados
 
+### Analise de 2026-08-01
+
+| Setup | Tipo | CAPEX (US$) | OPEX (US$/mes) | Vel. | Qual. | Breakeven | Veredito |
+|---|---|---|---|---|---|---|---|
+| Local LLM Rig (RTX 5060 Ti 16GB) | local | 430 | 15 | 3/5 | 4/5 | nunca | local |
+| Claude Code Pro | paid | 0 | 20 | 4/5 | 5/5 | nunca | paid |
+| Claude Code Max 5x | paid | 0 | 100 | 5/5 | 5/5 | nunca | paid |
+| Claude Code Max 20x | paid | 0 | 200 | 5/5 | 5/5 | nunca | paid |
+| Google Antigravity Pro | paid | 0 | 20 | 4/5 | 5/5 | nunca | paid |
+| Google Antigravity Ultra | paid | 0 | 100 | 5/5 | 5/5 | nunca | paid |
+| Hybrid Setup (Local LLM + Claude Code) | hybrid | 430 | 35 | 5/5 | 5/5 | nunca | hybrid |
+
+### Local LLM Rig (RTX 5060 Ti 16GB)
+- **Tipo:** local
+- **CAPEX:** US$ 430
+- **OPEX:** US$ 15/mes
+- **Velocidade:** 3/5 | **Qualidade:** 4/5
+- **Breakeven local vs pago:** nunca
+- **Veredito:** local
+- **Justificativa:** Local setup offers good balance of cost and performance for most coding tasks, with lower long-term costs compared to paid subscriptions.
+- **Fonte:** https://www.kunalganglani.com/blog/local-llm-vs-claude-coding-benchmark
+
+### Claude Code Pro
+- **Tipo:** paid
+- **CAPEX:** US$ 0
+- **OPEX:** US$ 20/mes
+- **Velocidade:** 4/5 | **Qualidade:** 5/5
+- **Breakeven local vs pago:** nunca
+- **Veredito:** paid
+- **Justificativa:** Paid subscription offers high quality and speed, but at a higher ongoing cost compared to local setups.
+- **Fonte:** https://www.cosmicjs.com/blog/claude-code-vs-github-copilot-vs-cursor-which-ai-coding-agent-should-you-use-2026
+
+### Claude Code Max 5x
+- **Tipo:** paid
+- **CAPEX:** US$ 0
+- **OPEX:** US$ 100/mes
+- **Velocidade:** 5/5 | **Qualidade:** 5/5
+- **Breakeven local vs pago:** nunca
+- **Veredito:** paid
+- **Justificativa:** Max 5x plan provides the fastest and highest quality coding assistance, but at a significantly higher cost than local setups.
+- **Fonte:** https://www.cosmicjs.com/blog/claude-code-vs-github-copilot-vs-cursor-which-ai-coding-agent-should-you-use-2026
+
+### Claude Code Max 20x
+- **Tipo:** paid
+- **CAPEX:** US$ 0
+- **OPEX:** US$ 200/mes
+- **Velocidade:** 5/5 | **Qualidade:** 5/5
+- **Breakeven local vs pago:** nunca
+- **Veredito:** paid
+- **Justificativa:** Max 20x plan offers the highest performance and quality, but at a very high ongoing cost compared to local alternatives.
+- **Fonte:** https://www.cosmicjs.com/blog/claude-code-vs-github-copilot-vs-cursor-which-ai-coding-agent-should-you-use-2026
+
+### Google Antigravity Pro
+- **Tipo:** paid
+- **CAPEX:** US$ 0
+- **OPEX:** US$ 20/mes
+- **Velocidade:** 4/5 | **Qualidade:** 5/5
+- **Breakeven local vs pago:** nunca
+- **Veredito:** paid
+- **Justificativa:** Google Antigravity Pro offers high quality and performance, but at a higher ongoing cost compared to local setups.
+- **Fonte:** https://vibecoding.app/blog/google-antigravity-pricing-2026
+
+### Google Antigravity Ultra
+- **Tipo:** paid
+- **CAPEX:** US$ 0
+- **OPEX:** US$ 100/mes
+- **Velocidade:** 5/5 | **Qualidade:** 5/5
+- **Breakeven local vs pago:** nunca
+- **Veredito:** paid
+- **Justificativa:** Ultra tier provides the fastest and highest quality coding assistance, but at a significantly higher cost than local setups.
+- **Fonte:** https://vibecoding.app/blog/google-antigravity-pricing-2026
+
+### Hybrid Setup (Local LLM + Claude Code)
+- **Tipo:** hybrid
+- **CAPEX:** US$ 430
+- **OPEX:** US$ 35/mes
+- **Velocidade:** 5/5 | **Qualidade:** 5/5
+- **Breakeven local vs pago:** nunca
+- **Veredito:** hybrid
+- **Justificativa:** Combines the best of both worlds, offering high performance and quality with moderate long-term costs.
+- **Fonte:** https://www.xda-developers.com/my-local-llm-doesnt-replace-claude-it-makes-claude-dramatically-better/
+
+
 ### Analise de 2026-07-24
 
 | Setup | Tipo | CAPEX (US$) | OPEX (US$/mes) | Vel. | Qual. | Breakeven | Veredito |
