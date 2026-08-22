@@ -1,5 +1,6 @@
 """tests/test_telegram.py"""
 import json
+from unittest.mock import MagicMock
 
 import httpx
 import respx
@@ -153,4 +154,14 @@ async def test_run_publish_smoke_leaves_status_new_when_send_fails(db_pool):
 
 
 async def test_mark_notified_with_empty_list_is_a_noop(db_pool):
+    # An empty item_ids list must short-circuit before ever touching the
+    # database -- not merely produce a query that happens to match zero
+    # rows. Spy on pool.connection (wrapping the real bound method so any
+    # call that does slip through still works) and assert it's never
+    # entered.
+    spy = MagicMock(side_effect=db_pool.connection)
+    db_pool.connection = spy
+
     await mark_notified(db_pool, [])
+
+    spy.assert_not_called()
