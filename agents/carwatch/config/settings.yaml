@@ -1,0 +1,55 @@
+fixed_sources:
+  tier2:
+    - name: "BusinessWire Automotive"
+      feed_url: "https://www.businesswire.com/portal/site/home/news/industries/?vnsId=31319"
+      region: "GLOBAL"
+      lang: "en"
+    - name: "PR Newswire Auto"
+      feed_url: "https://www.prnewswire.com/rss/automotive-transportation-latest-news/automotive-transportation-latest-news-list.rss"
+      region: "GLOBAL"
+      lang: "en"
+  tier3:
+    - name: "Motor1"
+      feed_url: "https://www.motor1.com/rss/articles/all/"
+      region: "GLOBAL"
+      lang: "en"
+    - name: "Carscoops"
+      feed_url: "https://www.carscoops.com/feed/"
+      region: "GLOBAL"
+      lang: "en"
+    - name: "CarNewsChina"
+      feed_url: "https://www.carnewschina.com/feed/"
+      region: "CN"
+      lang: "en"
+    - name: "Autocar UK"
+      feed_url: "https://www.autocar.co.uk/rss"
+      region: "GB"
+      lang: "en"
+    - name: "Auto Express"
+      feed_url: "https://www.autoexpress.co.uk/feed/all"
+      region: "GB"
+      lang: "en"
+    - name: "Paultan"
+      feed_url: "https://paultan.org/feed/"
+      region: "MY"
+      lang: "en"
+    - name: "Indian Autos Blog"
+      feed_url: "https://indianautosblog.com/feed"
+      region: "IN"
+      lang: "en"
+    - name: "Quatro Rodas"
+      feed_url: "https://quatrorodas.abril.com.br/feed/"
+      region: "BR"
+      lang: "pt"
+    - name: "Response.jp"
+      feed_url: "https://response.jp/rss/index.rdf"
+      region: "JP"
+      lang: "ja"
+
+tier4_google_news:
+  base_url: "https://news.google.com/rss/search"
+  query_template: '"{brand}" (unveil OR reveal OR debut OR launch)'
+  default_locale: {hl: "en", gl: "US", ceid: "US:en"}
+  extra_locales:
+    zh: [{hl: "zh-CN", gl: "CN", ceid: "CN:zh-Hans"}]
+    in: [{hl: "en-IN", gl: "IN", ceid: "IN:en"}]
