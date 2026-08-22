@@ -6,10 +6,9 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 import httpx
-from psycopg_pool import AsyncConnectionPool
 
 from carwatch import breaker, robots
-from carwatch.db import get_pool
+from carwatch.db import get_open_pool
 from carwatch.ratelimit import RateLimiter
 from carwatch.settings import get_settings
 
@@ -68,20 +67,6 @@ async def close_client() -> None:
         _client = None
 
 
-async def _get_open_pool() -> AsyncConnectionPool:
-    """Return the module-level DB pool, opening it first if needed.
-
-    `get_pool()` constructs the pool lazily with `open=False`; calling
-    `.connection()` on an unopened pool raises `PoolClosed`. `.open()` is
-    documented as safe to call again on an already-open pool, so this can be
-    called unconditionally at every call site instead of racing on a private
-    `_opened` check.
-    """
-    pool = get_pool()
-    await pool.open()
-    return pool
-
-
 async def _raw_get(url: str, headers: dict | None = None, timeout: float = 20.0):
     client = _get_client()
     return await client.get(url, headers=headers or {}, timeout=timeout)
@@ -112,31 +97,37 @@ async def fetch(
     parts = urlsplit(url)
     domain = parts.netloc
 
-    allowed, crawl_delay = await robots.is_allowed(
-        url, settings.user_agent, fetch_fn=lambda robots_url: _raw_get(robots_url, timeout=10.0)
-    )
-    if not allowed:
-        return FetchResult(0, None, None, None, False, False, "robots")
-
-    conditional_headers: dict[str, str] = {}
-    if source_id is not None:
-        pool = await _get_open_pool()
-        async with pool.connection() as conn:
-            result = await conn.execute(
-                "SELECT etag, last_modified FROM sources WHERE id = %s", (source_id,)
-            )
-            row = await result.fetchone()
-            if row:
-                etag, last_modified = row
-                if etag:
-                    conditional_headers["If-None-Match"] = etag
-                if last_modified:
-                    conditional_headers["If-Modified-Since"] = last_modified
-
     limiter = _get_limiter()
     async with limiter.domain(domain):
+        # The robots.txt check can itself issue a real HTTP request (on a
+        # cache miss) — it must happen inside the domain's rate-limit scope
+        # so that request also consumes this domain's slot, not before it.
+        allowed, crawl_delay = await robots.is_allowed(
+            url,
+            settings.user_agent,
+            fetch_fn=lambda robots_url: _raw_get(robots_url, timeout=10.0),
+        )
+        if not allowed:
+            # Not a fetch attempt against the target URL — no breaker call.
+            return FetchResult(0, None, None, None, False, False, "robots")
+
         if crawl_delay:
-            limiter._min_interval_sec = max(limiter._min_interval_sec, crawl_delay)
+            limiter.set_domain_min_interval(domain, crawl_delay)
+
+        conditional_headers: dict[str, str] = {}
+        if source_id is not None:
+            pool = await get_open_pool()
+            async with pool.connection() as conn:
+                result = await conn.execute(
+                    "SELECT etag, last_modified FROM sources WHERE id = %s", (source_id,)
+                )
+                row = await result.fetchone()
+                if row:
+                    etag, last_modified = row
+                    if etag:
+                        conditional_headers["If-None-Match"] = etag
+                    if last_modified:
+                        conditional_headers["If-Modified-Since"] = last_modified
 
         response = None
         exc: Exception | None = None
@@ -163,14 +154,22 @@ async def fetch(
             if response is not None and response.status_code in (429, 503):
                 retry_after = response.headers.get("Retry-After")
                 if retry_after is not None:
-                    wait_seconds = float(retry_after)
+                    try:
+                        wait_seconds = float(retry_after)
+                    except ValueError:
+                        # Legal HTTP-date Retry-After values (RFC 7231
+                        # §7.1.3) aren't numeric; parsing them is out of
+                        # scope here, so fall back to the exponential wait
+                        # already computed above instead of crashing the
+                        # single HTTP egress point.
+                        pass
             wait_seconds *= 1.0 + random.uniform(-0.2, 0.2)
 
             await asyncio.sleep(max(wait_seconds, 0.0))
 
         if exc is not None:
             if source_id is not None:
-                pool = await _get_open_pool()
+                pool = await get_open_pool()
                 await breaker.record_fetch_result(pool, source_id, status=0, blocked=False)
             return FetchResult(0, None, None, None, False, False, str(exc))
 
@@ -178,7 +177,7 @@ async def fetch(
 
         if status == 304:
             if source_id is not None:
-                pool = await _get_open_pool()
+                pool = await get_open_pool()
                 await breaker.record_fetch_result(pool, source_id, status=304, blocked=False)
             return FetchResult(304, None, None, None, True, False, None)
 
@@ -188,7 +187,7 @@ async def fetch(
         last_modified = response.headers.get("Last-Modified")
 
         if source_id is not None:
-            pool = await _get_open_pool()
+            pool = await get_open_pool()
             await breaker.record_fetch_result(pool, source_id, status=status, blocked=blocked)
             if status == 200 and not blocked and (etag or last_modified):
                 async with pool.connection() as conn:

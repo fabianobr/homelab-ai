@@ -7,11 +7,30 @@ import pytest_asyncio
 from psycopg_pool import AsyncConnectionPool
 
 from carwatch.db import run_migrations
+from carwatch.settings import get_settings
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TEST_DB_URL = os.environ.get(
     "DATABASE_URL_TEST", "postgresql://carwatch:carwatch@localhost:5433/carwatch_test"
 )
+
+
+@pytest.fixture(autouse=True)
+def _database_url_matches_test_db(monkeypatch):
+    """Force carwatch.db.get_pool()/get_open_pool() to resolve to the same
+    database as the db_pool fixture below.
+
+    .env's DATABASE_URL points at the dev `carwatch` database, which has no
+    migrated schema. Without this, any production code that calls
+    get_pool()/get_open_pool() directly (fetcher.fetch() with a source_id,
+    and later ingest.py/probe.py/discovery_seed.py/cli.py) would silently
+    talk to a different, empty database than the one the db_pool fixture
+    just set up and inserted rows into.
+    """
+    monkeypatch.setenv("DATABASE_URL", TEST_DB_URL)
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 @pytest_asyncio.fixture

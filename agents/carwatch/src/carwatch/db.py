@@ -15,6 +15,23 @@ def get_pool() -> AsyncConnectionPool:
     return _pool
 
 
+async def _ensure_open(pool: AsyncConnectionPool) -> AsyncConnectionPool:
+    if not pool._opened:
+        await pool.open()
+    return pool
+
+
+async def get_open_pool() -> AsyncConnectionPool:
+    """Return the module-level pool from get_pool(), opened if necessary.
+
+    get_pool() constructs the pool lazily (open=False); calling .connection()
+    on an unopened pool raises PoolClosed. Any caller that wants to use the
+    singleton pool (as opposed to a pool it manages itself, e.g. a test
+    fixture) should call this instead of get_pool() directly.
+    """
+    return await _ensure_open(get_pool())
+
+
 async def close_pool() -> None:
     global _pool
     if _pool is not None:
@@ -31,8 +48,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 
 
 async def run_migrations(pool: AsyncConnectionPool, migrations_dir: Path) -> list[str]:
-    if not pool._opened:
-        await pool.open()
+    pool = await _ensure_open(pool)
     async with pool.connection() as conn:
         await conn.execute(_TRACKING_TABLE_SQL)
         result = await conn.execute("SELECT filename FROM schema_migrations")

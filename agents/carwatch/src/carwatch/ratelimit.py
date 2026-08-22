@@ -13,6 +13,14 @@ class RateLimiter:
         self._global_sem = asyncio.Semaphore(global_concurrency)
         self._domain_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._last_request_at: dict[str, float] = {}
+        self._domain_min_interval: dict[str, float] = {}
+
+    def set_domain_min_interval(self, domain: str, seconds: float) -> None:
+        """Override the minimum interval for a single domain (e.g. from that
+        domain's robots.txt Crawl-delay), without affecting any other domain
+        or the process-wide default.
+        """
+        self._domain_min_interval[domain] = seconds
 
     @contextlib.asynccontextmanager
     async def domain(self, domain: str):
@@ -29,7 +37,8 @@ class RateLimiter:
         if last is None:
             return
         jitter = 1.0 + random.uniform(-self._jitter_pct, self._jitter_pct)
-        required = self._min_interval_sec * jitter
+        min_interval = self._domain_min_interval.get(domain, self._min_interval_sec)
+        required = min_interval * jitter
         elapsed = time.monotonic() - last
         remaining = required - elapsed
         if remaining > 0:

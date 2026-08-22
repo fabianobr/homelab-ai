@@ -130,6 +130,21 @@ async def test_429_honors_retry_after_header():
 
 
 @respx.mock
+async def test_non_numeric_retry_after_falls_back_to_backoff_without_crashing():
+    _allow_robots(respx)
+    route = respx.get("https://example.com/page")
+    route.side_effect = [
+        httpx.Response(429, headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}),
+        httpx.Response(200, text="fine content that is long enough " + "x" * 500),
+    ]
+
+    result = await fetcher.fetch("https://example.com/page")
+
+    assert result.status == 200
+    assert route.call_count == 2
+
+
+@respx.mock
 async def test_robots_disallow_short_circuits_without_fetching():
     respx.get("https://example.com/robots.txt").mock(
         return_value=httpx.Response(200, text="User-agent: *\nDisallow: /private\n")

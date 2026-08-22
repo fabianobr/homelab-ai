@@ -51,6 +51,28 @@ async def test_same_domain_concurrency_is_serialized():
     ]
 
 
+async def test_domain_min_interval_override_does_not_leak_to_other_domains():
+    limiter = RateLimiter(min_interval_sec=0.3, global_concurrency=10, jitter_pct=0.0)
+    limiter.set_domain_min_interval("slow.com", 0.05)
+
+    start = time.monotonic()
+    async with limiter.domain("slow.com"):
+        pass
+    async with limiter.domain("slow.com"):
+        pass
+    elapsed_override = time.monotonic() - start
+
+    start = time.monotonic()
+    async with limiter.domain("other.com"):
+        pass
+    async with limiter.domain("other.com"):
+        pass
+    elapsed_other = time.monotonic() - start
+
+    assert elapsed_override < 0.3  # overridden domain waited ~0.05s, well under the default
+    assert elapsed_other >= 0.3  # un-overridden domain still uses the process-wide default
+
+
 async def test_global_concurrency_is_capped():
     limiter = RateLimiter(min_interval_sec=0.0, global_concurrency=2, jitter_pct=0.0)
     active = 0
