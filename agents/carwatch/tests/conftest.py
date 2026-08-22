@@ -58,3 +58,13 @@ async def db_pool():
             "TRUNCATE raw_items, source_metrics, sources RESTART IDENTITY CASCADE"
         )
     await pool.close()
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _cli_test_env():
+    os.environ.setdefault("DATABASE_URL", TEST_DB_URL)
+    os.environ.setdefault("ANTHROPIC_API_KEY", "sk-test-dummy")
+    os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test-bot-token")
+    os.environ.setdefault("TELEGRAM_CHAT_ID", "test-chat-id")
+    os.environ.setdefault("BOT_INFO_URL", "https://example.com/bot")
+    os.environ.setdefault("CONTACT_EMAIL", "test@example.com")
