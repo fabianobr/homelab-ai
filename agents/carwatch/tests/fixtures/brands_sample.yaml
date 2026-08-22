@@ -1,0 +1,8 @@
+brands:
+  - name: "Volkswagen"
+    aliases: ["VW"]
+    press_domain: "www.volkswagen-media-services.com"
+  - name: "BYD"
+    aliases: ["比亚迪"]
+  - name: "Chevrolet"
+    aliases: ["Chevy"]
