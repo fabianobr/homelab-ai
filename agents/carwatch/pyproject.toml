@@ -1,7 +1,7 @@
 [project]
 name = "carwatch"
 version = "0.1.0"
-requires-python = ">=3.12,<3.15"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "psycopg[binary,pool]>=3.2,<4.0",
     "httpx[http2]>=0.27,<0.28",
