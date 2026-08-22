@@ -33,6 +33,20 @@ def _database_url_matches_test_db(monkeypatch):
     get_settings.cache_clear()
 
 
+@pytest.fixture(autouse=True)
+def _fast_rate_limiter(monkeypatch):
+    """Override the rate limiter to have zero delay in tests, avoiding real
+    3-second intervals during test sequences that make multiple same-domain
+    fetch() calls.
+    """
+    from carwatch.ratelimit import RateLimiter
+    from carwatch import fetcher
+
+    fast_limiter = RateLimiter(min_interval_sec=0.0, global_concurrency=50, jitter_pct=0.0)
+    monkeypatch.setattr(fetcher, "_limiter", fast_limiter)
+    yield
+
+
 @pytest_asyncio.fixture
 async def db_pool():
     pool = AsyncConnectionPool(TEST_DB_URL, min_size=1, max_size=4, open=False)
