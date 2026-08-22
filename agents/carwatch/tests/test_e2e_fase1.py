@@ -105,7 +105,10 @@ def test_weekly_run_end_to_end_ingests_classifies_and_publishes(db_pool):
 
     rows = _fetchall("SELECT title, status FROM raw_items ORDER BY id")
     statuses = {title: status for title, status in rows}
-    assert statuses["BYD unveils Seal 06 world premiere"] == "new"  # approved, classified populated
+    # approved, classified populated, and marked 'notified' after a successful
+    # Telegram send (prep fix: without this, weekly-run would re-notify the
+    # same item every subsequent run -- see publishers/telegram.mark_notified).
+    assert statuses["BYD unveils Seal 06 world premiere"] == "notified"
     assert statuses["Random unrelated corporate news"] == "filtered"  # no positive keyword term
 
     telegram_calls = [c for c in respx.calls if "sendMessage" in str(c.request.url)]
