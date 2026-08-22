@@ -1,6 +1,6 @@
 # Backlog de Pesquisa — SDLC Agêntico
 
-Este arquivo registra todas as ferramentas, modelos e tecnologias pesquisadas para o ciclo SDLC agêntico local. Atualizado semanalmente via job n8n.
+Este arquivo registra todas as ferramentas, modelos e tecnologias pesquisadas para o ciclo SDLC agêntico local. Atualizado semanalmente pelo agente `weekly-sdlc-research`, via systemd timer.
 
 ---
 
@@ -230,7 +230,8 @@ generate-tdd.sh:
 
 ## Como Adicionar Novas Ideias
 
-O job semanal do n8n executa toda segunda-feira e pode popular automaticamente novos itens neste arquivo. Para adicionar manualmente:
+O agente `weekly-sdlc-research` executa via systemd toda sexta-feira às 19h e pode
+popular automaticamente novos itens neste arquivo. Para adicionar manualmente:
 
 1. Atribuir o proximo numero sequencial
 2. Preencher: Nome, Tipo, Viabilidade (1-5), Relevancia (1-5), Status inicial = Pendente
@@ -325,5 +326,4 @@ Detalhes adicionais em [feedback.md](../feedback.md).
 - **Fonte:** https://github.com/your-repo/kodeops
 
 
-_Itens descobertos pela pesquisa semanal automatica. Adicionados toda segunda-feira._
-
+_Itens descobertos pela pesquisa semanal automatica. Adicionados toda sexta-feira._

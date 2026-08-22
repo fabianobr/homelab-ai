@@ -141,6 +141,6 @@ Ver [feedback.md](feedback.md) para registro do que foi testado e descartado.
 ## Status
 
 - Pesquisa iniciada: junho/2026
-- Job semanal de pesquisa: ativo (n8n — busca novidades em ferramentas agênticas)
+- Job semanal de pesquisa: ativo (systemd timer, sexta às 19h — busca novidades em ferramentas agênticas)
 - Proxima acao recomendada: implementar Proposta A (OpenCode ou Aider + Devstral Small) e Proposta B (mapear fases SDLC como workflows n8n)
 - Revisao agendada: mensal

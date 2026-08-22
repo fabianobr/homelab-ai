@@ -1,6 +1,16 @@
 ollama_url: "http://localhost:11434"
-ollama_model: "qwen2.5-coder:14b"
-ollama_fallback_model: "llama3.2:latest"
+# Modelos são aceitos somente por nome/tag exatos e tentados nesta ordem.
+# O limite de 2 tentativas evita manter a GPU ocupada durante toda a janela do timer.
+ollama_model: "qwen3:14b"
+ollama_fallback_models:
+  - "qwen3:8b"
+  - "llama3.2:latest"
+ollama_max_attempts: 2
+ollama_timeout_seconds: 240
+ollama_options:
+  temperature: 0.2
+  num_ctx: 8192
+  num_predict: 1536
 searxng_url: "http://localhost:8080"
 backlog_path: "../../research/sdlc-agentico/backlog.md"
 reports_dir: "./reports"

@@ -151,10 +151,13 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
+      # Valida o serviço e o ambiente EFETIVO do container. Alterar o .env não
+      # atualiza containers já criados; assim um n8n stale com credenciais
+      # vazias fica unhealthy em vez de aceitar webhooks que falharão depois.
       test:
         [
           "CMD-SHELL",
-          "wget -q --spider http://127.0.0.1:5678/healthz || wget -q --spider http://127.0.0.1:5678/",
+          "test -n \"$$YOUTUBE_API_KEY\" && test -n \"$$TELEGRAM_BOT_TOKEN\" && test -n \"$$TELEGRAM_CHAT_ID\" && (wget -q --spider http://127.0.0.1:5678/healthz || wget -q --spider http://127.0.0.1:5678/)",
         ]
       interval: 30s
       timeout: 10s
