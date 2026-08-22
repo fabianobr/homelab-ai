@@ -156,3 +156,79 @@ async def test_robots_disallow_short_circuits_without_fetching():
     assert result.status == 0
     assert result.reason == "robots"
     assert route.call_count == 0
+
+
+@respx.mock
+async def test_crawl_delay_from_robots_overrides_domain_min_interval():
+    respx.get("https://example.com/robots.txt").mock(
+        return_value=httpx.Response(200, text="User-agent: *\nCrawl-delay: 2\nAllow: /\n")
+    )
+    respx.get("https://example.com/page").mock(
+        return_value=httpx.Response(200, text="fine content that is long enough " + "x" * 500)
+    )
+
+    result = await fetcher.fetch("https://example.com/page")
+
+    assert result.status == 200
+    assert fetcher._limiter._domain_min_interval["example.com"] == 2.0
+
+
+@respx.mock
+async def test_connect_error_is_retried_then_records_breaker_failure(db_pool):
+    _allow_robots(respx)
+    async with db_pool.connection() as conn:
+        row = await conn.execute(
+            "INSERT INTO sources (domain, feed_url, kind, tier, status) "
+            "VALUES ('example.com', 'https://example.com/page', 'rss', 1, 'active') RETURNING id"
+        )
+        source_id = (await row.fetchone())[0]
+
+    route = respx.get("https://example.com/page").mock(side_effect=httpx.ConnectError("boom"))
+
+    result = await fetcher.fetch("https://example.com/page", source_id=source_id, timeout=5.0)
+
+    assert result.status == 0
+    assert result.body is None
+    assert "boom" in result.reason
+    assert route.call_count == 3
+
+    async with db_pool.connection() as conn:
+        row = await conn.execute(
+            "SELECT consecutive_failures FROM sources WHERE id = %s", (source_id,)
+        )
+        assert (await row.fetchone())[0] == 1
+
+
+@respx.mock
+async def test_successful_fetch_with_source_id_records_breaker_success_and_persists_headers(db_pool):
+    _allow_robots(respx)
+    async with db_pool.connection() as conn:
+        row = await conn.execute(
+            "INSERT INTO sources (domain, feed_url, kind, tier, status, consecutive_failures) "
+            "VALUES ('example.com', 'https://example.com/feed.xml', 'rss', 1, 'active', 2) "
+            "RETURNING id"
+        )
+        source_id = (await row.fetchone())[0]
+
+    respx.get("https://example.com/feed.xml").mock(
+        return_value=httpx.Response(
+            200,
+            text="<rss>ok content long enough to not look blocked " + "x" * 500 + "</rss>",
+            headers={"ETag": '"fresh-etag"'},
+        )
+    )
+
+    result = await fetcher.fetch(
+        "https://example.com/feed.xml", kind="feed", source_id=source_id
+    )
+
+    assert result.status == 200
+    assert result.blocked is False
+
+    async with db_pool.connection() as conn:
+        row = await conn.execute(
+            "SELECT consecutive_failures, etag FROM sources WHERE id = %s", (source_id,)
+        )
+        consecutive_failures, etag = await row.fetchone()
+        assert consecutive_failures == 0
+        assert etag == '"fresh-etag"'
