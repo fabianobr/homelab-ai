@@ -21,7 +21,7 @@ async def call_classify(system_prompt: str, user_content: str) -> str:
     client = get_anthropic_client()
     response = await client.messages.create(
         model=MODEL,
-        max_tokens=300,
+        max_tokens=300,  # SPEC.md §10's exact value; tight for a full 20-item batch, may truncate — see README's known risks once written (Task 17)
         temperature=0,
         system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
         messages=[{"role": "user", "content": user_content}],
