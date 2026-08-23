@@ -14,7 +14,7 @@ from carwatch.logging_setup import configure_logging
 from carwatch.models import load_brands_config, load_keywords_config
 from carwatch.prefilter import run_prefilter
 from carwatch.probe import run_probe
-from carwatch.publishers.telegram import get_approved_items_for_notification, run_publish_smoke
+from carwatch.publishers.telegram import get_pending_events, publish_pending_events
 from carwatch.settings import get_settings
 
 app = typer.Typer()
@@ -128,11 +128,11 @@ def publish(dry_run: bool = typer.Option(False, "--dry-run")):
         logger = _logger()
         pool = await get_open_pool()
         if dry_run:
-            items = await get_approved_items_for_notification(pool)
+            events = await get_pending_events(pool)
             await close_pool()
-            return {"would_send": len(items)}
+            return {"would_send": len(events)}
         settings = get_settings()
-        stats = await run_publish_smoke(pool, settings.telegram_bot_token, settings.telegram_chat_id, logger)
+        stats = await publish_pending_events(pool, settings.telegram_bot_token, settings.telegram_chat_id, logger)
         await close_pool()
         return stats
 
@@ -159,8 +159,11 @@ def weekly_run():
     """Single composite pass: ingest -> prefilter -> classify -> publish.
 
     DESIGN.md §1: replaces SPEC.md's APScheduler daemon (`carwatch run`) with one
-    synchronous run per systemd timer trigger. Exits non-zero if the Telegram send
-    failed, so systemd doesn't mask a broken run.
+    synchronous run per systemd timer trigger. Exits non-zero only when there were
+    pending launch_events and none of them sent -- a quiet week with zero pending
+    events is not a failure (Task 9 will extend this pipeline with the `extract`
+    step that actually populates `launch_events`; until then `publish` will
+    typically report zero pending events).
     """
 
     async def _run():
@@ -174,7 +177,7 @@ def weekly_run():
         ingest_stats = await run_ingest(pool, logger)
         prefilter_stats = await run_prefilter(pool, brands_config, keywords_config, logger)
         classify_stats = await run_classify(pool, logger, limit=200)
-        publish_stats = await run_publish_smoke(
+        publish_stats = await publish_pending_events(
             pool, settings.telegram_bot_token, settings.telegram_chat_id, logger
         )
         await close_pool()
@@ -187,5 +190,5 @@ def weekly_run():
 
     result = asyncio.run(_run())
     typer.echo(result)
-    if not result["publish"]["sent"]:
+    if result["publish"]["pending"] > 0 and result["publish"]["sent"] == 0:
         raise typer.Exit(code=1)

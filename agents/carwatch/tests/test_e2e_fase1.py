@@ -71,9 +71,12 @@ def test_weekly_run_end_to_end_ingests_classifies_and_publishes(db_pool):
     feed_route = respx.get("https://press.example.com/feed.xml").mock(
         return_value=httpx.Response(200, text=body, headers={"ETag": '"v1"'})
     )
-    respx.post("https://api.telegram.org/bottest-bot-token/sendMessage").mock(
-        return_value=httpx.Response(200, json={"ok": True})
-    )
+    # No sendMessage route registered here on purpose: `publish` now reads
+    # pending events from `launch_events` (Task 6), and `weekly-run` doesn't
+    # yet run the `extract` step that populates it from a classified raw_item
+    # (that pipeline wiring is Fase 2 Task 9) -- so this run always has zero
+    # pending events and never calls Telegram. A registered-but-unused respx
+    # route would fail this test on teardown (assert_all_called).
 
     _execute(
         "INSERT INTO sources (domain, feed_url, kind, tier, status, brand_scope) "
@@ -109,17 +112,24 @@ def test_weekly_run_end_to_end_ingests_classifies_and_publishes(db_pool):
 
     assert result.exit_code == 0, result.output
 
-    rows = _fetchall("SELECT title, status FROM raw_items ORDER BY id")
-    statuses = {title: status for title, status in rows}
-    # approved, classified populated, and marked 'notified' after a successful
-    # Telegram send (prep fix: without this, weekly-run would re-notify the
-    # same item every subsequent run -- see publishers/telegram.mark_notified).
-    assert statuses["BYD unveils Seal 06 world premiere"] == "notified"
+    rows = _fetchall("SELECT title, status, classified FROM raw_items ORDER BY id")
+    statuses = {title: status for title, status, _ in rows}
+    classified = {title: data for title, _, data in rows}
+    # Approved by classify and left 'new' -- raw_items.status no longer tracks
+    # notification state (Fase 1's 'notified' status/mark_notified was removed
+    # in Fase 2 Task 6, replaced by launch_events.published; see this task's
+    # report for the full removal). Nothing currently promotes this item past
+    # 'new' because `extract` (which reads classified 'new' items and creates
+    # the launch_events row publish.py acts on) isn't wired into `weekly-run`
+    # yet -- that's Fase 2 Task 9.
+    assert statuses["BYD unveils Seal 06 world premiere"] == "new"
+    assert classified["BYD unveils Seal 06 world premiere"]["brand"] == "BYD"
     assert statuses["Random unrelated corporate news"] == "filtered"  # no positive keyword term
 
+    # No launch_events exist yet (extract isn't wired in), so publish has
+    # nothing pending and never calls Telegram.
     telegram_calls = [c for c in respx.calls if "sendMessage" in str(c.request.url)]
-    assert len(telegram_calls) == 1
-    assert b"BYD" in telegram_calls[0].request.content
+    assert len(telegram_calls) == 0
 
     # Second run: same feed, unchanged -> conditional GET must short-circuit via 304.
     feed_route.side_effect = None
