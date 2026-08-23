@@ -1,31 +1,29 @@
-FROM pytorch/pytorch:2.7.0-cuda12.8-cudnn9-runtime
+FROM pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git libgl1 libglib2.0-0 \
+    git libgl1 libglib2.0-0 python3-venv \
     && rm -rf /var/lib/apt/lists/*
+
+# PyTorch 2.13 aplica PEP 668 no Python da imagem. O venv herda a stack
+# Torch/CUDA oficial sem alterar o ambiente gerenciado pelo sistema.
+RUN python -m venv --system-site-packages /opt/comfyui-venv \
+    && /opt/comfyui-venv/bin/pip install --no-cache-dir pip==26.2.1
+ENV PATH=/opt/comfyui-venv/bin:$PATH
 
 COPY requirements.txt /tmp/requirements.txt
 COPY custom_nodes/ComfyUI-Manager/requirements.txt /tmp/manager-requirements.txt
 COPY custom_nodes/ComfyUI-LTXVideo/requirements.txt /tmp/ltxvideo-requirements.txt
 COPY custom_nodes/comfyui-ollama/requirements.txt /tmp/ollama-node-requirements.txt
 RUN pip install --no-cache-dir \
+    'click>=8,<8.3' \
     -r /tmp/requirements.txt \
     -r /tmp/manager-requirements.txt \
     -r /tmp/ltxvideo-requirements.txt \
     -r /tmp/ollama-node-requirements.txt
 
-# Imagem base traz torch cu128. LTX 2/2.3 usa texto encoder Gemma3-12B nvfp4,
-# cujo dequant otimizado (comfy-kitchen) exige torch com build CUDA 13.0+ nesta
-# GPU Blackwell (sm_120) — sem isso ele cai num fallback "eager" que materializa
-# os pesos inteiros e estoura os 16GB de VRAM (CUDA OOM confirmado nos logs).
-RUN pip install --no-cache-dir \
-    --index-url https://download.pytorch.org/whl/cu130 \
-    torch==2.9.0+cu130 torchvision==0.24.0+cu130 torchaudio==2.9.0+cu130
-# O pacote pip do NVRTC pra CUDA 13 mudou de layout (nvidia/cu13/lib/ em vez de
-# nvidia/cuda_nvrtc/lib/) e o torch 2.9.0+cu130 não acha libnvrtc-builtins.so.13.0
-# sozinho — falha silenciosa em log, mas fatal (derruba o processo) assim que um
-# kernel precisa de JIT (ex.: abs() em tensor complexo, usado no RoPE do LTX).
-ENV LD_LIBRARY_PATH=/opt/conda/lib/python3.11/site-packages/nvidia/cu13/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64
+# A base oficial já traz Torch e CUDA 13.0 alinhados. Isso evita instalar uma
+# segunda stack Torch sobre uma imagem CUDA 12.8 e mantém suporte a Blackwell
+# (sm_120), necessário pelo dequant otimizado do LTX/Gemma nvfp4.
 
 RUN mkdir -p /opt/comfyui-python \
     && printf '%s\n' \

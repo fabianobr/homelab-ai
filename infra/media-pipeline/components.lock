@@ -1,7 +1,9 @@
 # Formato shell restrito: somente valores constantes auditáveis.
 COMFYUI_REPOSITORY=https://github.com/comfyanonymous/ComfyUI.git
-COMFYUI_COMMIT=603d891eaf045d726d9c23276b4428daf2977624
+COMFYUI_COMMIT=72865f4f27eaf5396f8f36370e0a2be3a9a090ee
 COMFYUI_MANAGER_REPOSITORY=https://github.com/ltdrdata/ComfyUI-Manager.git
-COMFYUI_MANAGER_COMMIT=8da299d978fc7063282cfe2f3978cef26be2db2a
+COMFYUI_MANAGER_COMMIT=f39cbd56fecae0b27a446c0cd450cd591f3a8bea
 COMFYUI_LTXVIDEO_REPOSITORY=https://github.com/Lightricks/ComfyUI-LTXVideo.git
-COMFYUI_LTXVIDEO_COMMIT=4f45fd6c222eb06eb3e46605da62e7c889e4be5c
+COMFYUI_LTXVIDEO_COMMIT=15d09abb5a187a8dcaea2fc31fe51ee96e6c9d0d
+COMFYUI_OLLAMA_REPOSITORY=https://github.com/stavsap/comfyui-ollama.git
+COMFYUI_OLLAMA_COMMIT=6db7560576e5a59488708e6be13e07b5aba2432a
