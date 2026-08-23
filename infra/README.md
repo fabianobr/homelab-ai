@@ -65,5 +65,6 @@ Nunca expor diretamente na internet:
 | [`SERVICES.md`](SERVICES.md) | Tabela de portas e exposição |
 | [`ROADMAP.md`](ROADMAP.md) | Fases concluídas e próximas |
 | [`ROLLBACK-gpu-cdi.md`](docker/ROLLBACK-gpu-cdi.md) | Troubleshooting GPU CDI |
+| [`groq-fast-public.md`](docker/groq-fast-public.md) | Rota Groq opt-in, guardrail e fallback local |
 
 Docs de cada serviço em [`../docs/`](../docs/).
