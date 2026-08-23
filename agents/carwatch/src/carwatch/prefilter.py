@@ -10,12 +10,20 @@ def _word_boundary_pattern(term: str) -> re.Pattern:
     # Plain `\b` is defined in terms of `\w`, and Python's `\w` (Unicode mode)
     # treats CJK ideographs/kana as word characters too — so `\bBYD\b` finds
     # no boundary between "D" and an immediately adjacent "海" and fails to
-    # match "BYD海豹06首发". Using explicit ASCII-only boundary lookarounds
-    # instead of `\b` keeps the false-positive rejections ("gm" inside
-    # "segment", "ram" inside "program"/"framework") while still matching
-    # when the term is glued directly to non-ASCII CJK/kana text.
+    # match "BYD海豹06首发". A naive ASCII-only boundary class over-corrects
+    # the other way: it would also treat accented Latin letters (é, ó, ã, ñ,
+    # ç — common in this project's pt/es sources) as non-word, so "Ram" would
+    # wrongly match inside "Ramón". The boundary class below adds the Latin-1
+    # Supplement accented-letter ranges (À-ÖØ-öø-ÿ) so accented Latin still
+    # counts as a word character — matching `\w`'s original behavior there —
+    # while deliberately leaving CJK/kana (an entirely different Unicode
+    # range) out of the class. This keeps the false-positive rejections
+    # ("gm" inside "segment", "ram" inside "program"/"framework", "Ram"
+    # inside "Ramón") while still matching when the term is glued directly
+    # to CJK/kana text.
     return re.compile(
-        rf"(?<![A-Za-z0-9_]){re.escape(term)}(?![A-Za-z0-9_])", re.IGNORECASE
+        rf"(?<![A-Za-zÀ-ÖØ-öø-ÿ0-9_]){re.escape(term)}(?![A-Za-zÀ-ÖØ-öø-ÿ0-9_])",
+        re.IGNORECASE,
     )
 
 

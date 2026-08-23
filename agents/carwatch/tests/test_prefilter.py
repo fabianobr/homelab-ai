@@ -112,6 +112,17 @@ def test_real_gm_and_ram_mentions_still_match_on_a_word_boundary():
     assert brand == "Stellantis"
 
 
+def test_ram_alias_does_not_match_inside_accented_spanish_portuguese_name():
+    """Accented Latin letters (é, ó, ã, ñ, ç — common in this project's pt/es
+    sources) must still count as word characters, the way plain `\\b` treated
+    them, so "Ram" must not match inside the name "Ramón"."""
+    passes, brand = passes_prefilter(
+        "Ramón García unveils new safety report", None, REAL_WORLD_BRANDS, REAL_WORLD_KEYWORDS
+    )
+    assert brand is None
+    assert passes is False
+
+
 def test_in_stock_does_not_trigger_the_financial_negative_terms():
     """IMPORTANT 6: the bare `stock` negative term vetoed legitimate on-sale
     announcements ("now in stock nationwide")."""
