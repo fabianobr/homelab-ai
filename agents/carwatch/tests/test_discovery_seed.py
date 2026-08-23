@@ -184,3 +184,54 @@ async def test_seed_fixed_sources_survives_an_unexpected_exception(db_pool):
         stats = await seed_fixed_sources(db_pool, candidates, logger=None)
 
     assert stats == {"attempted": 2, "seeded": 1, "failed": 1}
+
+
+@respx.mock
+async def test_seed_fixed_sources_skips_candidate_already_blocked_by_breaker(db_pool):
+    """seed_fixed_sources() used to call fetcher.fetch() for every candidate
+    with no source_id, so fetcher never consulted the breaker for it — a
+    re-run of `seed-sources` would unconditionally re-probe a feed_url that
+    already has status='blocked' from a prior run, exactly the "hammer a
+    blocked source" scenario the breaker exists to prevent."""
+    async with db_pool.connection() as conn:
+        await conn.execute(
+            "INSERT INTO sources (domain, feed_url, kind, tier, status) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            ("blocked.example.com", "https://blocked.example.com/feed", "rss", 3, "blocked"),
+        )
+
+    respx.get("https://good.example.com/robots.txt").mock(
+        return_value=httpx.Response(200, text="User-agent: *\nAllow: /\n")
+    )
+    now = datetime.now(timezone.utc)
+    good_feed = "<?xml version='1.0'?><rss><channel>" + "".join(
+        f"<item><title>i{i}</title><link>https://x/{i}</link>"
+        f"<pubDate>{(now - timedelta(days=i)).strftime('%a, %d %b %Y %H:%M:%S +0000')}</pubDate></item>"
+        for i in range(5)
+    ) + "</channel></rss>"
+    respx.get("https://good.example.com/feed").mock(
+        return_value=httpx.Response(200, text=good_feed)
+    )
+
+    called_urls = []
+    real_fetch = fetcher.fetch
+
+    async def tracking_fetch(url, **kwargs):
+        called_urls.append(url)
+        return await real_fetch(url, **kwargs)
+
+    candidates = [
+        {"domain": "blocked.example.com", "feed_url": "https://blocked.example.com/feed", "kind": "rss", "tier": 3, "region": "GLOBAL", "lang": "en"},
+        {"domain": "good.example.com", "feed_url": "https://good.example.com/feed", "kind": "rss", "tier": 3, "region": "GLOBAL", "lang": "en"},
+    ]
+
+    with patch.object(fetcher, "fetch", new=tracking_fetch):
+        stats = await seed_fixed_sources(db_pool, candidates, logger=None)
+
+    # No fetch attempt at all against the already-blocked candidate — the
+    # other, unblocked candidate in the same batch is still probed normally.
+    assert "https://blocked.example.com/feed" not in called_urls
+    assert "https://good.example.com/feed" in called_urls
+    assert stats["attempted"] == 2
+    assert stats["seeded"] == 1
+    assert stats["failed"] == 0
