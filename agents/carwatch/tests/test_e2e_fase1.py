@@ -96,7 +96,13 @@ def test_weekly_run_end_to_end_ingests_classifies_and_publishes(db_pool):
                     "confidence": 0.92 if is_byd else 0.05,
                 }
             )
-        return json.dumps(results)
+        # call_classify returns (text, usage) since the Fase 1 final review
+        # (SPEC.md §18's llm.call event needs tokens_in/tokens_out).
+        return json.dumps(results), {
+            "tokens_in": 120,
+            "tokens_out": 80,
+            "stop_reason": "end_turn",
+        }
 
     with patch("carwatch.llm.classify.call_classify", new=AsyncMock(side_effect=fake_classify)):
         result = runner.invoke(app, ["weekly-run"])

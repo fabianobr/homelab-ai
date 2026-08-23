@@ -4,7 +4,7 @@ import re
 
 from pydantic import ValidationError
 
-from carwatch.llm.client import call_classify
+from carwatch.llm.client import MODEL, call_classify
 from carwatch.models import ClassifyItem
 
 SYSTEM_PROMPT = """\
@@ -38,7 +38,12 @@ Se o título estiver em outro idioma, traduza mentalmente. brand e model
 sempre em alfabeto latino.
 """
 
-BATCH_SIZE = 20
+# SPEC.md §10 said 20. The Fase 1 final review showed 20 items x ~30-40
+# output tokens each does not fit any sane per-call output budget alongside
+# SPEC's max_tokens=300 (see client.py); 8 keeps a full batch comfortably
+# inside the new 1200-token ceiling while still amortising the cached system
+# prompt over several items.
+BATCH_SIZE = 8
 APPROVAL_CONFIDENCE_THRESHOLD = 0.6
 
 
@@ -75,6 +80,68 @@ def parse_classify_response(raw_text: str, batch_size: int) -> list[ClassifyItem
     return items
 
 
+async def _classify_batch(pool, batch: list[tuple], system_prompt: str, logger) -> tuple[int, int, int]:
+    """Classify one batch, returning (approved, rejected, parse_errors).
+
+    On an unparseable response a batch of more than one item is split in half
+    and each half retried independently. That bounds the blast radius of any
+    future token-budget mismatch to the failing half instead of silently
+    discarding (and re-billing, week after week) the whole batch.
+    """
+    user_content = _format_batch_for_prompt(batch)
+    raw_response, usage = await call_classify(system_prompt, user_content)
+
+    if logger is not None:
+        logger.info(
+            "llm.call",
+            op="classify",
+            model=MODEL,
+            batch_size=len(batch),
+            tokens_in=usage.get("tokens_in"),
+            tokens_out=usage.get("tokens_out"),
+            stop_reason=usage.get("stop_reason"),
+        )
+
+    items = parse_classify_response(raw_response, batch_size=len(batch))
+
+    if items is None:
+        truncated = usage.get("stop_reason") == "max_tokens"
+        cause = "truncated_at_max_tokens" if truncated else "malformed_response"
+        if len(batch) > 1:
+            if logger is not None:
+                logger.warning(
+                    "classify.parse_error",
+                    cause=cause,
+                    batch_size=len(batch),
+                    action="split_and_retry",
+                )
+            mid = len(batch) // 2
+            left = await _classify_batch(pool, batch[:mid], system_prompt, logger)
+            right = await _classify_batch(pool, batch[mid:], system_prompt, logger)
+            return (left[0] + right[0], left[1] + right[1], left[2] + right[2])
+
+        if logger is not None:
+            logger.warning(
+                "classify.parse_error", cause=cause, batch_size=1, action="give_up"
+            )
+        return 0, 0, len(batch)
+
+    approved = rejected = 0
+    async with pool.connection() as conn:
+        for (row_id, _title, _summary), item in zip(batch, items):
+            is_approved = item.is_launch and item.confidence >= APPROVAL_CONFIDENCE_THRESHOLD
+            new_status = "new" if is_approved else "rejected"
+            await conn.execute(
+                "UPDATE raw_items SET classified = %s, status = %s WHERE id = %s",
+                (item.model_dump_json(), new_status, row_id),
+            )
+            if is_approved:
+                approved += 1
+            else:
+                rejected += 1
+    return approved, rejected, 0
+
+
 async def run_classify(pool, logger, limit: int = 100) -> dict:
     async with pool.connection() as conn:
         result = await conn.execute(
@@ -89,28 +156,12 @@ async def run_classify(pool, logger, limit: int = 100) -> dict:
 
     for batch_start in range(0, len(rows), BATCH_SIZE):
         batch = rows[batch_start : batch_start + BATCH_SIZE]
-        user_content = _format_batch_for_prompt(batch)
-        raw_response = await call_classify(system_prompt, user_content)
-        items = parse_classify_response(raw_response, batch_size=len(batch))
-
-        if items is None:
-            parse_errors += len(batch)
-            if logger is not None:
-                logger.warning("llm.call", op="classify", status="parse_error", batch_size=len(batch))
-            continue
-
-        async with pool.connection() as conn:
-            for (row_id, _title, _summary), item in zip(batch, items):
-                is_approved = item.is_launch and item.confidence >= APPROVAL_CONFIDENCE_THRESHOLD
-                new_status = "new" if is_approved else "rejected"
-                await conn.execute(
-                    "UPDATE raw_items SET classified = %s, status = %s WHERE id = %s",
-                    (item.model_dump_json(), new_status, row_id),
-                )
-                if is_approved:
-                    approved += 1
-                else:
-                    rejected += 1
+        batch_approved, batch_rejected, batch_errors = await _classify_batch(
+            pool, batch, system_prompt, logger
+        )
+        approved += batch_approved
+        rejected += batch_rejected
+        parse_errors += batch_errors
 
     return {
         "in": len(rows),
