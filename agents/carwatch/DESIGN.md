@@ -168,6 +168,18 @@ a instrução original de "manter o valor literal do spec".
   "program"/"framework". Termos com caracteres não-ASCII (zh/ja) continuam
   em substring: `\b` do Python pressupõe palavras delimitadas por espaço,
   que CJK não tem.
+- **`breaker.py`: o gatilho de pausa é "qualquer sinal isolado de
+  403/429/blocked", não a taxa de "> 20% em janela de 1h" que o §6 do
+  spec descreve.** Calcular a taxa literal exigiria uma tabela nova
+  logando toda tentativa de fetch (não só os sinais de pausa que
+  `source_incidents` já registra hoje) — uma migração de schema que esta
+  branch está deliberadamente evitando agora: a Fase 2 (PR #8), aberta em
+  cima desta branch, já reserva o número de migração `004`, e adicionar
+  uma migração aqui arriscaria colisão de numeração quando as duas forem
+  combinadas. O comportamento atual é mais conservador que o spec (pausa
+  mais cedo, não mais tarde), não uma lacuna de conformidade que deixe o
+  domínio ser martelado — fica registrado aqui como divergência honesta,
+  a implementar quando a tabela de log de fetches existir.
 
 Correções da mesma revisão que **não** divergem do spec (são o spec sendo
 finalmente implementado): o circuit breaker agora é **lido** antes de cada
