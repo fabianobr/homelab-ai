@@ -18,19 +18,33 @@ async def is_source_paused(pool, source_id: int, now: datetime | None = None) ->
     state into actual enforcement — ingest.py's source-selection SQL used to
     be the only place honouring it, so probe.py/discovery_seed.py kept
     hammering sources the breaker had already given up on.
+
+    Checked per DOMAIN, not just per source row: discovery_seed.py's
+    build_google_news_sources() deliberately creates several `sources` rows
+    sharing one `domain` (one per brand/locale on news.google.com). If that
+    domain starts blocking broadly, every sibling row still accumulates its
+    own failure history independently (record_fetch_result still writes only
+    the specific source_id row) — but a pause tripped on any one of them must
+    stop fetches against the rest too, or the untripped siblings keep
+    hammering an already-hostile domain.
     """
     now = now or datetime.now(timezone.utc)
     async with pool.connection() as conn:
         result = await conn.execute(
-            "SELECT status, blocked_until FROM sources WHERE id = %s", (source_id,)
+            "SELECT s2.status, s2.blocked_until FROM sources s1 "
+            "JOIN sources s2 ON s2.domain = s1.domain "
+            "WHERE s1.id = %s",
+            (source_id,),
         )
-        row = await result.fetchone()
-    if row is None:
+        rows = await result.fetchall()
+    if not rows:
         return False
-    status, blocked_until = row
-    if status in _TERMINAL_STATUSES:
-        return True
-    return blocked_until is not None and blocked_until > now
+    for status, blocked_until in rows:
+        if status in _TERMINAL_STATUSES:
+            return True
+        if blocked_until is not None and blocked_until > now:
+            return True
+    return False
 
 
 def _log_trip(source_id: int, previous_status: str, new_status: str, reason: str) -> None:
@@ -52,7 +66,7 @@ async def record_fetch_result(
     pool, source_id: int, *, status: int, blocked: bool, now: datetime | None = None
 ) -> str:
     now = now or datetime.now(timezone.utc)
-    is_failure = status >= 500 or status == 0
+    is_failure = status >= 500 or status == 0 or status in (404, 410)
     is_pause_signal = blocked or status in (403, 429)
 
     async with pool.connection() as conn:

@@ -1,7 +1,7 @@
 """tests/test_breaker.py"""
 from datetime import datetime, timedelta, timezone
 
-from carwatch.breaker import check_stale_sources, record_fetch_result
+from carwatch.breaker import check_stale_sources, is_source_paused, record_fetch_result
 
 
 async def _insert_source(db_pool, **overrides):
@@ -66,6 +66,73 @@ async def test_block_after_resuming_from_probation_is_permanent(db_pool):
     status = await record_fetch_result(db_pool, source_id, status=403, blocked=True, now=now)
 
     assert status == "blocked"
+
+
+async def test_three_consecutive_404s_marks_broken_without_resetting_as_success(db_pool):
+    """404/410 are the fetcher's "permanently gone" signals (never retried,
+    see fetcher.py's 403/404/410 handling), but is_failure used to only
+    catch >=500/0 — a dead feed that starts 404ing fell through to the
+    success branch, resetting consecutive_failures/last_ok_at as if it were
+    healthy, and never tripped 'broken' (which triggers feed rediscovery)."""
+    source_id = await _insert_source(db_pool, _unique=7)
+
+    for _ in range(3):
+        status = await record_fetch_result(db_pool, source_id, status=404, blocked=False)
+
+    assert status == "broken"
+
+    async with db_pool.connection() as conn:
+        result = await conn.execute(
+            "SELECT consecutive_failures, last_ok_at FROM sources WHERE id = %s",
+            (source_id,),
+        )
+        consecutive_failures, last_ok_at = await result.fetchone()
+    assert consecutive_failures == 3
+    assert last_ok_at is None
+
+
+async def test_pause_on_one_source_pauses_sibling_on_same_domain(db_pool):
+    """sources.domain lets discovery_seed.build_google_news_sources() create
+    several rows sharing one domain (news.google.com, one per brand). If
+    that domain starts blocking broadly, a pause tripped on any one row must
+    stop fetches against its siblings too, or the untripped siblings keep
+    hammering an already-hostile domain."""
+    domain = "shared.example.com"
+    tripped_id = await _insert_source(
+        db_pool, _unique=8, domain=domain, feed_url=f"https://{domain}/a"
+    )
+    sibling_id = await _insert_source(
+        db_pool, _unique=9, domain=domain, feed_url=f"https://{domain}/b"
+    )
+    now = datetime.now(timezone.utc)
+
+    await record_fetch_result(db_pool, tripped_id, status=429, blocked=True, now=now)
+
+    assert await is_source_paused(db_pool, sibling_id, now=now) is True
+
+    # record_fetch_result must still only have written the tripped row —
+    # the sibling's own row is untouched.
+    async with db_pool.connection() as conn:
+        result = await conn.execute(
+            "SELECT status, blocked_until FROM sources WHERE id = %s", (sibling_id,)
+        )
+        status, blocked_until = await result.fetchone()
+    assert status == "active"
+    assert blocked_until is None
+
+
+async def test_sources_on_different_domains_do_not_pause_each_other(db_pool):
+    id_a = await _insert_source(
+        db_pool, _unique=10, domain="a.example.com", feed_url="https://a.example.com/rss"
+    )
+    id_b = await _insert_source(
+        db_pool, _unique=11, domain="b.example.com", feed_url="https://b.example.com/rss"
+    )
+    now = datetime.now(timezone.utc)
+
+    await record_fetch_result(db_pool, id_a, status=429, blocked=True, now=now)
+
+    assert await is_source_paused(db_pool, id_b, now=now) is False
 
 
 async def test_check_stale_sources_flags_sources_without_recent_items(db_pool):
