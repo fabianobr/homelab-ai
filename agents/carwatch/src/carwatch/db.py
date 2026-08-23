@@ -1,6 +1,7 @@
 """src/carwatch/db.py"""
 from pathlib import Path
 
+from pgvector.psycopg import register_vector_async
 from psycopg_pool import AsyncConnectionPool
 
 from carwatch.settings import get_settings
@@ -8,10 +9,27 @@ from carwatch.settings import get_settings
 _pool: AsyncConnectionPool | None = None
 
 
+async def configure_connection(conn) -> None:
+    """Register pgvector's type adapters on a pooled connection.
+
+    Lets Python `list[float]` values bind directly to `vector` columns and
+    lets `vector` columns come back as numpy arrays instead of raw text.
+    Passed as the pool's `configure=` callback so it runs on every connection
+    the pool opens, not just the first one.
+    """
+    await register_vector_async(conn)
+
+
 def get_pool() -> AsyncConnectionPool:
     global _pool
     if _pool is None:
-        _pool = AsyncConnectionPool(get_settings().database_url, min_size=1, max_size=10, open=False)
+        _pool = AsyncConnectionPool(
+            get_settings().database_url,
+            min_size=1,
+            max_size=10,
+            open=False,
+            configure=configure_connection,
+        )
     return _pool
 
 

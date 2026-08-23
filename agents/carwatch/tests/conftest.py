@@ -6,7 +6,7 @@ import pytest
 import pytest_asyncio
 from psycopg_pool import AsyncConnectionPool
 
-from carwatch.db import run_migrations
+from carwatch.db import configure_connection, run_migrations
 from carwatch.settings import get_settings
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -49,7 +49,9 @@ def _fast_rate_limiter(monkeypatch):
 
 @pytest_asyncio.fixture
 async def db_pool():
-    pool = AsyncConnectionPool(TEST_DB_URL, min_size=1, max_size=4, open=False)
+    pool = AsyncConnectionPool(
+        TEST_DB_URL, min_size=1, max_size=4, open=False, configure=configure_connection
+    )
     await pool.open()
     await run_migrations(pool, REPO_ROOT / "migrations")
     yield pool
