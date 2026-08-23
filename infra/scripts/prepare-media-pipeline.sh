@@ -66,6 +66,7 @@ require_command git
 clone_at_commit "ComfyUI" "${COMFYUI_REPOSITORY}" "${COMFYUI_COMMIT}" "${COMFYUI_SOURCE_DIR}"
 clone_at_commit "ComfyUI-Manager" "${COMFYUI_MANAGER_REPOSITORY}" "${COMFYUI_MANAGER_COMMIT}" "${COMFYUI_SOURCE_DIR}/custom_nodes/ComfyUI-Manager"
 clone_at_commit "ComfyUI-LTXVideo" "${COMFYUI_LTXVIDEO_REPOSITORY}" "${COMFYUI_LTXVIDEO_COMMIT}" "${COMFYUI_SOURCE_DIR}/custom_nodes/ComfyUI-LTXVideo"
+clone_at_commit "comfyui-ollama" "${COMFYUI_OLLAMA_REPOSITORY}" "${COMFYUI_OLLAMA_COMMIT}" "${COMFYUI_SOURCE_DIR}/custom_nodes/comfyui-ollama"
 
 LOCAL_NODE_SOURCE="${ROOT}/infra/docker/comfyui/custom_nodes/ComfyUI-OllamaFlushVRAM"
 LOCAL_NODE_DESTINATION="${COMFYUI_SOURCE_DIR}/custom_nodes/ComfyUI-OllamaFlushVRAM"

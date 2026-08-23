@@ -1,6 +1,6 @@
 services:
   ollama:
-    image: ollama/ollama:0.32.6
+    image: ollama/ollama:0.32.15
     container_name: ollama
     profiles:
       - media-pipeline
@@ -40,7 +40,7 @@ services:
           memory: 2g
 
   open-webui:
-    image: ghcr.io/open-webui/open-webui:main
+    image: ghcr.io/open-webui/open-webui:v0.11.0@sha256:72c0ba641ba75e7aa52655cb242570906ececd09b1140fb736483038a22b3228
     container_name: open-webui
     profiles:
       - interactive
@@ -169,7 +169,8 @@ services:
           memory: 256m
 
   litellm:
-    image: ghcr.io/berriai/litellm:main-stable
+    # v1.97.0 validado em 2026-08-23; digest evita mudança silenciosa da tag.
+    image: ghcr.io/berriai/litellm:v1.97.0@sha256:468c25f35f3e5ec4e414974f00deab93337b1b4d9953cabcfd3722e59415f834
     container_name: litellm
     profiles:
       - optional
@@ -206,8 +207,9 @@ services:
           memory: 512m
 
   searxng:
-    # Digest da imagem validada em 2026-08-06; atualizar deliberadamente, não via :latest
-    image: searxng/searxng:latest@sha256:dc5c10fda6818dfef7abfdf9f451b898242c3321514a9524af215cbedc79c89b
+    # Digest da imagem 2026.8.22-9fea41204 validada em 2026-08-23;
+    # atualizar deliberadamente, não via :latest.
+    image: searxng/searxng:latest@sha256:11a9b34cdc0b1ec2b991470a2762ecb5a1a531898289fb51dcd015260450729e
     container_name: searxng
     profiles:
       - optional
