@@ -7,7 +7,16 @@ from carwatch.models import BrandsConfig, KeywordsConfig
 
 @lru_cache(maxsize=8192)
 def _word_boundary_pattern(term: str) -> re.Pattern:
-    return re.compile(rf"\b{re.escape(term)}\b", re.IGNORECASE)
+    # Plain `\b` is defined in terms of `\w`, and Python's `\w` (Unicode mode)
+    # treats CJK ideographs/kana as word characters too — so `\bBYD\b` finds
+    # no boundary between "D" and an immediately adjacent "海" and fails to
+    # match "BYD海豹06首发". Using explicit ASCII-only boundary lookarounds
+    # instead of `\b` keeps the false-positive rejections ("gm" inside
+    # "segment", "ram" inside "program"/"framework") while still matching
+    # when the term is glued directly to non-ASCII CJK/kana text.
+    return re.compile(
+        rf"(?<![A-Za-z0-9_]){re.escape(term)}(?![A-Za-z0-9_])", re.IGNORECASE
+    )
 
 
 def _term_in_text(term: str, text: str, text_lower: str) -> bool:

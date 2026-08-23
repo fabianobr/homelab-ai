@@ -144,6 +144,18 @@ def test_positive_term_is_word_bounded_too():
     assert passes is False
 
 
+def test_latin_brand_glued_to_cjk_text_still_matches():
+    """Python's `\\b` is defined in terms of `\\w`, and CJK ideographs count
+    as word characters too — so a naive `\\bBYD\\b` finds no boundary between
+    "D" and an immediately adjacent "海" and fails to match "BYD海豹06首发".
+    A Latin brand name/alias glued directly to CJK text (no space) must
+    still be found."""
+    brands = BrandsConfig.model_validate({"brands": [{"name": "BYD", "aliases": []}]})
+    passes, brand = passes_prefilter("BYD海豹06首发", None, brands, KEYWORDS)
+    assert brand == "BYD"
+    assert passes is True
+
+
 def test_cjk_terms_keep_substring_matching():
     """Python's \\b assumes whitespace-delimited words, which CJK text has
     none of — 比亚迪/首发 must keep plain containment."""
