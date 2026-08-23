@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -74,6 +75,8 @@ def test_safe_explicitly_public_prompt_is_allowed_without_network():
     [
         "Authorization: " + "Bearer " + "definitely-not-for-public-use",
         "api_" + "key=" + "super-sensitive-value",
+        json.dumps({"api_" + "key": "definitely-sensitive-value"}),
+        json.dumps({"pass" + "word": "correct-horse-battery-staple"}),
         "Host 192.168.10.25 contains the private service",
         "-----BEGIN " + "PRIVATE KEY-----\nnot-public",
     ],
@@ -90,6 +93,11 @@ def test_missing_public_classification_is_blocked():
     request.pop("metadata")
     with pytest.raises(guardrail.SensitivePromptError, match="data_classification=public"):
         guardrail.enforce_public_route(request)
+
+
+def test_public_environment_placeholders_are_not_treated_as_secret_values():
+    request = public_request(json.dumps({"api_" + "key": "${GROQ_API_KEY}"}))
+    assert guardrail.enforce_public_route(request) is request
 
 
 def test_uninspectable_multimodal_content_is_blocked_fail_closed():

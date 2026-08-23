@@ -42,8 +42,9 @@ _SENSITIVE_PATTERNS = (
     (
         "assigned secret",
         re.compile(
-            r"(?im)\b(?:api[_-]?key|secret|token|password|passwd|pwd)\b"
-            r"\s*(?::|=)\s*['\"]?(?!\$\{|<|REDACTED\b|EXAMPLE\b|CHANGE_ME\b)"
+            r"(?im)['\"]?\b(?:api[_-]?key|secret|token|password|passwd|pwd)\b"
+            r"['\"]?\s*(?::|=)\s*['\"]?"
+            r"(?!\$\{|<|REDACTED\b|EXAMPLE\b|CHANGE_ME\b)"
             r"[^\s'\";,]{8,}"
         ),
     ),
