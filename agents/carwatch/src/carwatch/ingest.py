@@ -91,13 +91,29 @@ async def run_ingest(pool, logger) -> dict:
         eligible = await result.fetchall()
 
     items_new_total = 0
+    sources_failed = 0
     for source_id, feed_url in eligible:
-        stats = await ingest_source(pool, source_id, feed_url, logger)
+        # One unreachable/misbehaving source must never abort the batch: across
+        # 20+ third-party press-room domains at least one failing per run is
+        # routine, and the remaining sources still have to be ingested.
+        try:
+            stats = await ingest_source(pool, source_id, feed_url, logger)
+        except Exception as exc:
+            sources_failed += 1
+            if logger is not None:
+                logger.warning(
+                    "ingest.source_failed",
+                    source_id=source_id,
+                    feed_url=feed_url,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+            continue
         items_new_total += stats["items_new"]
 
     elapsed_ms = int((time.monotonic() - start) * 1000)
     result = {
         "sources_checked": len(eligible),
+        "sources_failed": sources_failed,
         "items_new": items_new_total,
         "ms": elapsed_ms,
     }

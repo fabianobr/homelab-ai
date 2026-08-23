@@ -1,10 +1,12 @@
 """tests/test_discovery_seed.py"""
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 import httpx
 import respx
 
+from carwatch import fetcher
 from carwatch.discovery_seed import (
     build_google_news_sources,
     load_fixed_sources,
@@ -102,8 +104,83 @@ async def test_seed_fixed_sources_only_inserts_validated_feeds(db_pool):
 
     stats = await seed_fixed_sources(db_pool, candidates, logger=None)
 
-    assert stats == {"attempted": 2, "seeded": 1}
+    assert stats == {"attempted": 2, "seeded": 1, "failed": 0}
     async with db_pool.connection() as conn:
         result = await conn.execute("SELECT feed_url FROM sources")
         rows = await result.fetchall()
     assert rows == [("https://good.example.com/feed",)]
+
+
+@respx.mock
+async def test_seed_fixed_sources_survives_one_dead_candidate_domain(db_pool):
+    """CRITICAL 2: seed_fixed_sources had no per-candidate guard, so one
+    unreachable domain (DNS failure on robots.txt) aborted the whole
+    seed-sources run before the healthy candidates were reached."""
+    respx.get("https://dead.example.com/robots.txt").mock(
+        side_effect=httpx.ConnectError("Name or service not known")
+    )
+    respx.get("https://dead.example.com/feed").mock(
+        side_effect=httpx.ConnectError("Name or service not known")
+    )
+    respx.get("https://good.example.com/robots.txt").mock(
+        return_value=httpx.Response(200, text="User-agent: *\nAllow: /\n")
+    )
+    now = datetime.now(timezone.utc)
+    good_feed = "<?xml version='1.0'?><rss><channel>" + "".join(
+        f"<item><title>i{i}</title><link>https://x/{i}</link>"
+        f"<pubDate>{(now - timedelta(days=i)).strftime('%a, %d %b %Y %H:%M:%S +0000')}</pubDate></item>"
+        for i in range(5)
+    ) + "</channel></rss>"
+    respx.get("https://good.example.com/feed").mock(
+        return_value=httpx.Response(200, text=good_feed)
+    )
+
+    candidates = [
+        {"domain": "dead.example.com", "feed_url": "https://dead.example.com/feed", "kind": "rss", "tier": 3, "region": "GLOBAL", "lang": "en"},
+        {"domain": "good.example.com", "feed_url": "https://good.example.com/feed", "kind": "rss", "tier": 3, "region": "GLOBAL", "lang": "en"},
+    ]
+
+    stats = await seed_fixed_sources(db_pool, candidates, logger=None)
+
+    # The dead domain fails its own retry loop and returns status=0 (rejected),
+    # never raising — and the healthy candidate that follows is still seeded.
+    assert stats["attempted"] == 2
+    assert stats["seeded"] == 1
+    async with db_pool.connection() as conn:
+        result = await conn.execute("SELECT feed_url FROM sources")
+        assert await result.fetchall() == [("https://good.example.com/feed",)]
+
+
+@respx.mock
+async def test_seed_fixed_sources_survives_an_unexpected_exception(db_pool):
+    """Guards the per-candidate try/except itself: even a failure the fetcher
+    does not convert into a FetchResult must not abort the batch."""
+    respx.get("https://good.example.com/robots.txt").mock(
+        return_value=httpx.Response(200, text="User-agent: *\nAllow: /\n")
+    )
+    now = datetime.now(timezone.utc)
+    good_feed = "<?xml version='1.0'?><rss><channel>" + "".join(
+        f"<item><title>i{i}</title><link>https://x/{i}</link>"
+        f"<pubDate>{(now - timedelta(days=i)).strftime('%a, %d %b %Y %H:%M:%S +0000')}</pubDate></item>"
+        for i in range(5)
+    ) + "</channel></rss>"
+    respx.get("https://good.example.com/feed").mock(
+        return_value=httpx.Response(200, text=good_feed)
+    )
+
+    real_fetch = fetcher.fetch
+
+    async def flaky_fetch(url, **kwargs):
+        if "boom.example.com" in url:
+            raise RuntimeError("simulated unhandled failure for this candidate")
+        return await real_fetch(url, **kwargs)
+
+    candidates = [
+        {"domain": "boom.example.com", "feed_url": "https://boom.example.com/feed", "kind": "rss", "tier": 3, "region": "GLOBAL", "lang": "en"},
+        {"domain": "good.example.com", "feed_url": "https://good.example.com/feed", "kind": "rss", "tier": 3, "region": "GLOBAL", "lang": "en"},
+    ]
+
+    with patch.object(fetcher, "fetch", new=flaky_fetch):
+        stats = await seed_fixed_sources(db_pool, candidates, logger=None)
+
+    assert stats == {"attempted": 2, "seeded": 1, "failed": 1}

@@ -1,5 +1,6 @@
 """tests/test_ingest.py"""
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 import httpx
 import respx
@@ -112,4 +113,70 @@ async def test_run_ingest_only_selects_active_and_probation_sources(db_pool):
     stats = await run_ingest(db_pool, logger=None)
 
     assert stats["sources_checked"] == 1
+    assert stats["items_new"] == 1
+
+
+@respx.mock
+async def test_run_ingest_survives_one_failing_source_and_processes_the_rest(db_pool):
+    """CRITICAL 2: run_ingest had no per-source guard, so one raising source
+    (routine across 20+ third-party domains) aborted the whole weekly run and
+    every later source went un-ingested."""
+    respx.get("https://example.com/robots.txt").mock(
+        return_value=httpx.Response(200, text="User-agent: *\nAllow: /\n")
+    )
+    now = datetime.now(timezone.utc)
+    respx.get("https://example.com/good-feed").mock(
+        return_value=httpx.Response(200, text=_rss([("Item", "https://example.com/x", now)]))
+    )
+
+    async with db_pool.connection() as conn:
+        await conn.execute(
+            "INSERT INTO sources (domain, feed_url, kind, tier, status) VALUES "
+            "('example.com', 'https://example.com/broken-feed', 'rss', 1, 'active'), "
+            "('example.com', 'https://example.com/good-feed', 'rss', 1, 'active')"
+        )
+
+    real_ingest_source = ingest_source
+
+    async def flaky_ingest_source(pool, source_id, feed_url, logger):
+        if feed_url.endswith("broken-feed"):
+            raise RuntimeError("simulated unhandled failure for this source")
+        return await real_ingest_source(pool, source_id, feed_url, logger)
+
+    with patch("carwatch.ingest.ingest_source", new=flaky_ingest_source):
+        stats = await run_ingest(db_pool, logger=None)
+
+    assert stats["sources_checked"] == 2
+    assert stats["sources_failed"] == 1
+    assert stats["items_new"] == 1  # the healthy source was still ingested
+
+
+@respx.mock
+async def test_run_ingest_survives_a_dns_failure_on_a_real_source(db_pool):
+    """The realistic shape of the same bug: an unresolvable domain whose
+    robots.txt request raises before the target request is ever made."""
+    respx.get("https://dead.example.com/robots.txt").mock(
+        side_effect=httpx.ConnectError("Name or service not known")
+    )
+    respx.get("https://dead.example.com/feed").mock(
+        side_effect=httpx.ConnectError("Name or service not known")
+    )
+    respx.get("https://example.com/robots.txt").mock(
+        return_value=httpx.Response(200, text="User-agent: *\nAllow: /\n")
+    )
+    now = datetime.now(timezone.utc)
+    respx.get("https://example.com/good-feed").mock(
+        return_value=httpx.Response(200, text=_rss([("Item", "https://example.com/x", now)]))
+    )
+
+    async with db_pool.connection() as conn:
+        await conn.execute(
+            "INSERT INTO sources (domain, feed_url, kind, tier, status) VALUES "
+            "('dead.example.com', 'https://dead.example.com/feed', 'rss', 1, 'active'), "
+            "('example.com', 'https://example.com/good-feed', 'rss', 1, 'active')"
+        )
+
+    stats = await run_ingest(db_pool, logger=None)
+
+    assert stats["sources_checked"] == 2
     assert stats["items_new"] == 1

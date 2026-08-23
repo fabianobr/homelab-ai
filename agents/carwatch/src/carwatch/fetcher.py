@@ -1,16 +1,27 @@
 """src/carwatch/fetcher.py"""
 import asyncio
 import random
+import time
 from dataclasses import dataclass
 from typing import Literal
 from urllib.parse import urlsplit
 
 import httpx
+import structlog
 
 from carwatch import breaker, robots
 from carwatch.db import get_open_pool
 from carwatch.ratelimit import RateLimiter
 from carwatch.settings import get_settings
+
+logger = structlog.get_logger()
+
+# httpx.RequestError's three direct subtrees, spelled out: TransportError
+# (timeouts, connect/read/write errors, proxy errors, local/remote protocol
+# errors), TooManyRedirects and DecodingError. All of them are realistic
+# against 20+ third-party press-room domains and all of them used to escape
+# this module — the single HTTP egress point — uncaught.
+_RETRYABLE_EXCEPTIONS = (httpx.TransportError, httpx.TooManyRedirects, httpx.DecodingError)
 
 _BLOCK_MARKERS = (
     "Just a moment",
@@ -72,18 +83,58 @@ async def _raw_get(url: str, headers: dict | None = None, timeout: float = 20.0)
     return await client.get(url, headers=headers or {}, timeout=timeout)
 
 
-def _is_blocked(status: int, body: str) -> bool:
+async def _robots_get(robots_url: str):
+    """Fetch robots.txt, mapping any transport failure to None.
+
+    robots.is_allowed() treats a None response exactly like a 4xx one and
+    fails open. Doing the httpx-typed part here keeps HTTP-library knowledge
+    inside this module (the single egress point) while making sure an
+    unreachable domain's robots.txt can never abort the caller's whole batch.
+    """
+    try:
+        return await _raw_get(robots_url, timeout=10.0)
+    except httpx.HTTPError:
+        return None
+
+
+def _is_blocked(status: int, body: str, kind: Literal["feed", "page"] = "page") -> bool:
     if status != 200:
         return False
-    if len(body) < 500:
+    # The "suspiciously short body" heuristic only makes sense for HTML pages,
+    # where an anti-bot interstitial is a tiny document. A legitimately small
+    # RSS/Atom feed (few recent items) is perfectly normal, and flagging it as
+    # blocked feeds the circuit breaker: 24h pause -> probation -> permanently
+    # blocked, blacklisting a valid feed purely for being short.
+    if kind == "page" and len(body) < 500:
         return True
     return any(marker in body for marker in _BLOCK_MARKERS)
 
 
 def _is_retryable(status: int, exc: Exception | None) -> bool:
     if exc is not None:
-        return isinstance(exc, (httpx.TimeoutException, httpx.ConnectError))
+        return isinstance(exc, _RETRYABLE_EXCEPTIONS)
     return status >= 500 or status == 429
+
+
+def _log_result(
+    *,
+    domain: str,
+    status: int,
+    started: float,
+    not_modified: bool = False,
+    blocked: bool = False,
+    reason: str | None = None,
+) -> None:
+    """SPEC.md §18's `fetch.result` observability event, one per fetch()."""
+    logger.info(
+        "fetch.result",
+        domain=domain,
+        status=status,
+        ms=int((time.monotonic() - started) * 1000),
+        not_modified=not_modified,
+        blocked=blocked,
+        reason=reason,
+    )
 
 
 async def fetch(
@@ -96,6 +147,17 @@ async def fetch(
     settings = get_settings()
     parts = urlsplit(url)
     domain = parts.netloc
+    started = time.monotonic()
+
+    # Circuit-breaker ENFORCEMENT. record_fetch_result() below writes breaker
+    # state, but until now nothing read it back here: only ingest.py's
+    # source-selection SQL honoured it, leaving probe.py and
+    # discovery_seed.py free to keep hammering a blocked source.
+    if source_id is not None and await breaker.is_source_paused(
+        await get_open_pool(), source_id
+    ):
+        _log_result(domain=domain, status=0, started=started, reason="breaker")
+        return FetchResult(0, None, None, None, False, False, "breaker")
 
     limiter = _get_limiter()
     async with limiter.domain(domain):
@@ -103,12 +165,11 @@ async def fetch(
         # cache miss) — it must happen inside the domain's rate-limit scope
         # so that request also consumes this domain's slot, not before it.
         allowed, crawl_delay = await robots.is_allowed(
-            url,
-            settings.user_agent,
-            fetch_fn=lambda robots_url: _raw_get(robots_url, timeout=10.0),
+            url, settings.user_agent, fetch_fn=_robots_get
         )
         if not allowed:
             # Not a fetch attempt against the target URL — no breaker call.
+            _log_result(domain=domain, status=0, started=started, reason="robots")
             return FetchResult(0, None, None, None, False, False, "robots")
 
         if crawl_delay:
@@ -139,7 +200,7 @@ async def fetch(
             exc = None
             try:
                 response = await _raw_get(url, headers=conditional_headers, timeout=timeout)
-            except (httpx.TimeoutException, httpx.ConnectError) as e:
+            except _RETRYABLE_EXCEPTIONS as e:
                 exc = e
                 response = None
 
@@ -171,7 +232,9 @@ async def fetch(
             if source_id is not None:
                 pool = await get_open_pool()
                 await breaker.record_fetch_result(pool, source_id, status=0, blocked=False)
-            return FetchResult(0, None, None, None, False, False, str(exc))
+            reason = f"{type(exc).__name__}: {exc}"
+            _log_result(domain=domain, status=0, started=started, reason=reason)
+            return FetchResult(0, None, None, None, False, False, reason)
 
         status = response.status_code
 
@@ -179,10 +242,11 @@ async def fetch(
             if source_id is not None:
                 pool = await get_open_pool()
                 await breaker.record_fetch_result(pool, source_id, status=304, blocked=False)
+            _log_result(domain=domain, status=304, started=started, not_modified=True)
             return FetchResult(304, None, None, None, True, False, None)
 
         body = response.text
-        blocked = _is_blocked(status, body)
+        blocked = _is_blocked(status, body, kind)
         etag = response.headers.get("ETag")
         last_modified = response.headers.get("Last-Modified")
 
@@ -196,6 +260,7 @@ async def fetch(
                         (etag, last_modified, source_id),
                     )
 
+        _log_result(domain=domain, status=status, started=started, blocked=blocked)
         return FetchResult(
             status=status,
             body=body if not blocked else None,

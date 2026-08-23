@@ -81,20 +81,33 @@ def load_fixed_sources(settings_path: Path) -> list[dict]:
 
 async def seed_fixed_sources(pool, fixed_sources: list[dict], logger) -> dict:
     seeded = 0
+    failed = 0
     for candidate in fixed_sources:
-        result = await fetcher.fetch(candidate["feed_url"], kind="feed")
-        if result.status != 200 or result.blocked or not validate_feed_content(result.body):
-            if logger is not None:
-                logger.warning("discovery_seed.rejected", feed_url=candidate["feed_url"])
-            continue
+        # One dead candidate domain (DNS failure, refused connection, TLS
+        # error) must not abort seeding of every remaining candidate.
+        try:
+            result = await fetcher.fetch(candidate["feed_url"], kind="feed")
+            if result.status != 200 or result.blocked or not validate_feed_content(result.body):
+                if logger is not None:
+                    logger.warning("discovery_seed.rejected", feed_url=candidate["feed_url"])
+                continue
 
-        async with pool.connection() as conn:
-            await conn.execute(
-                "INSERT INTO sources (domain, feed_url, kind, tier, status, region, lang) "
-                "VALUES (%(domain)s, %(feed_url)s, %(kind)s, %(tier)s, 'probation', %(region)s, %(lang)s) "
-                "ON CONFLICT (feed_url) DO NOTHING",
-                candidate,
-            )
+            async with pool.connection() as conn:
+                await conn.execute(
+                    "INSERT INTO sources (domain, feed_url, kind, tier, status, region, lang) "
+                    "VALUES (%(domain)s, %(feed_url)s, %(kind)s, %(tier)s, 'probation', %(region)s, %(lang)s) "
+                    "ON CONFLICT (feed_url) DO NOTHING",
+                    candidate,
+                )
+        except Exception as exc:
+            failed += 1
+            if logger is not None:
+                logger.warning(
+                    "discovery_seed.failed",
+                    feed_url=candidate["feed_url"],
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+            continue
         seeded += 1
 
-    return {"attempted": len(fixed_sources), "seeded": seeded}
+    return {"attempted": len(fixed_sources), "seeded": seeded, "failed": failed}
