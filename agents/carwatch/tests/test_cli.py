@@ -105,3 +105,16 @@ def test_seed_sources_wires_fixed_and_google_news_sources_into_db(db_pool):
     assert result.exit_code == 0
     assert "attempted" in result.output
     assert "seeded" in result.output
+
+
+def test_help_lists_fase2_commands():
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    for command in ("extract", "review"):
+        assert command in result.output
+
+
+def test_publish_dry_run_counts_pending_events_without_sending(db_pool):
+    result = runner.invoke(app, ["publish", "--dry-run"])
+    assert result.exit_code == 0
+    assert "would_send" in result.output

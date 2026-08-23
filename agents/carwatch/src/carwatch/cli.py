@@ -10,11 +10,14 @@ from carwatch.db import close_pool, get_open_pool, run_migrations
 from carwatch.discovery_seed import build_google_news_sources, load_fixed_sources, seed_fixed_sources
 from carwatch.ingest import run_ingest
 from carwatch.llm.classify import run_classify
+from carwatch.llm.extract import run_extract
 from carwatch.logging_setup import configure_logging
 from carwatch.models import load_brands_config, load_keywords_config
 from carwatch.prefilter import run_prefilter
 from carwatch.probe import run_probe
+from carwatch.publishers.atom import write_atom_feed
 from carwatch.publishers.telegram import get_pending_events, publish_pending_events
+from carwatch.review import run_review
 from carwatch.settings import get_settings
 
 app = typer.Typer()
@@ -123,6 +126,29 @@ def classify(limit: int = typer.Option(100, "--limit")):
 
 
 @app.command()
+def extract(limit: int = typer.Option(50, "--limit")):
+    async def _run():
+        logger = _logger()
+        pool = await get_open_pool()
+        stats = await run_extract(pool, logger, limit=limit)
+        await close_pool()
+        return stats
+
+    typer.echo(asyncio.run(_run()))
+
+
+@app.command()
+def review(limit: int = typer.Option(15, "--limit")):
+    async def _run():
+        pool = await get_open_pool()
+        counts = await run_review(pool, limit, input_fn=input, print_fn=typer.echo)
+        await close_pool()
+        return counts
+
+    typer.echo(asyncio.run(_run()))
+
+
+@app.command()
 def publish(dry_run: bool = typer.Option(False, "--dry-run")):
     async def _run():
         logger = _logger()
@@ -133,6 +159,7 @@ def publish(dry_run: bool = typer.Option(False, "--dry-run")):
             return {"would_send": len(events)}
         settings = get_settings()
         stats = await publish_pending_events(pool, settings.telegram_bot_token, settings.telegram_chat_id, logger)
+        await write_atom_feed(pool, Path(settings.atom_feed_path), settings.atom_feed_url)
         await close_pool()
         return stats
 
@@ -156,14 +183,14 @@ def stats():
 
 @app.command(name="weekly-run")
 def weekly_run():
-    """Single composite pass: ingest -> prefilter -> classify -> publish.
+    """Single composite pass: ingest -> prefilter -> classify -> extract -> publish (+ atom).
 
     DESIGN.md §1: replaces SPEC.md's APScheduler daemon (`carwatch run`) with one
-    synchronous run per systemd timer trigger. Exits non-zero only when there were
-    pending launch_events and none of them sent -- a quiet week with zero pending
-    events is not a failure (Task 9 will extend this pipeline with the `extract`
-    step that actually populates `launch_events`; until then `publish` will
-    typically report zero pending events).
+    synchronous run per systemd timer trigger. dedupe.py has no separate CLI
+    entrypoint -- it's invoked per item inside run_extract (SPEC.md §3
+    architecture diagram: extract -> dedupe -> launch_events). Exits non-zero
+    only when there were pending launch_events and none of them sent -- a quiet
+    week with zero pending events is not a failure.
     """
 
     async def _run():
@@ -177,14 +204,17 @@ def weekly_run():
         ingest_stats = await run_ingest(pool, logger)
         prefilter_stats = await run_prefilter(pool, brands_config, keywords_config, logger)
         classify_stats = await run_classify(pool, logger, limit=200)
+        extract_stats = await run_extract(pool, logger, limit=100)
         publish_stats = await publish_pending_events(
             pool, settings.telegram_bot_token, settings.telegram_chat_id, logger
         )
+        await write_atom_feed(pool, Path(settings.atom_feed_path), settings.atom_feed_url)
         await close_pool()
         return {
             "ingest": ingest_stats,
             "prefilter": prefilter_stats,
             "classify": classify_stats,
+            "extract": extract_stats,
             "publish": publish_stats,
         }
 

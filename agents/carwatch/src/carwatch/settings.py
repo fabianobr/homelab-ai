@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     fetch_min_interval_sec: float = 3.0
     fetch_global_concurrency: int = 10
     log_level: str = "INFO"
+    atom_feed_path: str = "feed.atom"
+    atom_feed_url: str = "https://example.com/feed.atom"
 
     @property
     def user_agent(self) -> str:
