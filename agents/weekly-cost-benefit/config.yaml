@@ -49,33 +49,45 @@ pricing_reference:
   energy_cost_kwh_brl: 0.95
   usd_brl: 5.5
   local_hardware:
-    - name: "RTX 5060 Ti 16GB (setup atual)"
+    - id: "rtx-5060-ti-16gb"
+      name: "RTX 5060 Ti 16GB (setup atual)"
       capex_usd: 430
       opex_month_usd: 15   # energia ~200W em uso intenso
-    - name: "RTX 4090 24GB usada"
+    - id: "rtx-4090-24gb-used"
+      name: "RTX 4090 24GB usada"
       capex_usd: 1500
       opex_month_usd: 25
-    - name: "Mac Studio M4 Max 64GB"
+    - id: "mac-studio-m4-max-64gb"
+      name: "Mac Studio M4 Max 64GB"
       capex_usd: 2500
       opex_month_usd: 8
   paid_licenses:
-    - name: "Claude Pro (Anthropic)"
+    - id: "claude-pro"
+      name: "Claude Pro (Anthropic)"
       opex_month_usd: 20
-    - name: "Claude Max 5x (Anthropic)"
+    - id: "claude-max-5x"
+      name: "Claude Max 5x (Anthropic)"
       opex_month_usd: 100
-    - name: "Claude Max 20x (Anthropic)"
+    - id: "claude-max-20x"
+      name: "Claude Max 20x (Anthropic)"
       opex_month_usd: 200
-    - name: "ChatGPT Plus / Codex (OpenAI)"
+    - id: "chatgpt-plus-codex"
+      name: "ChatGPT Plus / Codex (OpenAI)"
       opex_month_usd: 20
-    - name: "ChatGPT Pro (OpenAI)"
+    - id: "chatgpt-pro"
+      name: "ChatGPT Pro (OpenAI)"
       opex_month_usd: 200
-    - name: "GitHub Copilot Pro"
+    - id: "github-copilot-pro"
+      name: "GitHub Copilot Pro"
       opex_month_usd: 10
-    - name: "GitHub Copilot Pro+"
+    - id: "github-copilot-pro-plus"
+      name: "GitHub Copilot Pro+"
       opex_month_usd: 39
-    - name: "Cursor Pro"
+    - id: "cursor-pro"
+      name: "Cursor Pro"
       opex_month_usd: 20
-    - name: "Google AI Pro (Gemini / Antigravity)"
+    - id: "google-ai-pro"
+      name: "Google AI Pro (Gemini / Antigravity)"
       opex_month_usd: 20
 
 known_evaluated: []

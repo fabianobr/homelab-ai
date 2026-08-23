@@ -12,7 +12,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import requests
 import yaml
@@ -220,7 +220,28 @@ def normalize_url(url: str) -> str:
     if parts.scheme not in {"http", "https"} or not parts.netloc:
         return ""
     path = re.sub(r"/{2,}", "/", parts.path).rstrip("/") or "/"
-    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, "", ""))
+    tracking_params = {
+        "dclid",
+        "fbclid",
+        "gclid",
+        "igshid",
+        "mc_cid",
+        "mc_eid",
+        "msclkid",
+    }
+    query = [
+        (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if not key.casefold().startswith("utm_")
+        and key.casefold() not in tracking_params
+    ]
+    # Query order is not part of the resource identity for the sources consumed
+    # here. Sorting makes equivalent links stable while preserving functional
+    # parameters such as YouTube's `v`, pagination and document IDs.
+    normalized_query = urlencode(sorted(query))
+    return urlunsplit(
+        (parts.scheme.lower(), parts.netloc.lower(), path, normalized_query, "")
+    )
 
 
 def normalize_item_name(name: str) -> str:
@@ -538,14 +559,18 @@ def analyze_results(
 def filter_new_items(
     items: list[dict], known_items: set[str], logger: logging.Logger
 ) -> list[dict]:
-    """Remove items whose name already appears in the backlog."""
+    """Remove backlog matches and semantic duplicates in the current batch."""
     new_items = []
+    seen_items = set(known_items)
     for item in items:
         name = item.get("name", "").strip()
-        if is_known_item_name(name, known_items):
+        if is_known_item_name(name, seen_items):
             logger.debug("Skipping already-known item: %s", name)
         else:
             new_items.append(item)
+            # Make the decision progressive: later exact or qualified variants
+            # are compared against items already accepted from this response.
+            seen_items.add(name)
     logger.info("%d items after dedup: %d new", len(items), len(new_items))
     return new_items
 

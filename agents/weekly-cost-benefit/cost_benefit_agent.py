@@ -13,9 +13,10 @@ import math
 import re
 import sys
 import time
+import unicodedata
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import requests
 import yaml
@@ -95,7 +96,12 @@ def validate_config(cfg: dict) -> None:
         if not isinstance(pricing.get(section), list) or not pricing[section]:
             raise ValueError(f"pricing_reference.{section} must be a non-empty list")
         for item in pricing[section]:
-            if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+            if (
+                not isinstance(item, dict)
+                or not isinstance(item.get("id"), str)
+                or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", item["id"])
+                or not isinstance(item.get("name"), str)
+            ):
                 raise ValueError(f"pricing_reference.{section} contains an invalid item")
             capex_keys = ("capex_usd",) if section == "local_hardware" else ()
             for cost_key in ("opex_month_usd",) + capex_keys:
@@ -109,6 +115,13 @@ def validate_config(cfg: dict) -> None:
                     raise ValueError(
                         f"pricing_reference.{section}.{cost_key} must be non-negative"
                     )
+    pricing_ids = [
+        item["id"]
+        for section in ("local_hardware", "paid_licenses")
+        for item in pricing[section]
+    ]
+    if len(pricing_ids) != len(set(pricing_ids)):
+        raise ValueError("pricing_reference item IDs must be unique")
 
     search = cfg.get("search", {})
     if search.get("time_range") not in {"day", "week", "month", "year"}:
@@ -332,7 +345,7 @@ def extract_known_items(ledger_text: str, known_evaluated: list[str]) -> set[str
 
 
 def normalize_url(url: str) -> str:
-    """Normalize a source URL for stable deduplication across tracking variants."""
+    """Normalize a URL while preserving every non-tracking query component."""
     try:
         parts = urlsplit(url.strip())
     except ValueError:
@@ -340,7 +353,24 @@ def normalize_url(url: str) -> str:
     if parts.scheme not in {"http", "https"} or not parts.netloc:
         return ""
     path = re.sub(r"/{2,}", "/", parts.path).rstrip("/") or "/"
-    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, "", ""))
+    tracking_keys = {
+        "fbclid",
+        "gclid",
+        "dclid",
+        "msclkid",
+        "mc_cid",
+        "mc_eid",
+        "_hsenc",
+        "_hsmi",
+    }
+    functional_query_parts = []
+    for key, value in parse_qsl(parts.query, keep_blank_values=True):
+        normalized_key = key.casefold()
+        if normalized_key.startswith("utm_") or normalized_key in tracking_keys:
+            continue
+        functional_query_parts.append((key, value))
+    query = urlencode(sorted(functional_query_parts))
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, query, ""))
 
 
 def extract_known_urls(ledger_text: str) -> set[str]:
@@ -354,20 +384,65 @@ def extract_known_urls(ledger_text: str) -> set[str]:
 
 
 def _normalize_name(name: str) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", name.casefold()).strip()
+    # Preserve an attached '+' as a tier marker (Copilot Pro+), while a spaced
+    # '+' remains a composition separator (Cursor + Copilot).
+    tier_aware_name = re.sub(r"(?<=\w)\+(?=\s|$|[),])", " plus-tier", name.casefold())
+    ascii_name = unicodedata.normalize("NFKD", tier_aware_name).encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]+", " ", ascii_name).strip()
+
+
+_GENERIC_SETUP_WORDS = {
+    "ai",
+    "and",
+    "ambiente",
+    "by",
+    "com",
+    "development",
+    "desenvolvimento",
+    "e",
+    "environment",
+    "local",
+    "mais",
+    "powered",
+    "rig",
+    "setup",
+    "using",
+    "with",
+    "workstation",
+}
+
+
+def _semantic_name_signature(name: str) -> frozenset[str]:
+    """Order-independent meaningful tokens for alias/batch duplicate checks."""
+    return frozenset(
+        token for token in _normalize_name(name).split() if token not in _GENERIC_SETUP_WORDS
+    )
+
+
+def _only_generic_remainder(longer: str, shorter: str) -> bool:
+    """True when a contained name only gained wrapper words, not another component."""
+    match = re.search(rf"(?:^| ){re.escape(shorter)}(?: |$)", longer)
+    if not match:
+        return False
+    remainder = f"{longer[:match.start()]} {longer[match.end():]}"
+    remainder_tokens = set(remainder.split())
+    return not remainder_tokens or remainder_tokens <= _GENERIC_SETUP_WORDS
 
 
 def is_known_setup_name(name: str, known_items: set[str]) -> bool:
-    """Match exact names and verbose/qualified variants without another LLM call."""
+    """Match semantic aliases while retaining setups with extra real components."""
     candidate = _normalize_name(name)
     if not candidate:
         return True
+    candidate_signature = _semantic_name_signature(name)
     for known in known_items:
         normalized_known = _normalize_name(known)
         if candidate == normalized_known:
             return True
+        if candidate_signature and candidate_signature == _semantic_name_signature(known):
+            return True
         shorter, longer = sorted((candidate, normalized_known), key=len)
-        if len(shorter) >= 8 and f" {shorter} " in f" {longer} ":
+        if len(shorter) >= 8 and _only_generic_remainder(longer, shorter):
             return True
     return False
 
@@ -378,7 +453,7 @@ def filter_search_candidates(
     known_items: set[str],
     logger: logging.Logger,
 ) -> list[dict]:
-    """Remove already-consumed URLs and exact known setup titles before inference."""
+    """Remove consumed URLs and semantic aliases of known setups before inference."""
     candidates: list[dict] = []
     seen_urls: set[str] = set()
     skipped_known_url = 0
@@ -457,8 +532,7 @@ ANALYSIS_SCHEMA = {
         "required": [
             "name",
             "setup_type",
-            "capex_usd",
-            "opex_month_usd",
+            "pricing_ids",
             "velocity_score",
             "quality_score",
             "verdict",
@@ -468,8 +542,12 @@ ANALYSIS_SCHEMA = {
         "properties": {
             "name": {"type": "string", "minLength": 1},
             "setup_type": {"type": "string", "enum": ["local", "paid", "hybrid"]},
-            "capex_usd": {"type": "integer", "minimum": 0},
-            "opex_month_usd": {"type": "integer", "minimum": 0},
+            "pricing_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1,
+                "uniqueItems": True,
+            },
             "velocity_score": {"type": "integer", "minimum": 1, "maximum": 5},
             "quality_score": {"type": "integer", "minimum": 1, "maximum": 5},
             "verdict": {"type": "string", "enum": ["local", "paid", "hybrid"]},
@@ -531,14 +609,15 @@ def format_pricing_reference(pricing: dict) -> str:
     for hw in pricing.get("local_hardware", []):
         source = hw.get("source_url") or "UNVERIFIED/MANUAL"
         lines.append(
-            f"- {hw['name']}: CAPEX US$ {hw['capex_usd']},"
+            f"- ID {hw['id']} — {hw['name']}: CAPEX US$ {hw['capex_usd']},"
             f" OPEX US$ {hw['opex_month_usd']}/month | source: {source}"
         )
     lines.append("PAID LICENSES (monthly subscription, no hardware needed):")
     for lic in pricing.get("paid_licenses", []):
         source = lic.get("source_url") or "UNVERIFIED/MANUAL"
         lines.append(
-            f"- {lic['name']}: US$ {lic['opex_month_usd']}/month | source: {source}"
+            f"- ID {lic['id']} — {lic['name']}: US$ {lic['opex_month_usd']}/month"
+            f" | source: {source}"
         )
     return "\n".join(lines)
 
@@ -584,7 +663,8 @@ PRICING REFERENCE (use these numbers as the baseline for estimates):
 
 The pricing block is a historical, manually maintained input. Do not replace,
 refresh, or invent prices from snippets. A price may only be changed by a human
-after checking an official vendor/source. Use the configured numbers as-is.
+after checking an official vendor/source. Select only the exact pricing IDs that
+compose the setup; Python derives CAPEX/OPEX from those IDs after your response.
 
 ALREADY EVALUATED setups (skip these — do not include them):
 {known_items}
@@ -596,8 +676,7 @@ For each NEW and relevant setup you find, output a JSON array. Each element must
 {{
   "name": "Setup or environment name",
   "setup_type": "local | paid | hybrid",
-  "capex_usd": <integer, upfront cost in USD (hardware, 0 if pure subscription)>,
-  "opex_month_usd": <integer, monthly cost in USD (licenses, API, energy)>,
+  "pricing_ids": ["one or more exact IDs from PRICING REFERENCE"],
   "velocity_score": <integer 1-5, speed of software output>,
   "quality_score": <integer 1-5, quality of software output>,
   "verdict": "local | paid | hybrid",
@@ -605,8 +684,11 @@ For each NEW and relevant setup you find, output a JSON array. Each element must
   "source_url": "URL from the search results if available, else empty string"
 }}
 
-Do NOT compute breakeven_months yourself — it is derived deterministically
-from capex_usd/opex_month_usd after your response, so omit it.
+Do NOT output capex_usd, opex_month_usd, or breakeven_months. Python derives all
+three deterministically from pricing_ids. Use exactly one hardware ID for a
+local/hybrid setup; hybrid also requires at least one paid-license ID. Paid
+setups use only paid-license IDs. If the needed price is not in the reference,
+omit the setup instead of estimating a number or inventing an ID.
 
 velocity_score: 5 = ships features very fast, 1 = slow/manual.
 quality_score: 5 = production-grade output, 1 = prototype-only.
@@ -617,20 +699,96 @@ If there are no new relevant setups, output an empty array: []
 """
 
 
-def validate_analysis_items(items: object, search_results: list[dict]) -> tuple[list[dict], str]:
-    """Validate structured output and source provenance without trusting the model."""
+def build_pricing_catalog(pricing: dict) -> dict[str, dict]:
+    """Build the only authoritative map from pricing IDs to numeric costs."""
+    catalog = {}
+    for item in pricing.get("local_hardware", []):
+        catalog[item["id"]] = {
+            "kind": "hardware",
+            "capex_usd": item["capex_usd"],
+            "opex_month_usd": item["opex_month_usd"],
+        }
+    for item in pricing.get("paid_licenses", []):
+        catalog[item["id"]] = {
+            "kind": "license",
+            "capex_usd": 0,
+            "opex_month_usd": item["opex_month_usd"],
+        }
+    return catalog
+
+
+def resolve_item_pricing(item: dict, pricing: dict) -> tuple[dict, str]:
+    """Resolve costs from configured IDs; never retain model-supplied numbers."""
+    pricing_ids = item.get("pricing_ids")
+    if (
+        not isinstance(pricing_ids, list)
+        or not pricing_ids
+        or any(not isinstance(pricing_id, str) for pricing_id in pricing_ids)
+        or len(pricing_ids) != len(set(pricing_ids))
+    ):
+        return {}, "pricing_ids deve ser um array não vazio de IDs únicos."
+
+    catalog = build_pricing_catalog(pricing)
+    unknown_ids = [pricing_id for pricing_id in pricing_ids if pricing_id not in catalog]
+    if unknown_ids:
+        return {}, f"pricing_ids desconhecido(s): {', '.join(unknown_ids)}."
+
+    hardware_ids = [
+        pricing_id for pricing_id in pricing_ids if catalog[pricing_id]["kind"] == "hardware"
+    ]
+    license_ids = [
+        pricing_id for pricing_id in pricing_ids if catalog[pricing_id]["kind"] == "license"
+    ]
+    setup_type = item.get("setup_type")
+    valid_composition = (
+        (setup_type == "local" and len(hardware_ids) == 1 and not license_ids)
+        or (setup_type == "paid" and not hardware_ids and bool(license_ids))
+        or (setup_type == "hybrid" and len(hardware_ids) == 1 and bool(license_ids))
+    )
+    if not valid_composition:
+        return {}, f"pricing_ids incompatíveis com setup_type={setup_type}."
+
+    # Keep only schema-owned descriptive fields, then inject authoritative costs.
+    # This also makes a second resolution at the persistence boundary safe.
+    resolved = {
+        key: item[key]
+        for key in ANALYSIS_SCHEMA["items"]["required"]
+        if key in item
+    }
+    resolved["capex_usd"] = sum(catalog[pricing_id]["capex_usd"] for pricing_id in pricing_ids)
+    resolved["opex_month_usd"] = sum(
+        catalog[pricing_id]["opex_month_usd"] for pricing_id in pricing_ids
+    )
+    return resolved, ""
+
+
+def anchor_items_to_pricing(items: list[dict], pricing: dict) -> tuple[list[dict], str]:
+    """Re-anchor every item immediately before reporting/persistence."""
+    anchored = []
+    for index, item in enumerate(items, 1):
+        resolved, error = resolve_item_pricing(item, pricing)
+        if error:
+            return [], f"item {index}: {error}"
+        anchored.append(resolved)
+    return anchored, ""
+
+
+def validate_analysis_items(
+    items: object, search_results: list[dict], pricing: dict
+) -> tuple[list[dict], str]:
+    """Validate structured output/provenance and resolve authoritative costs."""
     if not isinstance(items, list):
         return [], "LLM retornou JSON mas não como array."
     if len(items) > 20:
         return [], "LLM retornou mais de 20 itens; resposta rejeitada."
 
     required_strings = ("name", "rationale", "source_url")
-    required_ints = ("capex_usd", "opex_month_usd", "velocity_score", "quality_score")
+    required_ints = ("velocity_score", "quality_score")
     allowed_types = {"local", "paid", "hybrid"}
     allowed_urls = {
         normalize_url(result.get("url", "")) for result in search_results if result.get("url")
     }
-    seen_names = set()
+    resolved_items = []
 
     for index, item in enumerate(items, 1):
         if not isinstance(item, dict):
@@ -646,9 +804,7 @@ def validate_analysis_items(items: object, search_results: list[dict]) -> tuple[
             for key in required_ints
         )
         if invalid_integer:
-            return [], f"item {index} possui custo ou nota não inteiro."
-        if item["capex_usd"] < 0 or item["opex_month_usd"] < 0:
-            return [], f"item {index} possui custo negativo."
+            return [], f"item {index} possui nota não inteira."
         if not 1 <= item["velocity_score"] <= 5 or not 1 <= item["quality_score"] <= 5:
             return [], f"item {index} possui nota fora do intervalo 1-5."
         if (
@@ -663,11 +819,11 @@ def validate_analysis_items(items: object, search_results: list[dict]) -> tuple[
             return [], f"item {index} não cita a fonte disponível nos resultados de busca."
         if item["source_url"] and source_url not in allowed_urls:
             return [], f"item {index} cita URL que não estava nos resultados de busca."
-        normalized_name = _normalize_name(item["name"])
-        if normalized_name in seen_names:
-            return [], f"item {index} duplica outro setup na mesma resposta."
-        seen_names.add(normalized_name)
-    return items, ""
+        resolved, pricing_error = resolve_item_pricing(item, pricing)
+        if pricing_error:
+            return [], f"item {index}: {pricing_error}"
+        resolved_items.append(resolved)
+    return resolved_items, ""
 
 
 def analyze_results(
@@ -679,6 +835,7 @@ def analyze_results(
     ollama_url: str,
     logger: logging.Logger,
     inference: dict,
+    pricing: dict,
 ) -> tuple[list[dict], str]:
     """Use LLM to evaluate cost-benefit of found setups. Returns (items, error_message)."""
     if not search_results:
@@ -730,7 +887,7 @@ def analyze_results(
 
     try:
         items = json.loads(match.group(0))
-        items, validation_error = validate_analysis_items(items, search_results)
+        items, validation_error = validate_analysis_items(items, search_results, pricing)
         if validation_error:
             logger.warning("LLM structured output rejected: %s", validation_error)
             return [], validation_error
@@ -764,6 +921,7 @@ def analyze_with_fallback(
             cfg["ollama_url"],
             logger,
             cfg["inference"],
+            cfg["pricing_reference"],
         )
         if not error:
             return items, "", model
@@ -821,12 +979,14 @@ def filter_new_items(
 ) -> list[dict]:
     """Remove items whose name already appears in the ledger."""
     new_items = []
+    seen_items = set(known_items)
     for item in items:
         name = item.get("name", "").strip()
-        if is_known_setup_name(name, known_items):
+        if is_known_setup_name(name, seen_items):
             logger.debug("Skipping already-evaluated setup: %s", name)
         else:
             new_items.append(item)
+            seen_items.add(name)
     logger.info("%d items after dedup: %d new", len(items), len(new_items))
     return new_items
 
@@ -845,12 +1005,14 @@ def format_item_markdown(item: dict) -> str:
     verdict = item.get("verdict", "-")
     rationale = item.get("rationale", "")
     url = item.get("source_url", "")
+    pricing_ids = ", ".join(item.get("pricing_ids", [])) or "-"
 
     lines = [
         f"### {name}",
         f"- **Tipo:** {stype}",
         f"- **CAPEX:** US$ {capex}",
         f"- **OPEX:** US$ {opex}/mes",
+        f"- **IDs de preço:** `{pricing_ids}`",
         f"- **Velocidade:** {velocity}/5 | **Qualidade:** {quality}/5",
         f"- **Breakeven local vs pago:** {breakeven}",
         f"- **Veredito:** {verdict}",
@@ -1293,6 +1455,13 @@ def _run() -> int:
         cfg,
         logger,
     )
+
+    # Defense in depth: even validated/model-wrapper output is re-anchored at
+    # the reporting/persistence boundary, overwriting any numeric fields.
+    raw_items, pricing_error = anchor_items_to_pricing(raw_items, pricing_cfg)
+    if pricing_error and not llm_error:
+        llm_error = f"Falha ao ancorar custos no pricing_reference: {pricing_error}"
+        logger.error(llm_error)
 
     # 6. Filter duplicates
     new_items = filter_new_items(raw_items, known_items, logger)

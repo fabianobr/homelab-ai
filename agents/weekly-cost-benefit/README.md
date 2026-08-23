@@ -27,12 +27,13 @@ RTX 4090 + Ollama", "Cursor + Copilot"):
    incluindo nomes qualificados que contêm um setup conhecido
 4. Envia somente fontes candidatas + a **tabela histórica de preços** ao Ollama
    (`qwen3:14b`; um único fallback estrito para `qwen3:8b`)
-5. Exige JSON Schema, valida campos/notas/URLs e calcula breakeven em Python
-6. Gera um relatório semanal em `reports/YYYY-MM-DD-cost-benefit.md` com tabela
+5. Exige JSON Schema; o modelo escolhe somente `pricing_ids` da tabela fechada
+6. Valida campos/notas/URLs e deriva CAPEX, OPEX e breakeven em Python
+7. Gera um relatório semanal em `reports/YYYY-MM-DD-cost-benefit.md` com tabela
    comparativa e avaliações detalhadas
-7. Adiciona as novas avaliações ao ledger em `research/sdlc-agentico/cost-benefit.md`
-8. Notifica via Telegram (bot Hermes) com o resumo dos vereditos
-9. Registra tudo em `cost-benefit.log`
+8. Adiciona as novas avaliações ao ledger em `research/sdlc-agentico/cost-benefit.md`
+9. Notifica via Telegram (bot Hermes) com o resumo dos vereditos
+10. Registra tudo em `cost-benefit.log`
 
 Se todas as fontes já forem conhecidas, o relatório registra explicitamente
 “nenhuma fonte candidata nova”, não chama o Ollama e encerra com sucesso. Falha,
@@ -63,7 +64,10 @@ O script cria um virtualenv em `.venv/` na primeira execução e instala as depe
 A análise é ancorada em `pricing_reference` no `config.yaml`: preços de
 hardware local (CAPEX + energia) e de licenças pagas (US$/mês). Essa tabela é
 uma entrada histórica, não um dado que o modelo possa atualizar. O agente nunca
-inventa nem substitui preços a partir de snippets de busca.
+inventa nem substitui preços a partir de snippets de busca. Cada opção possui um
+`id` estável. A resposta do modelo não aceita CAPEX/OPEX livres: ela referencia
+esses IDs, e o Python valida a composição e soma os custos configurados antes de
+qualquer relatório ou escrita no ledger.
 
 Para alterar um valor, confira-o na página oficial do fornecedor, atualize
 `reference_date` e registre a URL em `source_url` no item correspondente. O

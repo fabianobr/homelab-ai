@@ -183,6 +183,35 @@ class AnalysisTests(unittest.TestCase):
                 [{"url": "https://example.test/a-different-source"}],
             )
 
+    def test_url_normalization_removes_only_known_tracking_parameters(self):
+        tracked = (
+            "https://Example.Test/watch?v=video-123&utm_source=newsletter"
+            "&fbclid=tracking&page=2"
+        )
+
+        self.assertEqual(
+            agent.normalize_url(tracked),
+            "https://example.test/watch?page=2&v=video-123",
+        )
+
+    def test_url_normalization_preserves_functional_resource_identity(self):
+        first = agent.normalize_url("https://youtube.com/watch?v=AAA&utm_medium=social")
+        second = agent.normalize_url("https://youtube.com/watch?v=BBB&utm_medium=social")
+
+        self.assertNotEqual(first, second)
+        with self.assertRaises(agent.AnalysisValidationError):
+            agent.parse_analysis_response(
+                json.dumps(
+                    [
+                        {
+                            **valid_item(),
+                            "source_url": "https://youtube.com/watch?v=BBB",
+                        }
+                    ]
+                ),
+                [{"url": "https://youtube.com/watch?v=AAA&utm_source=search"}],
+            )
+
 
 class RunOutcomeTests(unittest.TestCase):
     def test_known_item_extraction_and_normalized_dedup_cover_tables_and_tags(self):
@@ -195,6 +224,23 @@ class RunOutcomeTests(unittest.TestCase):
         values = [valid_item("OpenHands"), valid_item("Devstral"), valid_item("Qwen3-Coder 30B")]
 
         self.assertEqual(agent.filter_new_items(values, known, Mock(spec=logging.Logger)), [])
+
+    def test_batch_dedup_is_progressive_for_exact_and_qualified_variants(self):
+        values = [
+            valid_item("Devstral Small"),
+            valid_item("Devstral Small (local build)"),
+            valid_item("Devstral Small"),
+            valid_item("Qwen3 8B"),
+            valid_item("Qwen3 14B"),
+        ]
+
+        filtered = agent.filter_new_items(values, set(), Mock(spec=logging.Logger))
+
+        self.assertEqual(
+            [item["name"] for item in filtered],
+            ["Devstral Small", "Qwen3 8B", "Qwen3 14B"],
+        )
+
     @patch.object(agent, "send_telegram")
     @patch.object(agent, "write_report")
     @patch.object(agent, "pick_models")

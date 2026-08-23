@@ -16,6 +16,8 @@ const RUNNER = fs.readFileSync(require('path').join(__dirname, '..', 'run.sh'), 
 const SERVICE = fs.readFileSync(require('path').join(__dirname, '..', 'systemd', 'youtube-etl.service'), 'utf8');
 const TIMER = fs.readFileSync(require('path').join(__dirname, '..', 'systemd', 'youtube-etl.timer'), 'utf8');
 const COMPOSE = fs.readFileSync(require('path').join(ROOT, 'infra', 'docker', 'docker-compose.yml'), 'utf8');
+const N8N_SERVICE = COMPOSE.slice(COMPOSE.indexOf('\n  n8n:'), COMPOSE.indexOf('\n  litellm:'));
+const N8N_HEALTHCHECK = N8N_SERVICE.slice(N8N_SERVICE.indexOf('\n    healthcheck:'), N8N_SERVICE.indexOf('\n    deploy:'));
 const code = {};
 for (const n of WF.nodes.filter((n) => n.type === 'n8n-nodes-base.code')) {
   code[n.name] = n.parameters.jsCode;
@@ -64,10 +66,11 @@ console.log('\n=== CONTRATO OPERACIONAL: execução síncrona, preflight e healt
   assert(/--max-time/.test(RUNNER) && !/cat \"\$RESPONSE_FILE\"/.test(RUNNER), 'runner aguarda com timeout sem imprimir resposta potencialmente sensível');
   assert(/TimeoutStartSec=4h10min/.test(SERVICE), 'systemd permite que o workflow síncrono termine');
   assert(/OnCalendar=Fri 18:00/.test(TIMER), 'timer está documentado/testado para sexta às 18h');
+  assert(/healthz/.test(N8N_HEALTHCHECK), 'healthcheck geral do n8n exige somente o serviço HTTP');
   for (const name of ['YOUTUBE_API_KEY', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID']) {
-    assert(COMPOSE.includes(`test -n \\"$$${name}\\"`), `healthcheck do n8n exige ${name} sem expor seu valor`);
+    assert(!N8N_HEALTHCHECK.includes(name), `healthcheck geral do n8n não depende da credencial opcional ${name}`);
+    assert(RUNNER.includes(name), `preflight específico do YouTube ETL exige ${name}`);
   }
-  assert(/healthz/.test(COMPOSE), 'healthcheck do n8n também exige serviço HTTP');
 }
 
 const ANALISE_VALIDA = {

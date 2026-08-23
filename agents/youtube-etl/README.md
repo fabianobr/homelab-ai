@@ -175,8 +175,10 @@ TELEGRAM_CHAT_ID=...
 Importante: editar o `.env` não altera o ambiente de um container já criado.
 Depois de incluir ou trocar qualquer uma dessas variáveis, recrie somente o
 n8n (`docker compose --profile optional up -d --force-recreate n8n`). O
-healthcheck e o `run.sh` verificam os valores **dentro do container**, apenas
-como presente/ausente, sem revelar seu conteúdo.
+`run.sh` verifica os valores **dentro do container**, apenas como
+presente/ausente, sem revelar seu conteúdo. O healthcheck geral do n8n valida
+somente o serviço HTTP, pois essas credenciais pertencem a este workflow
+opcional e não à saúde do n8n como plataforma.
 
 Requisitos, já configurados no `docker-compose.yml` do compose deste repo:
 
