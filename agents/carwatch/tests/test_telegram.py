@@ -44,6 +44,22 @@ def test_format_event_message_includes_brand_model_stage_and_source_link():
     assert 'href="https://x.com/a"' in text
 
 
+def test_format_event_message_omits_stray_empty_parenthetical_when_price_status_is_none():
+    # `status` is a valid None value on the Price model even when `amount` is
+    # present (e.g. extraction couldn't determine official/estimated/starting_from).
+    # PRICE_STATUS_LABEL.get(None, "") returns "", so the parenthetical must be
+    # omitted entirely rather than rendered as a stray "()".
+    event = {
+        "brand": "Acme", "model": "X", "stage": "teaser", "markets": [],
+        "highlights": [], "powertrain": None,
+        "price": {"amount": 109800, "currency": "CNY", "status": None},
+        "sales_start": None,
+    }
+    text = format_event_message(event, source_count=1, primary_url="https://x.com/a")
+    assert "CNY 109,800" in text
+    assert "()" not in text
+
+
 def test_format_event_message_handles_missing_powertrain_and_price():
     event = {
         "brand": "Acme", "model": "X", "stage": "teaser", "markets": [],

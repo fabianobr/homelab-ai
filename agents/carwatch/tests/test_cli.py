@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 import httpx
+import psycopg
 import respx
 from typer.testing import CliRunner
 
@@ -13,6 +14,25 @@ from carwatch.cli import app
 runner = CliRunner()
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]  # agents/carwatch/
+
+# Mirrors tests/conftest.py's TEST_DB_URL / tests/test_e2e_fase1.py's pattern:
+# `publish` runs its own asyncio.run() internally, so a sync test can't reuse
+# the `db_pool` fixture's AsyncConnectionPool (opened on pytest-asyncio's own
+# event loop) for setup/assertion queries -- it talks to the same physical
+# test database directly via a plain synchronous psycopg connection instead.
+TEST_DB_URL = os.environ.get(
+    "DATABASE_URL_TEST", "postgresql://carwatch:carwatch@localhost:5433/carwatch_test"
+)
+
+
+def _execute(sql: str, params: tuple = ()) -> None:
+    with psycopg.connect(TEST_DB_URL) as conn:
+        conn.execute(sql, params)
+
+
+def _fetchall(sql: str, params: tuple = ()) -> list:
+    with psycopg.connect(TEST_DB_URL) as conn:
+        return conn.execute(sql, params).fetchall()
 
 
 def _reload_cli():
@@ -118,3 +138,35 @@ def test_publish_dry_run_counts_pending_events_without_sending(db_pool):
     result = runner.invoke(app, ["publish", "--dry-run"])
     assert result.exit_code == 0
     assert "would_send" in result.output
+
+
+@respx.mock
+def test_publish_sends_pending_event_and_writes_atom_feed(db_pool, monkeypatch, tmp_path):
+    """Direct, isolated coverage of `publish`'s non-dry-run path (previously
+    only exercised indirectly, mixed in with ingest/classify/extract, by
+    test_e2e_fase1.py's weekly-run end-to-end test). Also exercises the
+    _publish_and_write_feed helper shared with weekly-run.
+    """
+    monkeypatch.setenv("ATOM_FEED_PATH", str(tmp_path / "feed.atom"))
+    # env default from conftest.py's session-scoped _cli_test_env fixture.
+    respx.post("https://api.telegram.org/bottest-bot-token/sendMessage").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+
+    _execute(
+        "INSERT INTO launch_events (dedupe_key, brand, model, model_slug, stage, "
+        "highlights, confidence, published) VALUES "
+        "('k1', 'BYD', 'Seal 06', 'seal-06', 'world_premiere', ARRAY['h'], 0.9, FALSE)"
+    )
+
+    cli_result = runner.invoke(app, ["publish"])
+
+    assert cli_result.exit_code == 0, cli_result.output
+    assert "'sent': 1" in cli_result.output
+
+    rows = _fetchall("SELECT published FROM launch_events WHERE dedupe_key = 'k1'")
+    assert rows == [(True,)]
+
+    atom_path = tmp_path / "feed.atom"
+    assert atom_path.is_file()
+    assert "Seal 06" in atom_path.read_text()

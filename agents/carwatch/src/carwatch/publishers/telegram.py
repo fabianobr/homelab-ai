@@ -50,9 +50,10 @@ def _format_powertrain(powertrain: dict | None) -> str:
 def _format_price(price: dict | None) -> str:
     if not price or price.get("amount") is None:
         return "não divulgado"
-    status = PRICE_STATUS_LABEL.get(price.get("status"), "")
     currency = html.escape(price.get("currency") or "")
-    return f"{currency} {price['amount']:,.0f} ({status})".strip()
+    amount_str = f"{currency} {price['amount']:,.0f}".strip()
+    status = PRICE_STATUS_LABEL.get(price.get("status"), "")
+    return f"{amount_str} ({status})" if status else amount_str
 
 
 def format_event_message(event: dict, source_count: int, primary_url: str) -> str:

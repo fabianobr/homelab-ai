@@ -42,6 +42,18 @@ def _logger():
     return configure_logging(get_settings().log_level)
 
 
+async def _publish_and_write_feed(pool, settings, logger):
+    """Send pending launch_events over Telegram, then (re)write the Atom feed.
+
+    Shared by `publish` (non-dry-run path) and `weekly-run` -- both need the
+    identical publish-then-write-feed sequence, and letting them drift would
+    risk one route writing a stale feed after a publish.
+    """
+    stats = await publish_pending_events(pool, settings.telegram_bot_token, settings.telegram_chat_id, logger)
+    await write_atom_feed(pool, Path(settings.atom_feed_path), settings.atom_feed_url)
+    return stats
+
+
 @db_app.command("migrate")
 def db_migrate():
     async def _run():
@@ -158,8 +170,7 @@ def publish(dry_run: bool = typer.Option(False, "--dry-run")):
             await close_pool()
             return {"would_send": len(events)}
         settings = get_settings()
-        stats = await publish_pending_events(pool, settings.telegram_bot_token, settings.telegram_chat_id, logger)
-        await write_atom_feed(pool, Path(settings.atom_feed_path), settings.atom_feed_url)
+        stats = await _publish_and_write_feed(pool, settings, logger)
         await close_pool()
         return stats
 
@@ -205,10 +216,7 @@ def weekly_run():
         prefilter_stats = await run_prefilter(pool, brands_config, keywords_config, logger)
         classify_stats = await run_classify(pool, logger, limit=200)
         extract_stats = await run_extract(pool, logger, limit=100)
-        publish_stats = await publish_pending_events(
-            pool, settings.telegram_bot_token, settings.telegram_chat_id, logger
-        )
-        await write_atom_feed(pool, Path(settings.atom_feed_path), settings.atom_feed_url)
+        publish_stats = await _publish_and_write_feed(pool, settings, logger)
         await close_pool()
         return {
             "ingest": ingest_stats,
