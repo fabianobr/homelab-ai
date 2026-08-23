@@ -60,20 +60,21 @@ async def _try_link_rel_discovery(press_domain: str) -> str | None:
     return None
 
 
-async def _try_sitemaps(press_domain: str) -> str | None:
-    for path in ("/sitemap.xml", "/news-sitemap.xml"):
-        url = f"https://{press_domain}{path}"
-        result = await fetcher.fetch(url, kind="feed")
-        if result.status == 200 and not result.blocked and validate_feed_content(result.body):
-            return url
-    return None
+# NOTE: SPEC.md §7's third discovery strategy — /sitemap.xml then
+# /news-sitemap.xml — was REMOVED from the chain during the Fase 1 final
+# review. feedparser.parse() extracts zero entries from a <urlset> sitemap
+# document, so validate_feed_content()'s ">= 5 entries" check could never
+# pass for a sitemap response: the strategy was dead code that cost two extra
+# HTTP requests per brand and could never return a feed. Re-adding it
+# requires real sitemap XML parsing (a separate parser and a separate
+# validator), not just re-wiring the old function.
 
 
 async def probe_brand(brand: BrandEntry) -> tuple[str | None, str]:
     if not brand.press_domain:
         return None, "no_press_domain"
 
-    for strategy in (_try_candidate_paths, _try_link_rel_discovery, _try_sitemaps):
+    for strategy in (_try_candidate_paths, _try_link_rel_discovery):
         feed_url = await strategy(brand.press_domain)
         if feed_url:
             return feed_url, "ok"
@@ -88,7 +89,19 @@ async def run_probe(pool, brands: BrandsConfig, out_csv: Path, gaps_csv: Path, l
     gap_rows = []
 
     for brand in brands.brands:
-        feed_url, reason = await probe_brand(brand)
+        # A single unreachable press domain must not abort the whole probe run
+        # — it is just a gap like any other brand without a discoverable feed.
+        try:
+            feed_url, reason = await probe_brand(brand)
+        except Exception as exc:
+            feed_url, reason = None, "error"
+            if logger is not None:
+                logger.warning(
+                    "probe.brand_failed",
+                    brand=brand.name,
+                    press_domain=brand.press_domain,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
         out_rows.append({"brand": brand.name, "feed_url": feed_url or "", "reason": reason})
 
         if feed_url:

@@ -1,12 +1,14 @@
 """tests/test_probe.py"""
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 import httpx
 import respx
 
+from carwatch import probe as probe_module
 from carwatch.models import BrandEntry
-from carwatch.probe import probe_brand, run_probe
+from carwatch.probe import CANDIDATE_PATHS, probe_brand, run_probe
 from carwatch.models import BrandsConfig
 
 
@@ -75,8 +77,6 @@ async def test_probe_brand_rejects_feed_with_too_few_entries():
     for path in ["/rss", "/feed", "/feed.rss", "/rss.xml", "/feeds/news.xml", "/en/rss", "/news/rss", "/press-releases/rss"]:
         respx.get(f"https://press.example.com{path}").mock(return_value=httpx.Response(404))
     respx.get("https://press.example.com/").mock(return_value=httpx.Response(404))
-    respx.get("https://press.example.com/sitemap.xml").mock(return_value=httpx.Response(404))
-    respx.get("https://press.example.com/news-sitemap.xml").mock(return_value=httpx.Response(404))
 
     feed_url, reason = await probe_brand(
         BrandEntry(name="Acme", press_domain="press.example.com")
@@ -117,3 +117,57 @@ async def test_run_probe_inserts_sources_and_writes_csvs(db_pool, tmp_path):
         result = await conn.execute("SELECT feed_url, status, tier FROM sources")
         row = await result.fetchone()
     assert row == ("https://press.example.com/rss", "probation", 1)
+
+
+@respx.mock
+async def test_run_probe_survives_one_failing_brand_and_probes_the_rest(db_pool, tmp_path):
+    """CRITICAL 2: run_probe had no per-brand guard, so one raising press
+    domain aborted the whole probe run."""
+    _allow_robots("press.example.com")
+    respx.get("https://press.example.com/rss").mock(
+        return_value=httpx.Response(200, text=_valid_rss())
+    )
+
+    brands = BrandsConfig.model_validate(
+        {
+            "brands": [
+                {"name": "Boom", "press_domain": "boom.example.com"},
+                {"name": "Acme", "press_domain": "press.example.com"},
+            ]
+        }
+    )
+
+    real_probe_brand = probe_brand
+
+    async def flaky_probe_brand(brand):
+        if brand.press_domain == "boom.example.com":
+            raise RuntimeError("simulated unhandled failure for this brand")
+        return await real_probe_brand(brand)
+
+    with patch("carwatch.probe.probe_brand", new=flaky_probe_brand):
+        stats = await run_probe(db_pool, brands, tmp_path / "s.csv", tmp_path / "g.csv", logger=None)
+
+    assert stats == {"probed": 2, "found": 1, "gaps": 1}
+    assert "error" in (tmp_path / "g.csv").read_text()
+
+
+@respx.mock
+async def test_probe_brand_does_not_try_sitemaps_anymore():
+    """IMPORTANT 5: feedparser extracts zero entries from a <urlset> sitemap,
+    so validate_feed_content()'s >=5-entries check could never pass — the
+    sitemap fallback was dead code costing 2 extra requests per brand."""
+    _allow_robots("press.example.com")
+    for path in CANDIDATE_PATHS:
+        respx.get(f"https://press.example.com{path}").mock(return_value=httpx.Response(404))
+    respx.get("https://press.example.com/").mock(return_value=httpx.Response(404))
+    sitemap = respx.get("https://press.example.com/sitemap.xml")
+    news_sitemap = respx.get("https://press.example.com/news-sitemap.xml")
+
+    feed_url, reason = await probe_brand(
+        BrandEntry(name="Acme", press_domain="press.example.com")
+    )
+
+    assert (feed_url, reason) == (None, "no_feed_found")
+    assert sitemap.call_count == 0
+    assert news_sitemap.call_count == 0
+    assert not hasattr(probe_module, "_try_sitemaps")
