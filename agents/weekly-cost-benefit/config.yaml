@@ -1,57 +1,93 @@
 ollama_url: "http://localhost:11434"
 ollama_model: "qwen3:14b"
-ollama_fallback_model: "qwen2.5-coder:latest"
+ollama_fallback_model: "qwen3:8b"
 searxng_url: "http://localhost:8080"
 ledger_path: "../../research/sdlc-agentico/cost-benefit.md"
 reports_dir: "./reports"
 log_file: "./cost-benefit.log"
 
+# The current date is rendered at runtime. Two base queries plus one rotating
+# two-query group avoid resending the same eight broad searches every week.
 search_queries:
-  - "vibe coding setup cost 2026 hardware requirements"
-  - "Claude Code subscription vs local LLM cost comparison"
-  - "agentic coding local GPU vs cloud API cost 2026"
-  - "AI coding assistant pricing comparison Cursor Copilot Claude 2026"
-  - "OpenAI Codex Google Antigravity pricing developer 2026"
-  - "self-hosted LLM coding total cost of ownership"
-  - "is local LLM coding worth it vs subscription 2026"
-  - "AI software development environment setup cost benchmark"
+  - "AI coding development workflow benchmark published {month}"
+  - "local LLM coding setup case study published {month}"
+search_query_groups:
+  -
+    - "Claude Code Codex Cursor developer setup case study {year}"
+    - "AI coding subscription workflow cost benchmark {month_name} {year}"
+  -
+    - "Ollama coding workstation total cost case study {year}"
+    - "local GPU vs cloud coding agent measured benchmark {month_name} {year}"
+  -
+    - "hybrid local cloud agentic coding workflow case study {year}"
+    - "self hosted coding agent production setup published {month}"
+  -
+    - "new AI software development environment setup {month_name} {year}"
+    - "coding assistant team workflow cost comparison published {year}"
+
+search:
+  time_range: "month"
+  max_results_per_query: 6
+  delay_seconds: 0.5
+
+# Fixed per-request limits keep qwen3:14b inside the 16 GB GPU budget. A failed,
+# timed-out, or invalid response is retried only once with qwen3:8b.
+inference:
+  num_ctx: 8192
+  num_predict: 1400
+  timeout_seconds: 180
+  temperature: 0.1
 
 hardware_context: "RTX 5060 Ti 16GB VRAM, 32GB RAM. Roda modelos até 14B Q4 confortavelmente, ~24B Q4_K_M apertado (13GB). 1 GPU = sem paralelismo de inferência."
 
-# Tabela de preços de referência usada como base da análise.
-# ATUALIZAR periodicamente — preços mudam; a análise cita esta tabela como fonte.
+# Tabela histórica usada como entrada determinística; o LLM nunca a atualiza.
+# Atualize valor/data somente após conferir uma fonte oficial. Adicione source_url
+# em cada item verificado; itens sem URL aparecem explicitamente como não verificados.
 pricing_reference:
   reference_date: "2026-07"
+  max_age_months: 2
   energy_cost_kwh_brl: 0.95
   usd_brl: 5.5
   local_hardware:
-    - name: "RTX 5060 Ti 16GB (setup atual)"
+    - id: "rtx-5060-ti-16gb"
+      name: "RTX 5060 Ti 16GB (setup atual)"
       capex_usd: 430
       opex_month_usd: 15   # energia ~200W em uso intenso
-    - name: "RTX 4090 24GB usada"
+    - id: "rtx-4090-24gb-used"
+      name: "RTX 4090 24GB usada"
       capex_usd: 1500
       opex_month_usd: 25
-    - name: "Mac Studio M4 Max 64GB"
+    - id: "mac-studio-m4-max-64gb"
+      name: "Mac Studio M4 Max 64GB"
       capex_usd: 2500
       opex_month_usd: 8
   paid_licenses:
-    - name: "Claude Pro (Anthropic)"
+    - id: "claude-pro"
+      name: "Claude Pro (Anthropic)"
       opex_month_usd: 20
-    - name: "Claude Max 5x (Anthropic)"
+    - id: "claude-max-5x"
+      name: "Claude Max 5x (Anthropic)"
       opex_month_usd: 100
-    - name: "Claude Max 20x (Anthropic)"
+    - id: "claude-max-20x"
+      name: "Claude Max 20x (Anthropic)"
       opex_month_usd: 200
-    - name: "ChatGPT Plus / Codex (OpenAI)"
+    - id: "chatgpt-plus-codex"
+      name: "ChatGPT Plus / Codex (OpenAI)"
       opex_month_usd: 20
-    - name: "ChatGPT Pro (OpenAI)"
+    - id: "chatgpt-pro"
+      name: "ChatGPT Pro (OpenAI)"
       opex_month_usd: 200
-    - name: "GitHub Copilot Pro"
+    - id: "github-copilot-pro"
+      name: "GitHub Copilot Pro"
       opex_month_usd: 10
-    - name: "GitHub Copilot Pro+"
+    - id: "github-copilot-pro-plus"
+      name: "GitHub Copilot Pro+"
       opex_month_usd: 39
-    - name: "Cursor Pro"
+    - id: "cursor-pro"
+      name: "Cursor Pro"
       opex_month_usd: 20
-    - name: "Google AI Pro (Gemini / Antigravity)"
+    - id: "google-ai-pro"
+      name: "Google AI Pro (Gemini / Antigravity)"
       opex_month_usd: 20
 
 known_evaluated: []

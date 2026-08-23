@@ -20,7 +20,7 @@ quando ainda usava cron puro.
 ## O que faz
 
 ```
-Webhook (POST /webhook/youtube-etl-run) — systemd timer, segunda 08:00, ou manual
+Webhook (POST /webhook/youtube-etl-run) — systemd timer, sexta 18:00, ou manual
   → Config Canais            (channelIds + uploadsPlaylistId derivado + validação de env vars)
   → YouTube Data API v3      (playlistItems.list na playlist de uploads; filtro de 7 dias no Code node)
   → Extrair VideoIds         (1 item por vídeo; falhas de API e fora-da-janela viram rodapé)
@@ -29,7 +29,7 @@ Webhook (POST /webhook/youtube-etl-run) — systemd timer, segunda 08:00, ou man
   → Mesclar Estatisticas     (views/likes de volta em cada vídeo; < 1.000 views → ignorado, não analisado)
   → yt-dlp (Execute Command) (legenda .vtt em inglês; TODOS os vídeos em paralelo, até 4 por vez)
   → Dividir Transcricoes     (reexpande o stdout combinado em 1 item por vídeo)
-  → Ollama /api/chat         (llama3.2, format: json — saída JSON forçada)
+  → Ollama /api/chat         (llama3.2, JSON Schema, contexto 8K e saída limitada)
   → Validar JSON             (parse + schema; inválido → rodapé, não derruba)
   → Montar Relatório         (ordenado por views desc; markdown + resumo Telegram)
   → Gravar em reports/       (volume montado no container)
@@ -134,19 +134,29 @@ No nó **Config Canais**, a lista `CANAIS` já vem versionada no JSON — edite
 direto no arquivo (ou na UI) para adicionar/remover canais; não precisa mais
 de placeholder.
 
-**Rodar manualmente** (sem esperar a segunda-feira), via o trigger de webhook
-que o workflow já expõe:
+**Rodar manualmente** (sem esperar a sexta-feira) pelo mesmo runner usado pelo
+systemd:
 
 ```bash
-curl -X POST http://localhost:5678/webhook/youtube-etl-run
+./agents/youtube-etl/run.sh
 ```
 
-Dispara a execução real (consome quota da YouTube API; yt-dlp não tem cota
-própria). Para inspecionar o resultado sem UI, veja a execução mais recente
+O runner valida primeiro o ambiente efetivo do container n8n (sem imprimir
+segredos), o `yt-dlp`, o volume de relatórios, o HTTP do n8n e o modelo
+`llama3.2` no Ollama. Depois dispara a execução real e **aguarda o último nó**:
+se o workflow ou o Telegram falhar, o comando e o serviço systemd falham em
+vez de registrar um falso sucesso. A execução consome quota da YouTube API;
+yt-dlp não tem cota própria. Para inspecionar o resultado sem UI, veja a execução mais recente
 direto no banco do n8n (`docker exec n8n` não tem `sqlite3`; copie o arquivo
 com `docker cp n8n:/home/node/.n8n/database.sqlite …` — inclua os arquivos
 `-wal`/`-shm` juntos, senão a leitura fica desatualizada por causa do WAL do
 SQLite).
+
+Para validar somente as dependências, sem disparar o webhook nem consumir quota:
+
+```bash
+YOUTUBE_ETL_PREFLIGHT_ONLY=true ./agents/youtube-etl/run.sh
+```
 
 ## Configuração
 
@@ -161,6 +171,14 @@ YOUTUBE_API_KEY=...
 TELEGRAM_BOT_TOKEN=...
 TELEGRAM_CHAT_ID=...
 ```
+
+Importante: editar o `.env` não altera o ambiente de um container já criado.
+Depois de incluir ou trocar qualquer uma dessas variáveis, recrie somente o
+n8n (`docker compose --profile optional up -d --force-recreate n8n`). O
+`run.sh` verifica os valores **dentro do container**, apenas como
+presente/ausente, sem revelar seu conteúdo. O healthcheck geral do n8n valida
+somente o serviço HTTP, pois essas credenciais pertencem a este workflow
+opcional e não à saúde do n8n como plataforma.
 
 Requisitos, já configurados no `docker-compose.yml` do compose deste repo:
 
@@ -181,7 +199,7 @@ Requisitos, já configurados no `docker-compose.yml` do compose deste repo:
 - `CANAIS`: lista de `{channelId, channelName}` — não é segredo, fica
   versionada no JSON do workflow.
 - `DIAS_JANELA`: 7 (semanal). Para bi-semanal: 14 + ajustar
-  `OnCalendar=Mon 08:00` pra `*-*-* 08:00:00/14d` (ou equivalente) no
+  `OnCalendar=Fri 18:00` para uma expressão quinzenal equivalente no
   `youtube-etl.timer`.
 - `MAX_VIDEOS_POR_CANAL`: 3. Teto dos vídeos mais recentes analisados por
   canal a cada rodada. Não é mais uma proteção de cota paga (yt-dlp não tem
@@ -212,10 +230,10 @@ chamadas crescer muito; não observado neste uso pessoal de baixo volume.
 
 **systemd timer** (`agents/youtube-etl/systemd/`), mesmo padrão dos agents
 irmãos: `youtube-etl.timer` dispara `youtube-etl.service` toda
-**segunda-feira às 08:00** (horário local da máquina — uma hora antes do
-`weekly-sdlc-research`, que roda às 9h, sem disputa de GPU). O service roda
-`run.sh`, que só faz `POST /webhook/youtube-etl-run` — o n8n cuida do resto
-de forma assíncrona.
+**sexta-feira às 18:00** (horário local da máquina — uma hora antes do
+`weekly-sdlc-research`, às 19h). O service roda `run.sh`; o webhook fica
+aberto até o último nó e o exit code passa a representar o resultado real da
+execução. O timeout do serviço é 4h10, com 4h no cliente HTTP.
 
 ```bash
 ln -sf ~/homelab-ai/agents/youtube-etl/systemd/youtube-etl.{service,timer} ~/.config/systemd/user/
@@ -223,8 +241,8 @@ systemctl --user daemon-reload
 systemctl --user enable --now youtube-etl.timer
 ```
 
-`Persistent=true` no timer: se a máquina estiver desligada às 08h de
-segunda, roda assim que ligar de novo (`RandomizedDelaySec=2min` evita
+`Persistent=true` no timer: se a máquina estiver desligada às 18h de
+sexta, roda assim que ligar de novo (`RandomizedDelaySec=2min` evita
 disputa exata de horário com os outros dois timers no boot).
 
 O workflow em si só tem **um** trigger — `Trigger Manual (Webhook)` — usado
@@ -256,7 +274,8 @@ node agents/youtube-etl/tests/test-workflow.js
 Executa o JavaScript real dos 5 Code nodes do workflow (extraído do próprio
 JSON) com respostas simuladas para os nós HTTP e o Execute Command (yt-dlp),
 cobrindo: caminho feliz, canal com erro de API, vídeo sem legenda,
-JSON/schema inválido do modelo, semana vazia, credencial ausente (fail-fast)
+JSON/schema inválido do modelo, semana vazia, todas as credenciais ausentes
+individualmente (fail-fast)
 e truncamento de transcrição longa. Não precisa de n8n, Ollama, yt-dlp nem
 chaves — só Node.js.
 

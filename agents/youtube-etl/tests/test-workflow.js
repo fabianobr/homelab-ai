@@ -11,6 +11,13 @@
 const fs = require('fs');
 
 const WF = JSON.parse(fs.readFileSync(require('path').join(__dirname, '..', 'workflows', '01-youtube-etl.json'), 'utf8'));
+const ROOT = require('path').join(__dirname, '..', '..', '..');
+const RUNNER = fs.readFileSync(require('path').join(__dirname, '..', 'run.sh'), 'utf8');
+const SERVICE = fs.readFileSync(require('path').join(__dirname, '..', 'systemd', 'youtube-etl.service'), 'utf8');
+const TIMER = fs.readFileSync(require('path').join(__dirname, '..', 'systemd', 'youtube-etl.timer'), 'utf8');
+const COMPOSE = fs.readFileSync(require('path').join(ROOT, 'infra', 'docker', 'docker-compose.yml'), 'utf8');
+const N8N_SERVICE = COMPOSE.slice(COMPOSE.indexOf('\n  n8n:'), COMPOSE.indexOf('\n  litellm:'));
+const N8N_HEALTHCHECK = N8N_SERVICE.slice(N8N_SERVICE.indexOf('\n    healthcheck:'), N8N_SERVICE.indexOf('\n    deploy:'));
 const code = {};
 for (const n of WF.nodes.filter((n) => n.type === 'n8n-nodes-base.code')) {
   code[n.name] = n.parameters.jsCode;
@@ -45,6 +52,25 @@ let falhou = false;
 function assert(cond, msg) {
   console.log(`  ${cond ? 'PASS' : 'FAIL'} — ${msg}`);
   if (!cond) falhou = true;
+}
+
+console.log('\n=== CONTRATO OPERACIONAL: execução síncrona, preflight e healthcheck ===');
+{
+  const webhook = WF.nodes.find((n) => n.name === 'Trigger Manual (Webhook)');
+  const ollama = WF.nodes.find((n) => n.name === 'Analisar com Llama3.2');
+  assert(webhook.parameters.responseMode === 'lastNode', 'webhook responde somente quando o último nó termina');
+  assert(ollama.parameters.options.timeout === 180000, 'requisição individual ao Ollama tem timeout de 3 minutos');
+  assert(/docker exec/.test(RUNNER) && /YOUTUBE_API_KEY/.test(RUNNER) && /yt-dlp/.test(RUNNER), 'runner valida o ambiente efetivo e o yt-dlp dentro do n8n');
+  assert(/api\/tags/.test(RUNNER) && RUNNER.includes('llama3[.]2'), 'runner valida API e modelo do Ollama antes do webhook');
+  assert(/YOUTUBE_ETL_PREFLIGHT_ONLY/.test(RUNNER), 'runner oferece preflight isolado sem consumir quota');
+  assert(/--max-time/.test(RUNNER) && !/cat \"\$RESPONSE_FILE\"/.test(RUNNER), 'runner aguarda com timeout sem imprimir resposta potencialmente sensível');
+  assert(/TimeoutStartSec=4h10min/.test(SERVICE), 'systemd permite que o workflow síncrono termine');
+  assert(/OnCalendar=Fri 18:00/.test(TIMER), 'timer está documentado/testado para sexta às 18h');
+  assert(/healthz/.test(N8N_HEALTHCHECK), 'healthcheck geral do n8n exige somente o serviço HTTP');
+  for (const name of ['YOUTUBE_API_KEY', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID']) {
+    assert(!N8N_HEALTHCHECK.includes(name), `healthcheck geral do n8n não depende da credencial opcional ${name}`);
+    assert(RUNNER.includes(name), `preflight específico do YouTube ETL exige ${name}`);
+  }
 }
 
 const ANALISE_VALIDA = {
@@ -152,7 +178,9 @@ console.log('\n=== CENÁRIO A: misto (2 canais, 1 erro de API; 4 vídeos: ok / s
   assert(prompts[0].json.semTranscricao.length === 1 && /vid00000003/.test(prompts[0].json.semTranscricao[0]), 'vídeo sem transcrição contabilizado');
   assert(prompts[0].json.views === 542000, 'views propagadas até o prompt do Ollama');
   const body0 = JSON.parse(prompts[0].json.ollamaBody);
-  assert(body0.model === 'llama3.2' && body0.format === 'json' && body0.stream === false, 'body do Ollama: llama3.2 + format:json + stream:false');
+  assert(body0.model === 'llama3.2' && body0.format.type === 'object' && body0.stream === false, 'body do Ollama: llama3.2 + JSON Schema + stream:false');
+  assert(body0.format.additionalProperties === false && body0.format.required.includes('metricas_performance'), 'JSON Schema restringe campos e exige a estrutura principal');
+  assert(body0.options.num_ctx === 8192 && body0.options.num_predict === 512, 'Ollama limita contexto e tamanho máximo da saída');
   assert(body0.messages[0].role === 'system' && /Estrategista de Mercado Automotivo/.test(body0.messages[0].content), 'system prompt embutido');
   assert(/120 days supply/.test(body0.messages[1].content), 'transcrição incluída no user prompt');
 
@@ -224,14 +252,16 @@ console.log('\n=== CENÁRIO B: semana vazia (nenhum vídeo novo) ===');
 // ---------------------------------------------------------------------------
 console.log('\n=== CENÁRIO C: credencial ausente → fail-fast ===');
 {
-  const out = {};
-  let erro = null;
-  try {
-    runCode('Config Canais', [], out, { ...ENV, YOUTUBE_API_KEY: '' });
-  } catch (e) {
-    erro = e;
+  for (const name of ['YOUTUBE_API_KEY', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID']) {
+    const out = {};
+    let erro = null;
+    try {
+      runCode('Config Canais', [], out, { ...ENV, [name]: '' });
+    } catch (e) {
+      erro = e;
+    }
+    assert(erro !== null && erro.message.includes(name), `Config Canais aborta sem ${name}, com mensagem clara`);
   }
-  assert(erro !== null && /YOUTUBE_API_KEY/.test(erro.message), `Config Canais aborta com mensagem clara (${erro && erro.message})`);
 }
 
 // ---------------------------------------------------------------------------

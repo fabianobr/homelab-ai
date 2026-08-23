@@ -21,21 +21,32 @@ RTX 4090 + Ollama", "Cursor + Copilot"):
 
 ## O que faz
 
-1. Executa queries de busca pré-configuradas via SearXNG local (fallback: DuckDuckGo)
-2. Lê o ledger existente para extrair setups já avaliados
-3. Envia os resultados + a **tabela de preços de referência** (config.yaml) ao
-   Ollama local (`qwen2.5-coder:14b`) para análise de custo-benefício
-4. Gera um relatório semanal em `reports/YYYY-MM-DD-cost-benefit.md` com tabela
+1. Monta queries com ano/mês corrente e alterna um grupo temático a cada semana
+2. Executa quatro queries via SearXNG local (fallback: DuckDuckGo), limitadas ao mês
+3. Lê o ledger e remove URLs/títulos já avaliados **antes** de usar a GPU,
+   incluindo nomes qualificados que contêm um setup conhecido
+4. Envia somente fontes candidatas + a **tabela histórica de preços** ao Ollama
+   (`qwen3:14b`; um único fallback estrito para `qwen3:8b`)
+5. Exige JSON Schema; o modelo escolhe somente `pricing_ids` da tabela fechada
+6. Valida campos/notas/URLs e deriva CAPEX, OPEX e breakeven em Python
+7. Gera um relatório semanal em `reports/YYYY-MM-DD-cost-benefit.md` com tabela
    comparativa e avaliações detalhadas
-5. Adiciona as novas avaliações ao ledger em `research/sdlc-agentico/cost-benefit.md`
-6. Notifica via Telegram (bot Hermes) com o resumo dos vereditos
-7. Registra tudo em `cost-benefit.log`
+8. Adiciona as novas avaliações ao ledger em `research/sdlc-agentico/cost-benefit.md`
+9. Notifica via Telegram (bot Hermes) com o resumo dos vereditos
+10. Registra tudo em `cost-benefit.log`
+
+Se todas as fontes já forem conhecidas, o relatório registra explicitamente
+“nenhuma fonte candidata nova”, não chama o Ollama e encerra com sucesso. Falha,
+timeout ou resposta inválida nos dois modelos ainda gera relatório/notificação,
+mas o processo encerra com status diferente de zero para o systemd não mascarar
+o problema. Zero resultados brutos em todas as queries também é tratado como
+falha de busca, não como ausência legítima de novidades.
 
 ## Dependências
 
 - **Ollama** rodando em `http://localhost:11434` com pelo menos um modelo instalado
-  - Preferencial: `qwen2.5-coder:14b`
-  - Fallback: `llama3.2:latest`
+  - Primário exato: `qwen3:14b`
+  - Fallback exato: `qwen3:8b`
 - **Python 3.11+**
 - **SearXNG** em `http://localhost:8080` (opcional — usa DuckDuckGo se indisponível)
 
@@ -51,9 +62,19 @@ O script cria um virtualenv em `.venv/` na primeira execução e instala as depe
 ## Tabela de preços de referência
 
 A análise é ancorada em `pricing_reference` no `config.yaml`: preços de
-hardware local (CAPEX + energia) e de licenças pagas (US$/mês). **Atualizar
-periodicamente** — preços de assinatura e de GPU mudam; o campo
-`reference_date` marca a validade da tabela.
+hardware local (CAPEX + energia) e de licenças pagas (US$/mês). Essa tabela é
+uma entrada histórica, não um dado que o modelo possa atualizar. O agente nunca
+inventa nem substitui preços a partir de snippets de busca. Cada opção possui um
+`id` estável. A resposta do modelo não aceita CAPEX/OPEX livres: ela referencia
+esses IDs, e o Python valida a composição e soma os custos configurados antes de
+qualquer relatório ou escrita no ledger.
+
+Para alterar um valor, confira-o na página oficial do fornecedor, atualize
+`reference_date` e registre a URL em `source_url` no item correspondente. O
+relatório alerta quando a referência passa de `max_age_months` ou quando há
+valores sem fonte oficial. Preço observado de hardware usado e custo local de
+energia devem apontar para a fonte verificável adotada pelo operador; não devem
+ser apresentados como preço oficial do fabricante.
 
 ## Onde ficam os relatórios
 
@@ -74,16 +95,17 @@ A operação é **idempotente**: rodar duas vezes no mesmo dia não duplica entr
 ## Configuração
 
 Edite `agents/weekly-cost-benefit/config.yaml` para:
-- Adicionar/remover queries de busca
-- Atualizar a tabela `pricing_reference` (licenças, hardware, energia, câmbio)
-- Alterar o modelo Ollama
+- Ajustar queries base/grupos rotativos e a janela temporal de busca
+- Atualizar `pricing_reference` somente com data e fonte oficial verificadas
+- Alterar as tags exatas dos modelos Ollama
+- Ajustar `num_ctx`, `num_predict` e timeout por requisição
 - Adicionar itens ao `known_evaluated` (nunca serão reavaliados)
 - Ajustar a URL do SearXNG
 
 ## Agendamento (systemd timer)
 
-Executa toda segunda-feira às 10h — uma hora depois do `weekly-sdlc-research`
-(9h), para não disputar GPU/Ollama:
+Executa toda **sexta-feira às 20h** — uma hora depois do
+`weekly-sdlc-research` (19h), para não disputar GPU/Ollama:
 
 ```bash
 mkdir -p ~/.config/systemd/user
@@ -95,11 +117,20 @@ systemctl --user enable --now weekly-cost-benefit.timer
 systemctl --user list-timers weekly-cost-benefit.timer
 ```
 
-`Persistent=true` garante catch-up: se a máquina estava desligada na segunda
-às 10h, roda assim que ligar.
+`Persistent=true` garante catch-up: se a máquina estava desligada na sexta às
+20h, roda assim que ligar.
 
 ## Logs
 
 ```bash
 tail -f agents/weekly-cost-benefit/cost-benefit.log
 ```
+
+## Testes
+
+```bash
+python3 -m pytest -q agents/weekly-cost-benefit/tests
+```
+
+Os testes usam mocks: não executam buscas/Ollama, não enviam Telegram e não
+escrevem relatório ou ledger.

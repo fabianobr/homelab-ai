@@ -12,10 +12,51 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import requests
 import yaml
 from ddgs import DDGS
+
+
+ITEM_TYPES = {
+    "coding_agent",
+    "orchestrator",
+    "model",
+    "infrastructure",
+    "technique",
+}
+
+ANALYSIS_ITEM_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "name",
+        "type",
+        "sdlc_relevance",
+        "hw_viability",
+        "description",
+        "source_url",
+    ],
+    "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "type": {"type": "string", "enum": sorted(ITEM_TYPES)},
+        "sdlc_relevance": {"type": "integer", "minimum": 1, "maximum": 5},
+        "hw_viability": {"type": "integer", "minimum": 1, "maximum": 5},
+        "description": {"type": "string", "minLength": 1},
+        "source_url": {"type": "string"},
+    },
+}
+
+ANALYSIS_SCHEMA = {
+    "type": "array",
+    "items": ANALYSIS_ITEM_SCHEMA,
+}
+
+
+class AnalysisValidationError(ValueError):
+    """Raised when Ollama returns JSON that does not satisfy ANALYSIS_SCHEMA."""
+
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -161,12 +202,68 @@ def extract_known_items(backlog_text: str, known_discarded: list[str]) -> set[st
     patterns = [
         r"###\s+(.+)",
         r"\*\*(.+?)\*\*",
-        r"^\|\s*([^|]+?)\s*\|",  # table cells (first column)
+        r"^\|\s*[^|]+\|\s*([^|]+?)\s*\|",  # item name in the second table column
+        r"`([^`]+)`",  # exact model/tool tags mentioned in prose
     ]
     for pat in patterns:
         for match in re.finditer(pat, backlog_text, re.MULTILINE):
             known.add(match.group(1).strip().lower())
     return known
+
+
+def normalize_url(url: str) -> str:
+    """Normalize a source URL for deterministic provenance checks."""
+    try:
+        parts = urlsplit(url.strip())
+    except ValueError:
+        return ""
+    if parts.scheme not in {"http", "https"} or not parts.netloc:
+        return ""
+    path = re.sub(r"/{2,}", "/", parts.path).rstrip("/") or "/"
+    tracking_params = {
+        "dclid",
+        "fbclid",
+        "gclid",
+        "igshid",
+        "mc_cid",
+        "mc_eid",
+        "msclkid",
+    }
+    query = [
+        (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if not key.casefold().startswith("utm_")
+        and key.casefold() not in tracking_params
+    ]
+    # Query order is not part of the resource identity for the sources consumed
+    # here. Sorting makes equivalent links stable while preserving functional
+    # parameters such as YouTube's `v`, pagination and document IDs.
+    normalized_query = urlencode(sorted(query))
+    return urlunsplit(
+        (parts.scheme.lower(), parts.netloc.lower(), path, normalized_query, "")
+    )
+
+
+def normalize_item_name(name: str) -> str:
+    """Normalize headings, model tags and display qualifiers for deduplication."""
+    value = re.sub(r"^\s*\d+(?:\s*[-–]\s*\d+)?[.)]?\s*", "", name.casefold())
+    value = re.sub(r"\([^)]*\)", " ", value)
+    return re.sub(r"[^a-z0-9]+", " ", value).strip()
+
+
+def is_known_item_name(name: str, known_items: set[str]) -> bool:
+    """Match exact normalized names and qualified variants such as 'Devstral Small'."""
+    candidate = normalize_item_name(name)
+    if not candidate:
+        return True
+    for known in known_items:
+        normalized_known = normalize_item_name(known)
+        if candidate == normalized_known:
+            return True
+        shorter, longer = sorted((candidate, normalized_known), key=len)
+        if len(shorter) >= 7 and f" {shorter} " in f" {longer} ":
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -185,70 +282,167 @@ def check_ollama(ollama_url: str, logger: logging.Logger) -> list[str] | None:
         return None
 
 
-def pick_model(cfg: dict, logger: logging.Logger) -> str | None:
-    """Pick preferred model, fallback, or whatever is installed."""
+def configured_models(cfg: dict) -> list[str]:
+    """Return the configured primary/fallback models in stable order."""
+    candidates = [cfg.get("ollama_model", "")]
+    fallbacks = cfg.get("ollama_fallback_models")
+    if fallbacks is None:
+        # Backwards-compatible config parsing without restoring loose matching.
+        fallbacks = [cfg.get("ollama_fallback_model", "")]
+    elif isinstance(fallbacks, str):
+        fallbacks = [fallbacks]
+    candidates.extend(fallbacks)
+
+    ordered = []
+    for candidate in candidates:
+        if candidate and candidate not in ordered:
+            ordered.append(candidate)
+    return ordered
+
+
+def pick_models(cfg: dict, logger: logging.Logger) -> list[str]:
+    """Select only exact installed models, preserving configured priority."""
     ollama_url = cfg["ollama_url"]
     models = check_ollama(ollama_url, logger)
     if not models:
-        return None
+        return []
 
-    preferred = cfg.get("ollama_model", "")
-    fallback = cfg.get("ollama_fallback_model", "")
-
-    for candidate in [preferred, fallback]:
-        if not candidate:
-            continue
-        # Exact match first
-        if candidate in models:
-            logger.info("Using model: %s", candidate)
-            return candidate
-        # Prefix match as fallback (e.g. "qwen2.5-coder:14b" prefix "qwen2.5-coder")
-        prefix = candidate.split(":")[0]
-        tag = candidate.split(":")[-1] if ":" in candidate else ""
-        for installed in models:
-            installed_prefix = installed.split(":")[0]
-            installed_tag = installed.split(":")[-1] if ":" in installed else ""
-            if installed_prefix == prefix and installed_tag == tag:
-                logger.info("Using model: %s", installed)
-                return installed
-        # Looser prefix match only if no tag-matching candidate found
-        for installed in models:
-            if installed.startswith(prefix + ":"):
-                logger.warning(
-                    "Exact model '%s' not found; using '%s' (prefix match).",
-                    candidate, installed,
-                )
-                return installed
-
-    if models:
+    candidates = configured_models(cfg)
+    selected = [candidate for candidate in candidates if candidate in models]
+    missing = [candidate for candidate in candidates if candidate not in models]
+    if missing:
         logger.warning(
-            "Preferred model '%s' (or fallback '%s') not found; using first available "
-            "as last resort: %s — may be unsuitable for this task (e.g. embedding/vision model).",
-            preferred, fallback, models[0],
+            "Configured models not installed (no prefix substitution will be used): %s",
+            missing,
         )
-        return models[0]
-    return None
+    if not selected:
+        logger.error(
+            "None of the configured models is installed. Configured=%s; installed=%s",
+            candidates,
+            models,
+        )
+        return []
+
+    max_attempts = max(1, int(cfg.get("ollama_max_attempts", 2)))
+    selected = selected[:max_attempts]
+    logger.info("Models selected in attempt order: %s", selected)
+    return selected
 
 
 def ollama_chat(
-    model: str, prompt: str, ollama_url: str, logger: logging.Logger
+    model: str,
+    prompt: str,
+    ollama_url: str,
+    logger: logging.Logger,
+    *,
+    options: dict,
+    timeout_seconds: int,
 ) -> str:
-    """Send a prompt to Ollama and return the response text."""
+    """Send a bounded, non-thinking, schema-constrained request to Ollama."""
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
-        "options": {"temperature": 0.2, "num_predict": 4096},
+        "think": False,
+        "format": ANALYSIS_SCHEMA,
+        "options": options,
     }
     try:
         resp = requests.post(
-            f"{ollama_url}/api/chat", json=payload, timeout=300
+            f"{ollama_url}/api/chat", json=payload, timeout=timeout_seconds
         )
         resp.raise_for_status()
-        return resp.json()["message"]["content"].strip()
+        try:
+            content = resp.json()["message"]["content"]
+            if not isinstance(content, str):
+                raise TypeError("message.content is not a string")
+            return content.strip()
+        except (KeyError, TypeError, ValueError) as exc:
+            raise AnalysisValidationError(
+                f"envelope de resposta inválido: {exc}"
+            ) from exc
     except Exception as exc:
         logger.error("Ollama request failed: %s", exc)
         raise
+
+
+def validate_analysis_items(
+    value: object,
+    allowed_source_urls: set[str] | None = None,
+) -> list[dict]:
+    """Validate the LLM result deterministically before it reaches the backlog."""
+    if not isinstance(value, list):
+        raise AnalysisValidationError("a raiz deve ser um array")
+
+    required = set(ANALYSIS_ITEM_SCHEMA["required"])
+    validated = []
+    for index, item in enumerate(value):
+        location = f"item {index + 1}"
+        if not isinstance(item, dict):
+            raise AnalysisValidationError(f"{location} deve ser um objeto")
+
+        keys = set(item)
+        missing = required - keys
+        extra = keys - required
+        if missing:
+            raise AnalysisValidationError(
+                f"{location} sem campos obrigatórios: {sorted(missing)}"
+            )
+        if extra:
+            raise AnalysisValidationError(
+                f"{location} contém campos não permitidos: {sorted(extra)}"
+            )
+
+        for field in ("name", "description", "source_url"):
+            if not isinstance(item[field], str):
+                raise AnalysisValidationError(f"{location}.{field} deve ser string")
+        if not item["name"].strip():
+            raise AnalysisValidationError(f"{location}.name não pode ser vazio")
+        if not item["description"].strip():
+            raise AnalysisValidationError(f"{location}.description não pode ser vazia")
+        source_url = normalize_url(item["source_url"])
+        if allowed_source_urls:
+            if not source_url:
+                raise AnalysisValidationError(
+                    f"{location}.source_url deve citar uma fonte coletada"
+                )
+            if source_url not in allowed_source_urls:
+                raise AnalysisValidationError(
+                    f"{location}.source_url não estava nos resultados de busca"
+                )
+        if not isinstance(item["type"], str):
+            raise AnalysisValidationError(f"{location}.type deve ser string")
+        if item["type"] not in ITEM_TYPES:
+            raise AnalysisValidationError(
+                f"{location}.type deve ser um de {sorted(ITEM_TYPES)}"
+            )
+        for field in ("sdlc_relevance", "hw_viability"):
+            score = item[field]
+            if isinstance(score, bool) or not isinstance(score, int) or not 1 <= score <= 5:
+                raise AnalysisValidationError(
+                    f"{location}.{field} deve ser inteiro entre 1 e 5"
+                )
+        validated.append(item)
+    return validated
+
+
+def parse_analysis_response(raw: str, search_results: list[dict] | None = None) -> list[dict]:
+    """Parse an Ollama response and enforce the full analysis schema."""
+    if not raw:
+        raise AnalysisValidationError("resposta vazia")
+
+    cleaned = re.sub(r"```(?:json)?\s*", "", raw)
+    cleaned = re.sub(r"```", "", cleaned).strip()
+    try:
+        value = json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        raise AnalysisValidationError(f"JSON inválido: {exc}") from exc
+    allowed_source_urls = {
+        normalize_url(result.get("url", ""))
+        for result in (search_results or [])
+        if normalize_url(result.get("url", ""))
+    }
+    return validate_analysis_items(value, allowed_source_urls)
 
 
 # ---------------------------------------------------------------------------
@@ -292,14 +486,17 @@ def analyze_results(
     search_results: list[dict],
     known_items: set[str],
     hardware_context: str,
-    model: str,
+    models: list[str],
     ollama_url: str,
     logger: logging.Logger,
-) -> tuple[list[dict], str]:
-    """Use LLM to filter and evaluate search results. Returns (items, error_message)."""
+    *,
+    options: dict,
+    timeout_seconds: int,
+) -> tuple[list[dict], str, str]:
+    """Analyze results, retrying timeout/invalid output on the next model only."""
     if not search_results:
         logger.info("No search results to analyze.")
-        return [], ""
+        return [], "", models[0]
 
     # Format results for prompt
     formatted = []
@@ -319,37 +516,41 @@ def analyze_results(
         search_results=search_block,
     )
 
-    logger.info("Sending %d results to LLM for analysis...", len(search_results))
-    try:
-        raw = ollama_chat(model, prompt, ollama_url, logger)
-    except Exception as exc:
-        return [], f"LLM ({model}) falhou: {exc}"
+    failures = []
+    for attempt, model in enumerate(models, 1):
+        logger.info(
+            "Sending %d results to LLM for analysis (attempt %d/%d, model=%s)...",
+            len(search_results),
+            attempt,
+            len(models),
+            model,
+        )
+        try:
+            raw = ollama_chat(
+                model,
+                prompt,
+                ollama_url,
+                logger,
+                options=options,
+                timeout_seconds=timeout_seconds,
+            )
+            items = parse_analysis_response(raw, search_results)
+            logger.info("LLM identified %d new items with model %s.", len(items), model)
+            return items, "", model
+        except (requests.Timeout, AnalysisValidationError) as exc:
+            reason = f"{model}: {exc}"
+            failures.append(reason)
+            logger.warning("Retryable LLM failure (%s)", reason)
+            if attempt < len(models):
+                logger.info("Retrying with the next configured fallback model.")
+        except Exception as exc:
+            # Other HTTP/connectivity/programming failures are not made more expensive by retrying.
+            logger.error("Non-retryable LLM failure with %s: %s", model, exc)
+            return [], f"LLM ({model}) falhou: {exc}", model
 
-    if not raw:
-        logger.warning("LLM returned empty response.")
-        return [], f"LLM ({model}) retornou resposta vazia — verifique se o modelo está disponível."
-
-    # Extract JSON array robustly
-    # Strip markdown fences if present
-    cleaned = re.sub(r"```(?:json)?\s*", "", raw)
-    cleaned = re.sub(r"```", "", cleaned).strip()
-
-    # Find first [ ... ] block
-    match = re.search(r"\[.*\]", cleaned, re.DOTALL)
-    if not match:
-        logger.warning("Could not find JSON array in LLM response. Raw: %s", raw[:500])
-        return [], "LLM não retornou JSON válido — resposta inesperada."
-
-    try:
-        items = json.loads(match.group(0))
-        if not isinstance(items, list):
-            logger.warning("LLM JSON was not a list.")
-            return [], "LLM retornou JSON mas não como array."
-        logger.info("LLM identified %d new items.", len(items))
-        return items, ""
-    except json.JSONDecodeError as exc:
-        logger.error("JSON parse error: %s\nRaw snippet: %s", exc, match.group(0)[:500])
-        return [], f"Erro ao parsear JSON do LLM: {exc}"
+    attempted = ", ".join(models)
+    details = "; ".join(failures)
+    return [], f"Tentativas LLM esgotadas ({attempted}): {details}", attempted
 
 
 # ---------------------------------------------------------------------------
@@ -358,14 +559,18 @@ def analyze_results(
 def filter_new_items(
     items: list[dict], known_items: set[str], logger: logging.Logger
 ) -> list[dict]:
-    """Remove items whose name already appears in the backlog."""
+    """Remove backlog matches and semantic duplicates in the current batch."""
     new_items = []
+    seen_items = set(known_items)
     for item in items:
         name = item.get("name", "").strip()
-        if name.lower() in known_items:
+        if is_known_item_name(name, seen_items):
             logger.debug("Skipping already-known item: %s", name)
         else:
             new_items.append(item)
+            # Make the decision progressive: later exact or qualified variants
+            # are compared against items already accepted from this response.
+            seen_items.add(name)
     logger.info("%d items after dedup: %d new", len(items), len(new_items))
     return new_items
 
@@ -614,10 +819,10 @@ def send_telegram(
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-def main() -> None:
+def main() -> int:
     """Run the agent, guaranteeing a Telegram alert even on an unhandled crash."""
     try:
-        _run()
+        return _run()
     except Exception as exc:
         logging.getLogger("research_agent").exception("Agent crashed unexpectedly.")
         send_telegram_message(
@@ -627,7 +832,7 @@ def main() -> None:
         raise
 
 
-def _run() -> None:
+def _run() -> int:
     cfg = load_config()
     logger = setup_logging(cfg.get("log_file", "research.log"))
     today = datetime.now().strftime("%Y-%m-%d")
@@ -647,10 +852,33 @@ def _run() -> None:
     queries = cfg.get("search_queries", [])
     all_results = run_searches(queries, cfg, logger)
 
+    # Zero resultados em todas as queries é indistinguível de uma indisponibilidade
+    # completa dos backends de busca; não registrar isso como execução saudável.
+    if not all_results:
+        search_error = "Nenhum resultado foi retornado pelos backends de busca."
+        logger.error(search_error)
+        report_path = write_report(
+            [], all_results, queries, reports_dir, today, logger,
+            llm_error=search_error,
+            llm_model="",
+        )
+        send_telegram(
+            [],
+            today,
+            logger,
+            queries=queries,
+            known_count=len(known_items),
+            raw_result_count=0,
+            model="",
+            report_path=report_path,
+            llm_error=search_error,
+        )
+        return 1
+
     # 3. Check Ollama
-    model = pick_model(cfg, logger)
-    if model is None:
-        no_model_error = "Ollama indisponível ou sem modelos instalados."
+    models = pick_models(cfg, logger)
+    if not models:
+        no_model_error = "Ollama indisponível ou nenhum modelo configurado está instalado."
         logger.error(
             "Ollama not available or no models installed. "
             "Writing raw results to report without LLM analysis."
@@ -672,16 +900,21 @@ def _run() -> None:
             llm_error=no_model_error,
         )
         logger.info("Done (no LLM analysis).")
-        return
+        return 1
 
     # 4. LLM analysis
-    raw_items, llm_error = analyze_results(
+    raw_items, llm_error, used_model = analyze_results(
         all_results,
         known_items,
         cfg.get("hardware_context", ""),
-        model,
+        models,
         cfg["ollama_url"],
         logger,
+        options=cfg.get(
+            "ollama_options",
+            {"temperature": 0.2, "num_ctx": 8192, "num_predict": 1536},
+        ),
+        timeout_seconds=int(cfg.get("ollama_timeout_seconds", 240)),
     )
 
     # 5. Filter duplicates
@@ -691,7 +924,7 @@ def _run() -> None:
     report_path = write_report(
         new_items, all_results, queries, reports_dir, today, logger,
         llm_error=llm_error,
-        llm_model=model,
+        llm_model=used_model,
     )
 
     # 7. Update backlog
@@ -705,13 +938,14 @@ def _run() -> None:
         queries=queries,
         known_count=len(known_items),
         raw_result_count=len(all_results),
-        model=model,
+        model=used_model,
         report_path=report_path,
         llm_error=llm_error,
     )
 
     logger.info("=== Agent finished. Report: %s ===", report_path)
+    return 1 if llm_error else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

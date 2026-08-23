@@ -1,5 +1,5 @@
 [Unit]
-Description=YouTube ETL — Mercado Automotivo (dispara o webhook do workflow n8n)
+Description=YouTube ETL — Mercado Automotivo (executa e aguarda o workflow n8n)
 # Dá tempo do Docker subir n8n/Ollama quando o timer dispara logo após o boot
 # (Persistent=true executa runs perdidos na primeira oportunidade).
 
@@ -8,4 +8,6 @@ Type=oneshot
 ExecStartPre=/bin/sleep 60
 ExecStart=%h/homelab-ai/agents/youtube-etl/run.sh
 WorkingDirectory=%h/homelab-ai/agents/youtube-etl
-TimeoutStartSec=2min
+# O webhook agora responde somente no fim do workflow. O teto cobre até 60
+# vídeos (20 canais x 3), sem encerrar uma rodada válida no meio.
+TimeoutStartSec=4h10min
