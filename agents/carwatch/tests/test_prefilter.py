@@ -62,6 +62,104 @@ def test_checks_summary_as_well_as_title():
     assert passes is True
 
 
+# Mirrors the real config/brands.yaml + config/keywords.yaml entries that the
+# Fase 1 final review found colliding with naive substring matching.
+REAL_WORLD_BRANDS = BrandsConfig.model_validate(
+    {
+        "brands": [
+            {"name": "General Motors", "aliases": ["GM", "Chevrolet", "Chevy"]},
+            {"name": "Stellantis", "aliases": ["Jeep", "Ram", "Dodge"]},
+            {"name": "Volkswagen", "aliases": ["VW"]},
+        ]
+    }
+)
+REAL_WORLD_KEYWORDS = KeywordsConfig.model_validate(
+    {
+        "positive": {"en": ["unveils", "world premiere", "goes on sale"]},
+        "negative_strong": ["stock price", "stock plunges", "shares fall", "recall"],
+    }
+)
+
+
+def test_gm_alias_does_not_match_inside_segment():
+    """IMPORTANT 6: `"gm" in "segment"` used to make every article about a
+    market segment look like a General Motors article."""
+    passes, brand = passes_prefilter(
+        "Analysts say the compact SUV segment unveils strong growth",
+        None,
+        REAL_WORLD_BRANDS,
+        REAL_WORLD_KEYWORDS,
+    )
+    assert brand is None
+    assert passes is False
+
+
+def test_ram_alias_does_not_match_inside_program_or_framework():
+    passes, brand = passes_prefilter(
+        "New safety program and regulatory framework unveils in Europe",
+        None,
+        REAL_WORLD_BRANDS,
+        REAL_WORLD_KEYWORDS,
+    )
+    assert brand is None
+    assert passes is False
+
+
+def test_real_gm_and_ram_mentions_still_match_on_a_word_boundary():
+    _passes, brand = passes_prefilter("GM unveils new Chevy Bolt", None, REAL_WORLD_BRANDS, REAL_WORLD_KEYWORDS)
+    assert brand == "General Motors"
+    _passes, brand = passes_prefilter("Ram unveils new 1500 pickup", None, REAL_WORLD_BRANDS, REAL_WORLD_KEYWORDS)
+    assert brand == "Stellantis"
+
+
+def test_in_stock_does_not_trigger_the_financial_negative_terms():
+    """IMPORTANT 6: the bare `stock` negative term vetoed legitimate on-sale
+    announcements ("now in stock nationwide")."""
+    passes, brand = passes_prefilter(
+        "VW Golf goes on sale, now in stock nationwide",
+        None,
+        REAL_WORLD_BRANDS,
+        REAL_WORLD_KEYWORDS,
+    )
+    assert brand == "Volkswagen"
+    assert passes is True
+
+
+def test_financial_market_news_is_still_vetoed():
+    for title in (
+        "VW unveils plan as stock plunges after profit warning",
+        "VW unveils plan as shares fall 8%",
+        "VW unveils plan; stock price hits a 5-year low",
+    ):
+        passes, _ = passes_prefilter(title, None, REAL_WORLD_BRANDS, REAL_WORLD_KEYWORDS)
+        assert passes is False, title
+
+
+def test_positive_term_is_word_bounded_too():
+    """`unveils` must not match inside an unrelated longer token."""
+    passes, brand = passes_prefilter(
+        "Volkswagen reunveilsomething odd", None, REAL_WORLD_BRANDS, REAL_WORLD_KEYWORDS
+    )
+    assert brand == "Volkswagen"
+    assert passes is False
+
+
+def test_cjk_terms_keep_substring_matching():
+    """Python's \\b assumes whitespace-delimited words, which CJK text has
+    none of — 比亚迪/首发 must keep plain containment."""
+    passes, brand = passes_prefilter("比亚迪海豹06首发", None, BRANDS, KEYWORDS)
+    assert passes is True
+    assert brand == "BYD"
+
+
+def test_hyphenated_and_multiword_terms_still_match():
+    keywords = KeywordsConfig.model_validate(
+        {"positive": {"en": ["all-new", "world premiere"]}, "negative_strong": []}
+    )
+    assert passes_prefilter("VW shows the all-new Golf", None, REAL_WORLD_BRANDS, keywords)[0] is True
+    assert passes_prefilter("VW holds a world premiere", None, REAL_WORLD_BRANDS, keywords)[0] is True
+
+
 async def test_run_prefilter_updates_rows_and_returns_counts(db_pool):
     async with db_pool.connection() as conn:
         source = await conn.execute(

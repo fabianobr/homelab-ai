@@ -1,33 +1,58 @@
 """src/carwatch/prefilter.py"""
+import re
+from functools import lru_cache
+
 from carwatch.models import BrandsConfig, KeywordsConfig
 
 
-def _find_matching_brand(text_lower: str, brands: BrandsConfig) -> str | None:
+@lru_cache(maxsize=8192)
+def _word_boundary_pattern(term: str) -> re.Pattern:
+    return re.compile(rf"\b{re.escape(term)}\b", re.IGNORECASE)
+
+
+def _term_in_text(term: str, text: str, text_lower: str) -> bool:
+    """Match `term` in `text`, word-bounded for ASCII/Latin terms.
+
+    Plain substring containment produced real false positives: the "GM" alias
+    matched inside "segment", "Ram" matched inside "program"/"framework", and
+    the negative term "shares" matched inside "shareable". Python's `\\b`
+    assumes whitespace/punctuation-delimited words, which CJK text does not
+    have — a `\\b` around 首发 would never match inside 比亚迪海豹06首发 — so
+    any term with non-ASCII characters keeps substring containment.
+    """
+    if not term.isascii():
+        return term.lower() in text_lower
+    return _word_boundary_pattern(term).search(text) is not None
+
+
+def _find_matching_brand(text: str, brands: BrandsConfig) -> str | None:
+    text_lower = text.lower()
     for brand in brands.brands:
-        candidates = [brand.name, *brand.aliases]
-        if any(candidate.lower() in text_lower for candidate in candidates):
-            return brand.name
+        for candidate in (brand.name, *brand.aliases):
+            if _term_in_text(candidate, text, text_lower):
+                return brand.name
     return None
 
 
-def _matches_any(text_lower: str, terms: list[str]) -> bool:
-    return any(term.lower() in text_lower for term in terms)
+def _matches_any(text: str, terms: list[str]) -> bool:
+    text_lower = text.lower()
+    return any(_term_in_text(term, text, text_lower) for term in terms)
 
 
 def passes_prefilter(
     title: str, summary: str | None, brands: BrandsConfig, keywords: KeywordsConfig
 ) -> tuple[bool, str | None]:
-    text_lower = f"{title} {summary or ''}".lower()
+    text = f"{title} {summary or ''}"
 
-    brand = _find_matching_brand(text_lower, brands)
+    brand = _find_matching_brand(text, brands)
     if brand is None:
         return False, None
 
     all_positive_terms = [term for terms in keywords.positive.values() for term in terms]
-    if not _matches_any(text_lower, all_positive_terms):
+    if not _matches_any(text, all_positive_terms):
         return False, brand
 
-    if _matches_any(text_lower, keywords.negative_strong):
+    if _matches_any(text, keywords.negative_strong):
         return False, brand
 
     return True, brand

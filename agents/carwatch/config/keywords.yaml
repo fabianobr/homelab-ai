@@ -20,8 +20,24 @@ negative_strong:
   - obituary
   - sponsorship
   - esports
-  - stock
-  - shares
+  # SPEC.md §9 lists the bare terms `stock` and `shares` here, meaning
+  # financial-market news. Word-boundary matching (prefilter.py) does not
+  # save them: "now in stock nationwide" and "shares the platform with"
+  # contain the whole word and would veto legitimate launch announcements.
+  # Fase 1 final review replaced them with the financial phrasings they were
+  # actually aiming at — a deliberate, documented deviation from the literal
+  # spec list.
+  - stock price
+  - stock market
+  - stock plunges
+  - stock falls
+  - stock jumps
+  - stock surges
+  - share price
+  - shareholders
+  - shares fall
+  - shares rise
+  - shares plunge
   - merger talks
   - union
   - strike
