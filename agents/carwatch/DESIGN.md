@@ -132,18 +132,66 @@ semana completa de dados.
 `ExecStartPre` garante `docker compose up -d db` e aguarda o healthcheck
 antes do `ExecStart` chamar `docker compose run --rm app carwatch weekly-run`.
 
+### 6. Correções da revisão final da Fase 1 (divergências do SPEC.md)
+
+Estas quatro divergências **não** eram planejadas: foram encontradas na
+revisão final da Fase 1, com reprodução empírica, e corrigidas por sobrepor
+a instrução original de "manter o valor literal do spec".
+
+- **`llm/classify.py`: `max_tokens=300` + `BATCH_SIZE=20` (§10) →
+  `max_tokens=1200` + `BATCH_SIZE=8`.** A combinação do spec é
+  aritmeticamente impossível: um objeto de classificação custa ~30–40 tokens
+  de saída, então um lote cheio de 20 itens precisa de ~600–800 e sempre
+  truncava no meio do JSON. `parse_classify_response` devolvia `None`, o
+  lote inteiro era descartado, e as linhas ficavam em
+  `status='new' AND prefilter_ok=TRUE` — ou seja, a execução da semana
+  seguinte re-tentava (e re-cobrava) os mesmos itens mais os novos, num
+  backlog sem limite. Além dos novos valores, um lote que falha o parse
+  agora é **dividido ao meio e re-tentado**, o que limita o estrago de
+  qualquer desalinhamento futuro de orçamento de tokens à metade que falhou.
+- **`probe.py`: o fallback de sitemap (§7) saiu da cadeia de descoberta.**
+  A cadeia agora é apenas *candidate paths → `<link rel="alternate">`*.
+  `feedparser.parse()` extrai **zero** entradas de um documento `<urlset>`
+  (verificado empiricamente), então o `>= 5 entries` de
+  `validate_feed_content` jamais passaria para uma resposta de sitemap: era
+  código morto que custava 2 requisições HTTP a mais por marca. Reativar
+  exige um parser de sitemap XML de verdade e um validador próprio, não
+  apenas religar a função antiga.
+- **`config/keywords.yaml`: os termos `stock` e `shares` (§9) viraram
+  frases financeiras** (`stock price`, `stock plunges`, `shares fall`, …).
+  Com `prefilter.py` casando por fronteira de palavra, a palavra solta ainda
+  vetava anúncios legítimos — "now in stock nationwide" contém `stock`
+  inteiro. As frases capturam a intenção real do spec (notícia de mercado
+  financeiro) sem o falso positivo.
+- **`prefilter.py` casa por fronteira de palavra**, não por substring.
+  Substring fazia o alias `GM` casar dentro de "segment" e `Ram` dentro de
+  "program"/"framework". Termos com caracteres não-ASCII (zh/ja) continuam
+  em substring: `\b` do Python pressupõe palavras delimitadas por espaço,
+  que CJK não tem.
+
+Correções da mesma revisão que **não** divergem do spec (são o spec sendo
+finalmente implementado): o circuit breaker agora é **lido** antes de cada
+fetch (não só gravado), a heurística de corpo curto <500 chars só vale para
+`kind="page"` (um feed pequeno e válido não é bloqueio silencioso), e os
+eventos `fetch.result`/`breaker.trip`/`llm.call` do §18 passaram a ser
+emitidos de fato.
+
 ## O que **não** muda em relação ao `SPEC.md`
 
 - Schema do banco (§5) inteiro, incluindo `source_metrics`,
   `launch_events`, `event_sources`.
 - Contrato e comportamento do `fetcher` (§6): robots.txt, UA fixo,
   conditional GET, rate limit por domínio (semáforo 1, 3s + jitter),
-  retry via `tenacity`, detecção de bloqueio silencioso, circuit breaker
-  (§6, "não implemente lógica de contorno" continua valendo integralmente).
+  retry com backoff exponencial + jitter, detecção de bloqueio silencioso,
+  circuit breaker (§6, "não implemente lógica de contorno" continua valendo
+  integralmente). O retry é um laço próprio dentro de `fetcher.fetch()`, não
+  `tenacity`: o backoff precisa enxergar o `Retry-After` da resposta e
+  interagir com o breaker, o que ficaria mais obscuro embrulhado no
+  decorator. `tenacity` continua nas dependências para as fases seguintes.
 - `probe.py` (§7), `prefilter.py` (§9), `llm/classify.py` (§10),
   `llm/extract.py` (§11), `dedupe.py` (§12) completos, incluindo os
   prompts, os limiares (0.55 trigram / 0.86 cosseno), e a regra de
-  progressão de estágio.
+  progressão de estágio — com as exceções registradas na seção 6 abaixo.
 - `curate.py` (§13) e `discovery.py` (§14) completos — aliás, a cadência
   semanal do spec original para `curate` já era semanal; aqui ela só
   passa a rodar *dentro* do mesmo processo de `weekly-run` em vez de via

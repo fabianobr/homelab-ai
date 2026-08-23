@@ -2232,6 +2232,8 @@ git commit -m "feat(carwatch): add feed ingest with URL normalization and dedupe
 
 **Known tuning risk to flag in the README (not to silently fix):** SPEC.md §10 sets `max_tokens=300` for a batch of up to 20 classified items — at ~25-30 tokens per compact JSON object that leaves little headroom, and Claude may truncate the array on a full batch. Keep the literal spec value; if `parse_classify_response` starts returning `None` frequently in production, that is the first thing to check (raise `max_tokens` or shrink the batch), not a plan defect.
 
+> **SUPERSEDED by the Fase 1 final review (2026-08-22).** This instruction to "keep the literal spec value" was wrong, and the risk was not merely a tuning risk: `max_tokens=300` with `BATCH_SIZE=20` is arithmetically impossible, not just tight. A full 20-item response needs ~600-800 output tokens, so *every* full batch truncated mid-JSON, `parse_classify_response` returned `None`, and `run_classify` dropped the whole batch — leaving those rows at `status='new' AND prefilter_ok=TRUE`, so the next weekly run re-attempted and **re-billed** them alongside the new ones, an unbounded backlog. Corrected to `max_tokens=1200` and `BATCH_SIZE=8`, plus split-and-retry: a batch that fails to parse is halved and each half retried independently, so a future budget mismatch costs at most the failing half. Documented in `agents/carwatch/DESIGN.md` §6. Batching below therefore reads "8 at a time", not 20.
+
 - [ ] **Step 1: Write the failing tests**
 
 ```python
@@ -2521,6 +2523,8 @@ git commit -m "feat(carwatch): add Claude Haiku classify stage with batched prom
 - Produces: `def validate_feed_content(body: str | None) -> bool` — **exported (not private)** specifically so Task 14's fixed-source seeding can reuse the exact same ≥5-entries/<90-days validation rule instead of duplicating it.
 
 **Candidate paths, in order (SPEC.md §7), tried against `https://{press_domain}`:** `/rss`, `/feed`, `/feed.rss`, `/rss.xml`, `/feeds/news.xml`, `/en/rss`, `/news/rss`, `/press-releases/rss`. If none validate, look for `<link rel="alternate" type="application/rss+xml">` on the homepage; if that fails too, try `/sitemap.xml` then `/news-sitemap.xml`. **Validation (SPEC.md §7.5):** feed parses without a fatal error, has ≥5 entries, and the newest entry is <90 days old.
+
+> **SUPERSEDED by the Fase 1 final review (2026-08-22).** The sitemap step was **removed** from the chain — it is now *candidate paths → link-rel* only. `feedparser.parse()` extracts zero entries from a `<urlset>` sitemap document (verified empirically), so the ≥5-entries validation above could never pass for a sitemap response: the strategy was dead code costing two extra HTTP requests per brand. Re-adding it requires a real sitemap XML parser plus its own validator. Documented in `agents/carwatch/DESIGN.md` §6.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3735,6 +3739,11 @@ horário agendado.
 - `config/brands.yaml` traz domínios de press room de melhor esforço;
   `carwatch probe` é quem valida de verdade em runtime.
 ```
+
+> **SUPERSEDED by the Fase 1 final review (2026-08-22):** the first bullet of
+> that README block no longer matches the code — `max_tokens=1200` /
+> `BATCH_SIZE=8` with split-and-retry. See the note under Task 12 and
+> `agents/carwatch/DESIGN.md` §6; the shipped `README.md` has the corrected text.
 
 - [ ] **Step 7: Commit**
 
