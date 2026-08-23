@@ -48,3 +48,29 @@ async def call_classify(system_prompt: str, user_content: str) -> tuple[str, dic
         "tokens_out": getattr(usage, "output_tokens", None),
         "stop_reason": getattr(response, "stop_reason", None),
     }
+
+
+async def call_extract(system_prompt: str, article_text: str) -> tuple[str, dict]:
+    """Return the raw response text plus the usage/stop metadata.
+
+    Same `(text, usage)` contract as `call_classify` above (see its
+    docstring) -- the Fase 2 plan originally sketched this as a bare `str`
+    return, but the Fase 1 final review's cost-observability fix already
+    established this file's convention, so this follows suit instead of
+    reintroducing an inconsistent shape.
+    """
+    client = get_anthropic_client()
+    response = await client.messages.create(
+        model=MODEL,
+        max_tokens=1024,
+        temperature=0,
+        system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
+        messages=[{"role": "user", "content": article_text}],
+    )
+    text = "".join(block.text for block in response.content if block.type == "text")
+    usage = getattr(response, "usage", None)
+    return text, {
+        "tokens_in": getattr(usage, "input_tokens", None),
+        "tokens_out": getattr(usage, "output_tokens", None),
+        "stop_reason": getattr(response, "stop_reason", None),
+    }
