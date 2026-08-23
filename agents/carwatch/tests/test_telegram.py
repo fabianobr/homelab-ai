@@ -54,6 +54,38 @@ def test_format_event_message_handles_missing_powertrain_and_price():
     assert "não divulgado" in text
 
 
+def test_format_event_message_escapes_html_special_characters_in_llm_controlled_fields():
+    # brand/model/highlights/markets/sales_start come from the LLM extraction
+    # pipeline, not a fixed vocabulary, and the message is sent with
+    # parse_mode="HTML" -- unescaped '<'/'>'/'&' would corrupt Telegram's
+    # HTML parsing and fail the send.
+    event = {
+        "brand": "Foo & <Bar>", "model": "X < 5 & Y > 3", "stage": "teaser",
+        "markets": ["CN & TW"], "highlights": ["Power < 300 hp & torque > 400 Nm"],
+        "powertrain": {"type": "bev", "power_hp": None, "range_km": None, "range_cycle": None},
+        "price": {"amount": 1000, "currency": "R$ <fake>", "status": "official"},
+        "sales_start": "Q2 <2026> & beyond",
+    }
+    text = format_event_message(event, source_count=1, primary_url="https://x.com/a?x=1&y=2")
+
+    assert "Foo &amp; &lt;Bar&gt;" in text
+    assert "X &lt; 5 &amp; Y &gt; 3" in text
+    assert "CN &amp; TW" in text
+    assert "Power &lt; 300 hp &amp; torque &gt; 400 Nm" in text
+    assert "Q2 &lt;2026&gt; &amp; beyond" in text
+    assert "R$ &lt;fake&gt;" in text
+    assert 'href="https://x.com/a?x=1&amp;y=2"' in text
+
+    # No raw '<' or '>' should survive anywhere in the message -- the only
+    # unescaped angle brackets allowed are the literal tags we build
+    # ourselves (<b>, </b>, <a href="...">, </a>).
+    import re
+
+    stripped = re.sub(r"</?(b|a)( href=\"[^\"]*\")?>", "", text)
+    assert "<" not in stripped
+    assert ">" not in stripped
+
+
 async def test_get_pending_events_excludes_published_and_low_confidence(db_pool):
     async with db_pool.connection() as conn:
         source = await conn.execute(

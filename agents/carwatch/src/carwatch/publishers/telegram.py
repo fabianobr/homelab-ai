@@ -1,5 +1,6 @@
 """src/carwatch/publishers/telegram.py"""
 import asyncio
+import html
 
 import httpx
 
@@ -36,11 +37,13 @@ async def send_telegram_message(bot_token: str, chat_id: str, text: str) -> bool
 def _format_powertrain(powertrain: dict | None) -> str:
     if not powertrain:
         return "não informado"
-    parts = [POWERTRAIN_TYPE_LABEL.get(powertrain.get("type"), powertrain.get("type") or "?")]
+    ptype = powertrain.get("type")
+    parts = [POWERTRAIN_TYPE_LABEL.get(ptype, html.escape(ptype) if ptype else "?")]
     if powertrain.get("power_hp"):
         parts.append(f"{powertrain['power_hp']} cv")
     if powertrain.get("range_km"):
-        parts.append(f"{powertrain['range_km']} km ({powertrain.get('range_cycle') or '?'})")
+        cycle = powertrain.get("range_cycle")
+        parts.append(f"{powertrain['range_km']} km ({html.escape(cycle) if cycle else '?'})")
     return " · ".join(parts)
 
 
@@ -48,27 +51,38 @@ def _format_price(price: dict | None) -> str:
     if not price or price.get("amount") is None:
         return "não divulgado"
     status = PRICE_STATUS_LABEL.get(price.get("status"), "")
-    currency = price.get("currency") or ""
+    currency = html.escape(price.get("currency") or "")
     return f"{currency} {price['amount']:,.0f} ({status})".strip()
 
 
 def format_event_message(event: dict, source_count: int, primary_url: str) -> str:
+    # brand/model/markets/highlights/sales_start are free-text fields sourced
+    # from the LLM extraction pipeline (ExtractedEvent), not from a fixed
+    # vocabulary, and this message is sent with parse_mode="HTML" -- any
+    # unescaped '<', '>', or '&' in that text would corrupt Telegram's HTML
+    # parsing and fail the send (leaving the event stuck unpublished and
+    # retried every future run). Only the tags we build ourselves (<b>,
+    # <a href=...>) are literal HTML; everything interpolated into them, plus
+    # the primary_url placed inside the href attribute, is escaped.
     stage = event["stage"]
     emoji = STAGE_EMOJI.get(stage, "🚗")
-    label = STAGE_LABEL_PT.get(stage, stage)
-    markets = ", ".join(event.get("markets") or []) or "Global"
+    label = STAGE_LABEL_PT.get(stage, html.escape(stage))
+    markets = ", ".join(html.escape(m) for m in (event.get("markets") or [])) or "Global"
 
-    lines = [f"🚗 <b>{event['brand']} {event['model']}</b>", f"{emoji} {label} · {markets}", ""]
+    brand = html.escape(event["brand"])
+    model = html.escape(event["model"])
+
+    lines = [f"🚗 <b>{brand} {model}</b>", f"{emoji} {label} · {markets}", ""]
     highlights = event.get("highlights") or []
     if highlights:
-        lines.append("\n".join(f"• {h}" for h in highlights))
+        lines.append("\n".join(f"• {html.escape(h)}" for h in highlights))
         lines.append("")
     lines.append(f"⚡ {_format_powertrain(event.get('powertrain'))}")
     lines.append(f"💰 {_format_price(event.get('price'))}")
     if event.get("sales_start"):
-        lines.append(f"📅 Vendas: {event['sales_start']}")
+        lines.append(f"📅 Vendas: {html.escape(event['sales_start'])}")
     lines.append("")
-    lines.append(f'<a href="{primary_url}">Fonte</a> · {source_count} fonte(s)')
+    lines.append(f'<a href="{html.escape(primary_url)}">Fonte</a> · {source_count} fonte(s)')
     return "\n".join(lines)
 
 
