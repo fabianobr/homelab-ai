@@ -15,18 +15,28 @@ execução semanal — leia os dois; `DESIGN.md` prevalece em conflitos).
   não é o bot Hermes usado pelos outros agentes deste repositório
   (DESIGN.md §4)
 
-## Como rodar manualmente
+## Setup (uma vez, vale para rodar e para testar)
+
+`.env` é gitignored — um clone novo só tem `.env.example`. Copie antes de
+qualquer outra coisa:
 
 ```bash
 cd ~/homelab-ai/agents/carwatch
 cp .env.example .env   # preencher as chaves
+```
+
+## Como rodar manualmente
+
+```bash
+cd ~/homelab-ai/agents/carwatch
 ./run.sh
 ```
 
 ## Testes
 
 Precisam de Postgres real (não são mockados — apenas HTTP é mockado via
-`respx`, seguindo SPEC.md §20):
+`respx`, seguindo SPEC.md §20). Faça o setup acima (`cp .env.example .env`)
+antes:
 
 ```bash
 cd ~/homelab-ai/agents/carwatch
@@ -57,8 +67,14 @@ horário agendado.
 
 ## Riscos operacionais conhecidos
 
-- `llm/classify.py` usa `max_tokens=300` por lote de 20 itens (valor exato
-  do SPEC.md §10) — pode truncar em lotes cheios; ver nota em
-  `llm/classify.py`.
+- `llm/classify.py` usava `max_tokens=300` por lote de 20 itens (valor exato
+  do SPEC.md §10). A revisão final da Fase 1 mostrou que essa combinação é
+  aritmeticamente impossível — um lote cheio precisa de ~600–800 tokens de
+  saída, truncava o JSON no meio e o lote inteiro era descartado (e
+  re-cobrado na semana seguinte). Corrigido para `max_tokens=1200` com
+  `BATCH_SIZE=8`, mais split-and-retry do lote quando o parse falha.
+- `config/keywords.yaml` substitui os termos `stock`/`shares` do SPEC.md §9
+  por frases financeiras (`stock price`, `shares fall`, …): a palavra solta
+  vetava anúncios legítimos com "now in stock".
 - `config/brands.yaml` traz domínios de press room de melhor esforço;
   `carwatch probe` é quem valida de verdade em runtime.

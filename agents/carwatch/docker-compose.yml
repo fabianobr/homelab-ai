@@ -21,8 +21,11 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # `.env` is gitignored, so a fresh clone only has `.env.example`. Without
+    # `required: false` even `docker compose config` fails there.
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       DATABASE_URL: postgresql://carwatch:carwatch@db:5432/carwatch
 

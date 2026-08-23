@@ -10,5 +10,10 @@ COPY config/ ./config/
 
 RUN uv pip install --system --no-cache .
 
+# `carwatch` is installed non-editably into site-packages, so cli.py cannot
+# infer config/ and migrations/ from its own __file__ — point it at WORKDIR,
+# where both directories were COPYed above.
+ENV CARWATCH_ROOT=/app
+
 ENTRYPOINT ["carwatch"]
 CMD ["--help"]
