@@ -179,8 +179,11 @@ services:
       - "127.0.0.1:4000:4000"
     volumes:
       - ./litellm-config.yaml:/app/config.yaml:ro
+      - ./public_prompt_guardrail.py:/app/public_prompt_guardrail.py:ro
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # Valor real somente no .env ignorado pelo Git. A rota continua opcional.
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     extra_hosts:
       - "host.docker.internal:host-gateway"

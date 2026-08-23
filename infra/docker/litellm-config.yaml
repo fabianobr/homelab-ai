@@ -6,6 +6,8 @@
 #   sdlc-codegen    → qwen3-coder:30b (lógica de negócio, SWE-bench 69.6%)
 #   sdlc-test       → qwen2.5-coder:32b (geração de testes com ACs explícitos)
 #   sdlc-fix        → qwen3:14b thinking (debug local, fallback → Claude se travar)
+#   groq-fast-public → Qwen 3.6 27B sem reasoning (somente dados públicos,
+#                      fallback → qwen3.5 local 9.7B)
 #
 # Subir: docker compose --profile optional up -d litellm
 # Smoke test: curl http://localhost:4000/health
@@ -36,13 +38,36 @@ model_list:
       model: ollama/qwen3:14b
       api_base: http://ollama:11434
 
+  # Opt-in somente: nenhum workflow existente seleciona este alias.
+  - model_name: groq-fast-public
+    litellm_params:
+      model: groq/qwen/qwen3.6-27b
+      api_key: os.environ/GROQ_API_KEY
+      reasoning_effort: none
+      temperature: 0.7
+      top_p: 0.8
+
+  - model_name: groq-fast-public-local
+    litellm_params:
+      model: ollama/qwen3.5:latest
+      api_base: http://ollama:11434
+
 litellm_settings:
   # Se o fix local falhar/exceder timeout, escala para Claude
   fallbacks:
     - sdlc-fix:
         - sdlc-review
+    - groq-fast-public:
+        - groq-fast-public-local
   num_retries: 2
   request_timeout: 600
   # Para habilitar tracking de custo via Langfuse (ver backlog):
   # success_callback: ["langfuse"]
   # failure_callback: ["langfuse"]
+
+guardrails:
+  - guardrail_name: public-data-only
+    litellm_params:
+      guardrail: public_prompt_guardrail.PublicPromptGuardrail
+      mode: pre_call
+      default_on: true
