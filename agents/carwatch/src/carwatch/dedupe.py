@@ -10,6 +10,12 @@ per successfully extracted item:
    >= 0.55 AND cosine similarity >= 0.86, 14-day window) -> merge (Etapa 3).
    Both thresholds are required together: either alone produces false
    positives between sibling models (e.g. "Seal 05" vs "Seal 06").
+   A third gate, not in SPEC.md, is also required: the incoming and
+   candidate model strings' digit-groups must match exactly (see
+   `_digit_signature`). Verified against the real embedding model that
+   SPEC.md's own two thresholds both pass for "Seal 05" vs "Seal 06" (and
+   for the digit-vs-no-digit case "Model 3" vs "Model Y"), so this guard is
+   load-bearing, not decorative.
 3. No match at either stage-preserving check -> look for a prior event with
    the same brand + model_slug but an earlier stage in STAGE_ORDER (no time
    window) -> stage progression: create a NEW row with previous_event_id set
@@ -75,12 +81,20 @@ def _digit_signature(text: str) -> tuple[str, ...]:
     both fail to discriminate short automotive model codes that differ only
     in a trailing number: empirically, similarity('Seal 05', 'Seal 06') via
     pg_trgm is 0.6 (above the 0.55 gate) and their cosine similarity under
-    `_embedding_text` is ~0.95 (above the 0.86 gate) -- both SPEC.md §12
+    `_embedding_text` is ~0.95-0.97 (above the 0.86 gate, and *worse* with
+    the real ExtractedEvent default `highlights=[]`) -- both SPEC.md §12
     thresholds pass for a pair SPEC.md itself names as the canonical
     sibling-model false positive. Numbers are highly discriminating in car
     naming (Seal 05 and Seal 06 are different products), so a fuzzy
     candidate whose digit groups differ from the incoming event's is
     rejected even if it clears both similarity gates.
+
+    The empty tuple `()` (no digits at all, e.g. "Model Y") is itself a
+    valid signature and must be compared like any other -- not treated as a
+    wildcard. An earlier version of this guard only compared signatures
+    when *both* sides had at least one digit group, which let "Model 3" and
+    "Model Y" (trgm 0.6, cosine ~0.90, one side digit-less) merge into one
+    launch event. Comparing unconditionally catches that: ("3",) != ().
     """
     return tuple(re.findall(r"\d+", text))
 
@@ -100,7 +114,7 @@ async def _find_fuzzy_match(pool, brand: str, model: str, stage: str, embedding:
         rows = await result.fetchall()
     for candidate_id, candidate_model in rows:
         candidate_digits = _digit_signature(candidate_model)
-        if incoming_digits and candidate_digits and incoming_digits != candidate_digits:
+        if incoming_digits != candidate_digits:
             continue
         return candidate_id
     return None
@@ -173,10 +187,21 @@ async def _merge_into_existing(
         is_primary = source_tier == 1 and not already_has_tier1
 
         if is_primary:
+            # SPEC.md §12 Etapa 3: a tier-1 source overwrites *conflicting*
+            # fields. A field the new source didn't extract (None on the
+            # incoming ExtractedEvent) is an absence, not a conflict -- it
+            # must not wipe out a value a previous (lower-tier) source
+            # already supplied. COALESCE(new, old) here means "new value
+            # wins when present, old value survives when the tier-1 source
+            # is simply silent on that field" -- same pattern as the
+            # non-primary branch below, just also applied when is_primary.
             await conn.execute(
-                "UPDATE launch_events SET body_type = %s, generation = %s, "
-                "is_new_generation = %s, event_date = %s, sales_start = %s, "
-                "powertrain = %s, price = %s, updated_at = now() WHERE id = %s",
+                "UPDATE launch_events SET "
+                "body_type = COALESCE(%s, body_type), generation = COALESCE(%s, generation), "
+                "is_new_generation = %s, "
+                "event_date = COALESCE(%s, event_date), sales_start = COALESCE(%s, sales_start), "
+                "powertrain = COALESCE(%s, powertrain), price = COALESCE(%s, price), "
+                "updated_at = now() WHERE id = %s",
                 (
                     extracted.body_type, extracted.generation, extracted.is_new_generation,
                     extracted.event_date, extracted.sales_start,

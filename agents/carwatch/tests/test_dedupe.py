@@ -162,6 +162,59 @@ async def test_second_tier1_source_does_not_overwrite_existing_tier1_fields(db_p
         assert (await result.fetchone())[0] is False
 
 
+async def test_digit_vs_no_digit_siblings_do_not_collapse(db_pool):
+    """Regression for an asymmetric gap in the digit-signature guard: the
+    original check only compared digit groups when *both* sides had at
+    least one, so a digit-less model name (e.g. "Model Y") skipped the
+    check entirely against a digited sibling (e.g. "Model 3"). Empirically,
+    similarity('Model 3', 'Model Y') via pg_trgm is 0.6 and their cosine
+    similarity under `_embedding_text` is ~0.90 -- both SPEC.md §12 gates
+    pass, so without the fix these two distinct real vehicles collapse into
+    one launch event."""
+    model_3 = await _make_extracted(brand="Tesla", model="Model 3")
+    source_id_a, item_id_a = await _insert_source_and_item(db_pool)
+    id_a = await process_extracted_event(
+        db_pool, model_3, source_id=source_id_a, raw_item_id=item_id_a, source_tier=1
+    )
+
+    model_y = await _make_extracted(brand="Tesla", model="Model Y")
+    source_id_b, item_id_b = await _insert_source_and_item(db_pool)
+    id_b = await process_extracted_event(
+        db_pool, model_y, source_id=source_id_b, raw_item_id=item_id_b, source_tier=1
+    )
+
+    assert id_a != id_b
+
+
+async def test_tier1_merge_with_missing_field_does_not_null_out_prior_value(db_pool):
+    """SPEC.md §12 Etapa 3: a tier-1 source overwrites *conflicting* fields.
+    A field the tier-1 source didn't extract (None) is an absence, not a
+    conflict, and must not wipe out a value a prior lower-tier source
+    already supplied -- while a field the tier-1 source DID extract should
+    still win."""
+    first = await _make_extracted(
+        body_type="sedan", price={"amount": 109800, "currency": "CNY", "status": "official"}
+    )
+    source_id_a, item_id_a = await _insert_source_and_item(db_pool, tier=3)
+    event_id = await process_extracted_event(
+        db_pool, first, source_id=source_id_a, raw_item_id=item_id_a, source_tier=3
+    )
+
+    corrected = await _make_extracted(body_type="hatchback", price=None)
+    source_id_b, item_id_b = await _insert_source_and_item(db_pool, tier=1)
+    await process_extracted_event(
+        db_pool, corrected, source_id=source_id_b, raw_item_id=item_id_b, source_tier=1
+    )
+
+    async with db_pool.connection() as conn:
+        result = await conn.execute(
+            "SELECT body_type, price FROM launch_events WHERE id = %s", (event_id,)
+        )
+        body_type, price = await result.fetchone()
+        assert body_type == "hatchback"  # tier-1 value wins
+        assert price["amount"] == 109800  # tier-3 value survives (tier-1 didn't extract it)
+
+
 async def test_fuzzy_match_merges_naming_variation_of_same_model(db_pool):
     """"Seal 06 DM-i" and "Seal 06" have different dedupe_keys (no exact
     match) but clear both the trigram (>=0.55) and cosine (>=0.86) gates,
