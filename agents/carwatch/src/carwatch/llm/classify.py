@@ -2,6 +2,7 @@
 import json
 import re
 
+from anthropic import APIError
 from pydantic import ValidationError
 
 from carwatch.llm.client import MODEL, call_classify
@@ -89,24 +90,44 @@ async def _classify_batch(pool, batch: list[tuple], system_prompt: str, logger) 
     discarding (and re-billing, week after week) the whole batch.
     """
     user_content = _format_batch_for_prompt(batch)
-    raw_response, usage = await call_classify(system_prompt, user_content)
 
-    if logger is not None:
-        logger.info(
-            "llm.call",
-            op="classify",
-            model=MODEL,
-            batch_size=len(batch),
-            tokens_in=usage.get("tokens_in"),
-            tokens_out=usage.get("tokens_out"),
-            stop_reason=usage.get("stop_reason"),
-        )
+    # A raised Anthropic SDK exception (rate limit, 5xx, connection drop) is
+    # treated exactly like an unparseable response: `items` stays None and
+    # `cause` records which failure mode it was, then the shared
+    # split-and-retry / give-up logic below handles both identically. This
+    # avoids a raised exception here ever propagating out of _classify_batch
+    # and crashing the whole weekly-run process past whatever ingest/prefilter
+    # work already succeeded.
+    items = None
+    cause = None
+    try:
+        raw_response, usage = await call_classify(system_prompt, user_content)
+    except APIError as exc:
+        cause = "api_error"
+        if logger is not None:
+            logger.warning(
+                "classify.api_error",
+                batch_size=len(batch),
+                error=f"{type(exc).__name__}: {exc}",
+            )
+    else:
+        if logger is not None:
+            logger.info(
+                "llm.call",
+                op="classify",
+                model=MODEL,
+                batch_size=len(batch),
+                tokens_in=usage.get("tokens_in"),
+                tokens_out=usage.get("tokens_out"),
+                stop_reason=usage.get("stop_reason"),
+            )
 
-    items = parse_classify_response(raw_response, batch_size=len(batch))
+        items = parse_classify_response(raw_response, batch_size=len(batch))
+        if items is None:
+            truncated = usage.get("stop_reason") == "max_tokens"
+            cause = "truncated_at_max_tokens" if truncated else "malformed_response"
 
     if items is None:
-        truncated = usage.get("stop_reason") == "max_tokens"
-        cause = "truncated_at_max_tokens" if truncated else "malformed_response"
         if len(batch) > 1:
             if logger is not None:
                 logger.warning(
@@ -146,7 +167,7 @@ async def run_classify(pool, logger, limit: int = 100) -> dict:
     async with pool.connection() as conn:
         result = await conn.execute(
             "SELECT id, title, summary FROM raw_items "
-            "WHERE status = 'new' AND prefilter_ok = TRUE LIMIT %s",
+            "WHERE status = 'new' AND prefilter_ok = TRUE AND classified IS NULL LIMIT %s",
             (limit,),
         )
         rows = await result.fetchall()
