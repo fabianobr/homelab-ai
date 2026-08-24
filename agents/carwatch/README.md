@@ -78,3 +78,11 @@ horário agendado.
   vetava anúncios legítimos com "now in stock".
 - `config/brands.yaml` traz domínios de press room de melhor esforço;
   `carwatch probe` é quem valida de verdade em runtime.
+
+## Definição de pronto (SPEC.md §22) — revisar após 2 execuções semanais
+
+- [ ] Detecta ≥90% dos lançamentos das 40 marcas principais (checar manualmente contra Motor1/Autocar)
+- [ ] Taxa de duplicata no Telegram < 5%
+- [ ] Custo LLM < US$15/mês (`carwatch stats` → `month_to_date_cost_usd`)
+- [ ] Nenhum domínio em `status='blocked'` por culpa do fetcher (não por bloqueio real do site)
+- [ ] Intervenção manual ≤ 30 min/semana (tempo gasto em `carwatch review` + confirmar aposentadorias)
