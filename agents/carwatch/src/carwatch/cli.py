@@ -165,9 +165,15 @@ def weekly_run():
     """Single composite pass: ingest -> prefilter -> classify -> publish.
 
     DESIGN.md §1: replaces SPEC.md's APScheduler daemon (`carwatch run`) with one
-    synchronous run per systemd timer trigger. Exits non-zero only when there
-    WERE items eligible for notification but none of them got sent -- a quiet
-    week with nothing to notify is not a failure.
+    synchronous run per systemd timer trigger. Exits non-zero when there WERE
+    items eligible for notification but none of them got sent, OR when the
+    publish stage itself raised -- a quiet week with nothing to notify is not
+    a failure, but publish crashing means "we may have had things to tell
+    someone and didn't," which must never exit 0 even though its zeroed
+    fallback stats (`{"sent": 0, "item_count": 0}`) look identical to a quiet
+    week's. ingest/prefilter/classify failing alone is more tolerable (that
+    stage's work just doesn't happen this run, and there's usually a next
+    run), so only publish's own failure is treated as always-fatal.
 
     Each stage is isolated in its own try/except: a crash in one stage (e.g. a
     DB error inside run_classify that Fix 3's per-batch handling doesn't
@@ -232,10 +238,14 @@ def weekly_run():
     result = asyncio.run(_run())
     typer.echo(result)
     publish_had_unsent_items = result["publish"]["item_count"] > 0 and result["publish"]["sent"] == 0
-    # A quiet week (nothing eligible to notify) is not a failure on its own,
-    # but every single stage raising is a total pipeline meltdown that would
-    # otherwise report a deceptively "clean" {sent: 0, item_count: 0} and
-    # exit 0 -- systemd must be told this run accomplished nothing.
-    total_meltdown = len(result["failed_stages"]) == 4
-    if publish_had_unsent_items or total_meltdown:
+    # A lone publish-stage crash zeroes publish_stats to the exact same
+    # {"sent": 0, "item_count": 0} shape as a legitimate quiet week, so
+    # publish_had_unsent_items alone can never catch it (item_count > 0 is
+    # required, and a crash-before-counting-anything can't satisfy that).
+    # Check whether publish specifically raised, independent of item_count,
+    # so this failure mode is never silently reported as a clean exit 0.
+    # This also subsumes the "every stage raised" total-meltdown case, since
+    # that can only happen when publish is among the failed stages too.
+    publish_stage_crashed = "publish" in result["failed_stages"]
+    if publish_had_unsent_items or publish_stage_crashed:
         raise typer.Exit(code=1)

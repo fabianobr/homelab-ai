@@ -90,7 +90,10 @@ async def test_run_publish_smoke_sends_and_reports_count(db_pool):
 
     stats = await run_publish_smoke(db_pool, "token123", "chat1", logger=None)
 
-    assert stats == {"sent": True, "item_count": 1}
+    # "sent" is the int count of items actually marked notified, not a bool
+    # of "did the API call succeed" (True == 1 made the old literal pass by
+    # coincidence).
+    assert stats == {"sent": 1, "item_count": 1}
 
 
 @respx.mock
@@ -113,7 +116,10 @@ async def test_run_publish_smoke_marks_items_notified_and_excludes_from_next_run
         item_id = (await row.fetchone())[0]
 
     stats = await run_publish_smoke(db_pool, "token123", "chat1", logger=None)
-    assert stats == {"sent": True, "item_count": 1}
+    # "sent" is the int count of items marked notified (True == 1 made the
+    # old literal pass by coincidence, not because it was re-verified
+    # against the new int contract).
+    assert stats == {"sent": 1, "item_count": 1}
 
     async with db_pool.connection() as conn:
         result = await conn.execute("SELECT status FROM raw_items WHERE id = %s", (item_id,))
@@ -149,7 +155,10 @@ async def test_run_publish_smoke_leaves_status_new_when_send_fails(db_pool):
         item_id = (await row.fetchone())[0]
 
     stats = await run_publish_smoke(db_pool, "token123", "chat1", logger=None)
-    assert stats == {"sent": False, "item_count": 1}
+    # "sent" is the int count of items marked notified -- 0 here because the
+    # send failed (False == 0 made the old literal pass by coincidence, not
+    # because it was re-verified against the new int contract).
+    assert stats == {"sent": 0, "item_count": 1}
 
     async with db_pool.connection() as conn:
         result = await conn.execute("SELECT status FROM raw_items WHERE id = %s", (item_id,))

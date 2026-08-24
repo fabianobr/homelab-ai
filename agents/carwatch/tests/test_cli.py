@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 import httpx
+import pytest
 import respx
 from typer.testing import CliRunner
 
@@ -126,6 +127,53 @@ def test_weekly_run_survives_a_raising_stage_and_still_closes_the_pool(db_pool, 
     assert result.exit_code == 0, result.output
     assert prefilter_calls, "the stage after the failing one must still have run"
     assert db_module._pool is None, "close_pool() must run even when an earlier stage raised"
+
+
+@pytest.mark.parametrize("stage_attr", ["run_ingest", "run_prefilter", "run_classify"])
+@respx.mock
+def test_weekly_run_exits_zero_when_ingest_prefilter_or_classify_fails_alone(db_pool, monkeypatch, stage_attr):
+    """ingest/prefilter/classify failing alone is tolerable -- that stage's
+    work just doesn't happen this run, no data is lost, and there's usually a
+    next run -- so it must NOT force a non-zero exit on its own. Companion to
+    the publish-crash test below, which asserts the opposite for the one
+    stage whose failure IS always fatal."""
+    respx.post("https://api.telegram.org/bottest-bot-token/sendMessage").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+
+    async def raising_stage(*args, **kwargs):
+        raise RuntimeError(f"simulated {stage_attr} crash")
+
+    monkeypatch.setattr(cli_module, stage_attr, raising_stage)
+
+    result = runner.invoke(app, ["weekly-run"])
+
+    assert result.exit_code == 0, result.output
+
+
+@respx.mock
+def test_weekly_run_exits_nonzero_when_publish_stage_crashes_alone(db_pool, monkeypatch):
+    """Post-review Finding 1: a lone run_publish_smoke crash zeroes
+    publish_stats to the exact same {"sent": 0, "item_count": 0} shape as a
+    legitimate quiet week, so the item_count>0 check can never catch it, and
+    the total-meltdown check requires all 4 stages to fail. Pre-Fix4 this
+    crash propagated loudly (non-zero exit, traceback); after stage isolation
+    it must still fail the run rather than going silent, since publish
+    crashing means "we may have had things to tell someone and didn't"."""
+    from carwatch import db as db_module
+
+    async def raising_publish(*args, **kwargs):
+        raise RuntimeError("simulated publish crash")
+
+    monkeypatch.setattr(cli_module, "run_publish_smoke", raising_publish)
+
+    result = runner.invoke(app, ["weekly-run"])
+
+    assert result.exc_info is None or not isinstance(result.exc_info[1], RuntimeError), (
+        "the stage exception must be caught inside weekly-run, not propagate to the CLI runner"
+    )
+    assert result.exit_code == 1, result.output
+    assert db_module._pool is None, "close_pool() must still run even though the run exits non-zero"
 
 
 @respx.mock
