@@ -8,6 +8,18 @@ from carwatch.probe import discover_feed_for_domain
 OUTBOUND_LINK_PATTERNS = ("media.", "press.", "newsroom.", ".presse")
 
 
+def _matches_outbound_pattern(hostname: str, pattern: str) -> bool:
+    # A pattern that already starts with a dot (like ".presse") must not get
+    # a second dot prepended when building the substring needle — naively
+    # doing f".{pattern}" on ".presse" builds the literal "..presse", which
+    # no real hostname ever contains, silently making that pattern
+    # permanently dead. Patterns without a leading dot (e.g. "media.") still
+    # get one prepended so they also match as a subdomain component, not
+    # just as a literal prefix.
+    needle = pattern if pattern.startswith(".") else f".{pattern}"
+    return hostname.startswith(pattern) or needle in hostname
+
+
 async def find_scoop_domain_candidates(pool) -> list[str]:
     async with pool.connection() as conn:
         result = await conn.execute(
@@ -49,7 +61,7 @@ async def find_outbound_link_candidates(pool) -> list[str]:
             hostname = urlsplit(href).netloc.lower()
             if not hostname or hostname in existing_domains:
                 continue
-            if any(hostname.startswith(p) or f".{p}" in hostname for p in OUTBOUND_LINK_PATTERNS):
+            if any(_matches_outbound_pattern(hostname, p) for p in OUTBOUND_LINK_PATTERNS):
                 candidates.add(hostname)
     return sorted(candidates)
 

@@ -63,6 +63,42 @@ async def test_find_outbound_link_candidates_matches_press_patterns(db_pool):
     assert candidates == ["media.acme-motors.com"]
 
 
+async def test_find_outbound_link_candidates_covers_all_four_configured_patterns(db_pool):
+    """Regression test for the OUTBOUND_LINK_PATTERNS[".presse"] double-dot
+    bug: f".{pattern}" on a pattern that already starts with "." built the
+    literal needle "..presse", which no real hostname ever contains, so the
+    ".presse" pattern silently matched nothing. Each of the four configured
+    patterns ("media.", "press.", "newsroom.", ".presse") must be exercised
+    by at least one realistic hostname here so a regression on any one of
+    them fails this test instead of shipping unnoticed.
+    """
+    tier3_id = await _insert_source(db_pool, "carscoops.com", 3, "https://carscoops.com/feed")
+    body = (
+        '<html><body><article>'
+        '<a href="https://media.acme-motors.com/press-release">media prefix</a>'
+        '<a href="https://press.bmw-group.com/global/article">press prefix</a>'
+        '<a href="https://newsroom.bmw.com/en/article">newsroom prefix</a>'
+        '<a href="https://peugeot.presse.fr/communique">presse subdomain</a>'
+        '<a href="https://twitter.com/acme">social, not a match</a>'
+        '</article></body></html>'
+    )
+    async with db_pool.connection() as conn:
+        await conn.execute(
+            "INSERT INTO raw_items (source_id, url, url_hash, title, body) "
+            "VALUES (%s, 'https://carscoops.com/a', 'h1', 't', %s)",
+            (tier3_id, body),
+        )
+
+    candidates = await find_outbound_link_candidates(db_pool)
+
+    assert candidates == [
+        "media.acme-motors.com",
+        "newsroom.bmw.com",
+        "peugeot.presse.fr",
+        "press.bmw-group.com",
+    ]
+
+
 async def test_register_and_validate_candidates_only_keeps_domains_with_a_valid_feed(db_pool):
     with patch(
         "carwatch.discovery.discover_feed_for_domain",
