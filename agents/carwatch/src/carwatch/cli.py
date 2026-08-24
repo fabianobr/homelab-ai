@@ -154,38 +154,88 @@ def stats():
     typer.echo(asyncio.run(_run()))
 
 
+_EMPTY_INGEST_STATS = {"sources_checked": 0, "sources_failed": 0, "items_new": 0, "ms": 0}
+_EMPTY_PREFILTER_STATS = {"in": 0, "out": 0, "pass_rate": 0.0}
+_EMPTY_CLASSIFY_STATS = {"in": 0, "approved": 0, "rejected": 0, "parse_errors": 0}
+_EMPTY_PUBLISH_STATS = {"sent": 0, "item_count": 0}
+
+
 @app.command(name="weekly-run")
 def weekly_run():
     """Single composite pass: ingest -> prefilter -> classify -> publish.
 
     DESIGN.md §1: replaces SPEC.md's APScheduler daemon (`carwatch run`) with one
-    synchronous run per systemd timer trigger. Exits non-zero if the Telegram send
-    failed, so systemd doesn't mask a broken run.
+    synchronous run per systemd timer trigger. Exits non-zero only when there
+    WERE items eligible for notification but none of them got sent -- a quiet
+    week with nothing to notify is not a failure.
+
+    Each stage is isolated in its own try/except: a crash in one stage (e.g. a
+    DB error inside run_classify that Fix 3's per-batch handling doesn't
+    catch, or a bug in run_prefilter) must not prevent the OTHER stages from
+    still attempting to run -- in particular, publish alone can still
+    successfully notify about items approved in a prior week even if this
+    week's classify pass melts down. close_pool() is wrapped in try/finally
+    so the pool is always released, even when every stage above it raised.
     """
 
     async def _run():
         logger = _logger()
         pool = await get_open_pool()
-        settings = get_settings()
-        brands_config = load_brands_config(CONFIG_DIR / "brands.yaml")
-        keywords_config = load_keywords_config(CONFIG_DIR / "keywords.yaml")
+        failed_stages: list[str] = []
+        try:
+            settings = get_settings()
+            brands_config = load_brands_config(CONFIG_DIR / "brands.yaml")
+            keywords_config = load_keywords_config(CONFIG_DIR / "keywords.yaml")
 
-        await run_migrations(pool, MIGRATIONS_DIR)
-        ingest_stats = await run_ingest(pool, logger)
-        prefilter_stats = await run_prefilter(pool, brands_config, keywords_config, logger)
-        classify_stats = await run_classify(pool, logger, limit=200)
-        publish_stats = await run_publish_smoke(
-            pool, settings.telegram_bot_token, settings.telegram_chat_id, logger
-        )
-        await close_pool()
-        return {
-            "ingest": ingest_stats,
-            "prefilter": prefilter_stats,
-            "classify": classify_stats,
-            "publish": publish_stats,
-        }
+            await run_migrations(pool, MIGRATIONS_DIR)
+
+            try:
+                ingest_stats = await run_ingest(pool, logger)
+            except Exception as exc:
+                logger.error("weekly_run.stage_failed", stage="ingest", error=f"{type(exc).__name__}: {exc}")
+                ingest_stats = dict(_EMPTY_INGEST_STATS)
+                failed_stages.append("ingest")
+
+            try:
+                prefilter_stats = await run_prefilter(pool, brands_config, keywords_config, logger)
+            except Exception as exc:
+                logger.error("weekly_run.stage_failed", stage="prefilter", error=f"{type(exc).__name__}: {exc}")
+                prefilter_stats = dict(_EMPTY_PREFILTER_STATS)
+                failed_stages.append("prefilter")
+
+            try:
+                classify_stats = await run_classify(pool, logger, limit=200)
+            except Exception as exc:
+                logger.error("weekly_run.stage_failed", stage="classify", error=f"{type(exc).__name__}: {exc}")
+                classify_stats = dict(_EMPTY_CLASSIFY_STATS)
+                failed_stages.append("classify")
+
+            try:
+                publish_stats = await run_publish_smoke(
+                    pool, settings.telegram_bot_token, settings.telegram_chat_id, logger
+                )
+            except Exception as exc:
+                logger.error("weekly_run.stage_failed", stage="publish", error=f"{type(exc).__name__}: {exc}")
+                publish_stats = dict(_EMPTY_PUBLISH_STATS)
+                failed_stages.append("publish")
+
+            return {
+                "ingest": ingest_stats,
+                "prefilter": prefilter_stats,
+                "classify": classify_stats,
+                "publish": publish_stats,
+                "failed_stages": failed_stages,
+            }
+        finally:
+            await close_pool()
 
     result = asyncio.run(_run())
     typer.echo(result)
-    if not result["publish"]["sent"]:
+    publish_had_unsent_items = result["publish"]["item_count"] > 0 and result["publish"]["sent"] == 0
+    # A quiet week (nothing eligible to notify) is not a failure on its own,
+    # but every single stage raising is a total pipeline meltdown that would
+    # otherwise report a deceptively "clean" {sent: 0, item_count: 0} and
+    # exit 0 -- systemd must be told this run accomplished nothing.
+    total_meltdown = len(result["failed_stages"]) == 4
+    if publish_had_unsent_items or total_meltdown:
         raise typer.Exit(code=1)

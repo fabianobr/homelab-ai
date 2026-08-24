@@ -87,6 +87,48 @@ def test_stats_reports_counts_by_status(db_pool):
 
 
 @respx.mock
+def test_weekly_run_survives_a_raising_stage_and_still_closes_the_pool(db_pool, monkeypatch):
+    """CRITICAL: weekly_run had no exception handling around any pipeline
+    stage, and close_pool() only ran on the happy path. An unhandled
+    exception from any stage used to leak the connection pool (close_pool()
+    skipped entirely) AND abort every later stage, even ones that don't
+    depend on the failing one -- e.g. publish alone could otherwise still
+    successfully notify about items approved in a prior week. Simulate
+    run_ingest raising and confirm: the CLI still exits cleanly (no unhandled
+    traceback), the LATER stages (prefilter onward) still ran, and the pool
+    was closed."""
+    respx.post("https://api.telegram.org/bottest-bot-token/sendMessage").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+
+    from carwatch import db as db_module
+
+    async def raising_ingest(pool, logger):
+        raise RuntimeError("simulated stage crash")
+
+    real_run_prefilter = cli_module.run_prefilter
+    prefilter_calls: list[bool] = []
+
+    async def spying_prefilter(pool, brands, keywords, logger):
+        prefilter_calls.append(True)
+        return await real_run_prefilter(pool, brands, keywords, logger)
+
+    monkeypatch.setattr(cli_module, "run_ingest", raising_ingest)
+    monkeypatch.setattr(cli_module, "run_prefilter", spying_prefilter)
+
+    result = runner.invoke(app, ["weekly-run"])
+
+    assert result.exc_info is None or not isinstance(result.exc_info[1], RuntimeError), (
+        "the stage exception must be caught inside weekly-run, not propagate to the CLI runner"
+    )
+    # Nothing was eligible to notify (empty DB) and not every stage failed,
+    # so this is not a reportable failure.
+    assert result.exit_code == 0, result.output
+    assert prefilter_calls, "the stage after the failing one must still have run"
+    assert db_module._pool is None, "close_pool() must run even when an earlier stage raised"
+
+
+@respx.mock
 def test_seed_sources_wires_fixed_and_google_news_sources_into_db(db_pool):
     """Task 14's seed_fixed_sources/build_google_news_sources/load_fixed_sources
     otherwise have no caller anywhere in the plan; this exercises the `seed-sources`
