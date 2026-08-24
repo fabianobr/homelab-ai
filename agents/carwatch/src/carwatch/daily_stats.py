@@ -19,7 +19,7 @@ async def aggregate_daily_stats(pool, day: date | None = None) -> dict:
 
         result = await conn.execute(
             "SELECT count(*) FILTER (WHERE first_seen_at >= %s AND first_seen_at < %s), "
-            "count(*) FILTER (WHERE published = TRUE AND updated_at >= %s AND updated_at < %s) "
+            "count(*) FILTER (WHERE published = TRUE AND published_at >= %s AND published_at < %s) "
             "FROM launch_events",
             (day_start, day_end, day_start, day_end),
         )

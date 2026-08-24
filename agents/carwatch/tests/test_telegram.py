@@ -1,4 +1,6 @@
 """tests/test_telegram.py"""
+from datetime import datetime, timedelta, timezone
+
 import httpx
 import respx
 
@@ -143,6 +145,39 @@ async def test_get_pending_events_excludes_published_and_low_confidence(db_pool)
     assert events[0]["id"] == pending_id
     assert events[0]["primary_url"] == "https://x.com/a"
     assert events[0]["source_count"] == 1
+
+
+async def test_mark_published_sets_published_at_to_now_not_first_seen_at(db_pool):
+    """Regression test: mark_published() used to only flip `published`,
+    never touching `published_at` (a new column) or `updated_at`. daily_stats
+    counts events_published off published_at, so this must actually be set
+    to "now", distinct from the row's original first_seen_at.
+    """
+    old_first_seen = datetime.now(timezone.utc) - timedelta(days=10)
+    async with db_pool.connection() as conn:
+        result = await conn.execute(
+            "INSERT INTO launch_events (dedupe_key, brand, model, model_slug, stage, "
+            "highlights, confidence, published, first_seen_at) VALUES "
+            "('k1', 'BYD', 'Seal 06', 'seal-06', 'world_premiere', ARRAY['h'], 0.9, FALSE, %s) "
+            "RETURNING id",
+            (old_first_seen,),
+        )
+        event_id = (await result.fetchone())[0]
+
+    before = datetime.now(timezone.utc)
+    await mark_published(db_pool, event_id)
+    after = datetime.now(timezone.utc)
+
+    async with db_pool.connection() as conn:
+        result = await conn.execute(
+            "SELECT published, published_at, first_seen_at FROM launch_events WHERE id = %s", (event_id,)
+        )
+        published, published_at, first_seen_at = await result.fetchone()
+
+    assert published is True
+    assert published_at is not None
+    assert before - timedelta(seconds=5) <= published_at <= after + timedelta(seconds=5)
+    assert published_at != first_seen_at
 
 
 @respx.mock

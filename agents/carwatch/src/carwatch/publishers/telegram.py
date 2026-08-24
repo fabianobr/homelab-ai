@@ -112,7 +112,9 @@ async def get_pending_events(pool) -> list[dict]:
 
 async def mark_published(pool, event_id: int) -> None:
     async with pool.connection() as conn:
-        await conn.execute("UPDATE launch_events SET published = TRUE WHERE id = %s", (event_id,))
+        await conn.execute(
+            "UPDATE launch_events SET published = TRUE, published_at = now() WHERE id = %s", (event_id,)
+        )
 
 
 async def publish_pending_events(pool, bot_token: str, chat_id: str, logger) -> dict:
