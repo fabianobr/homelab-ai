@@ -6,6 +6,13 @@ from xml.sax.saxutils import escape
 ATOM_NS = "http://www.w3.org/2005/Atom"
 
 
+def _escape_attr(value: str) -> str:
+    """escape() only handles &, <, > by default -- it leaves `"` untouched,
+    which is unsafe to place inside a double-quoted XML attribute (e.g.
+    href="..."). Escape the quote too for attribute values specifically."""
+    return escape(value, {'"': "&quot;"})
+
+
 async def get_recent_events_for_feed(pool, limit: int = 100) -> list[dict]:
     async with pool.connection() as conn:
         result = await conn.execute(
@@ -45,7 +52,7 @@ def render_atom_feed(events: list[dict], feed_self_url: str) -> str:
             f"    <id>urn:carwatch:event:{event['id']}</id>\n"
             f"    <title>{escape(title)}</title>\n"
             f"    <updated>{_rfc3339(event['updated_at'])}</updated>\n"
-            f"    <link href=\"{escape(link)}\"/>\n"
+            f"    <link href=\"{_escape_attr(link)}\"/>\n"
             f"    <summary>{escape(summary)}</summary>\n"
             "  </entry>\n"
         )
@@ -56,7 +63,7 @@ def render_atom_feed(events: list[dict], feed_self_url: str) -> str:
         "  <title>CarWatch — Lançamentos Automotivos</title>\n"
         "  <id>urn:carwatch:feed</id>\n"
         f"  <updated>{now}</updated>\n"
-        f'  <link rel="self" href="{escape(feed_self_url)}"/>\n'
+        f'  <link rel="self" href="{_escape_attr(feed_self_url)}"/>\n'
         + "".join(entries)
         + "</feed>\n"
     )

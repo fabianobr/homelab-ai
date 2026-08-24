@@ -45,6 +45,39 @@ def test_render_atom_feed_escapes_special_characters_in_titles():
     assert "M&M Motors" in root.find(f"{ATOM_NS}entry/{ATOM_NS}title").text
 
 
+def test_render_atom_feed_escapes_double_quote_in_href_attributes():
+    """A URL containing a literal `"` (crafted or malformed, sourced from an
+    external feed's <link> with zero validation) must not break out of the
+    double-quoted href="..." attribute. xml.sax.saxutils.escape()'s default
+    entity set does not cover `"`, so this used to inject a bogus extra
+    attribute and corrupt the XML. Round-trip through ElementTree (not
+    string-matching) to prove the quote survives escape+parse intact."""
+    malicious_url = 'https://x.com/a" foo="bar'
+    events = [
+        {
+            "id": 3, "brand": "BYD", "model": "Seal 06", "stage": "teaser",
+            "highlights": [], "updated_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
+            "primary_url": malicious_url,
+        }
+    ]
+    xml_text = render_atom_feed(events, feed_self_url="https://example.com/feed.atom")
+
+    root = ET.fromstring(xml_text)  # raises if the injected attribute broke well-formedness
+    entry = root.findall(f"{ATOM_NS}entry")[0]
+    assert entry.find(f"{ATOM_NS}link").get("href") == malicious_url
+    assert entry.find(f"{ATOM_NS}link").get("foo") is None
+
+
+def test_render_atom_feed_escapes_double_quote_in_feed_self_url():
+    malicious_self_url = 'https://example.com/feed.atom" foo="bar'
+    xml_text = render_atom_feed([], feed_self_url=malicious_self_url)
+
+    root = ET.fromstring(xml_text)  # raises if the injected attribute broke well-formedness
+    self_link = root.find(f"{ATOM_NS}link")
+    assert self_link.get("href") == malicious_self_url
+    assert self_link.get("foo") is None
+
+
 def test_render_atom_feed_handles_zero_events():
     xml_text = render_atom_feed([], feed_self_url="https://example.com/feed.atom")
     root = ET.fromstring(xml_text)
