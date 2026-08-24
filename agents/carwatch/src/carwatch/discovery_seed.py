@@ -116,8 +116,8 @@ async def seed_fixed_sources(pool, fixed_sources: list[dict], logger) -> dict:
 
             async with pool.connection() as conn:
                 await conn.execute(
-                    "INSERT INTO sources (domain, feed_url, kind, tier, status, region, lang) "
-                    "VALUES (%(domain)s, %(feed_url)s, %(kind)s, %(tier)s, 'probation', %(region)s, %(lang)s) "
+                    "INSERT INTO sources (domain, feed_url, kind, tier, status, region, lang, probation_since) "
+                    "VALUES (%(domain)s, %(feed_url)s, %(kind)s, %(tier)s, 'probation', %(region)s, %(lang)s, now()) "
                     "ON CONFLICT (feed_url) DO NOTHING",
                     candidate,
                 )

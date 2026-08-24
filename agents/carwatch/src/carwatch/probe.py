@@ -108,8 +108,8 @@ async def run_probe(pool, brands: BrandsConfig, out_csv: Path, gaps_csv: Path, l
             found += 1
             async with pool.connection() as conn:
                 await conn.execute(
-                    "INSERT INTO sources (domain, feed_url, kind, tier, status, brand_scope) "
-                    "VALUES (%s, %s, 'rss', 1, 'probation', %s) "
+                    "INSERT INTO sources (domain, feed_url, kind, tier, status, brand_scope, probation_since) "
+                    "VALUES (%s, %s, 'rss', 1, 'probation', %s, now()) "
                     "ON CONFLICT (feed_url) DO NOTHING",
                     (brand.press_domain, feed_url, [brand.name]),
                 )
