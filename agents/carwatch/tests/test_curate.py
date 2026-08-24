@@ -163,13 +163,36 @@ async def test_confirm_retirement_applies_the_human_decision(db_pool):
     source_id = await _insert_source(db_pool, _unique=5, status="probation", probation_since=old_probation)
     await apply_transitions(db_pool)
 
-    await confirm_retirement(db_pool, source_id)
+    confirmed = await confirm_retirement(db_pool, source_id)
 
+    assert confirmed is True
     async with db_pool.connection() as conn:
         result = await conn.execute("SELECT status FROM sources WHERE id = %s", (source_id,))
         assert (await result.fetchone())[0] == "retired"
         result = await conn.execute("SELECT count(*) FROM pending_retirements WHERE source_id = %s", (source_id,))
         assert (await result.fetchone())[0] == 0
+
+
+async def test_confirm_retirement_refuses_a_source_never_flagged_for_retirement(db_pool):
+    """SPEC.md §13's ONE human-in-the-loop safety path ("Nada é aposentado
+    sem o OK"): confirm_retirement must refuse to touch a source that was
+    never flagged into pending_retirements, whether it's a real, active
+    source or an id that doesn't exist at all. Regression test for the bug
+    where `UPDATE sources SET status = 'retired' WHERE id = %s` had no
+    membership check and would silently retire an arbitrary source.
+    """
+    active_source_id = await _insert_source(db_pool, _unique=8, status="active")
+
+    confirmed = await confirm_retirement(db_pool, active_source_id)
+
+    assert confirmed is False
+    async with db_pool.connection() as conn:
+        result = await conn.execute("SELECT status FROM sources WHERE id = %s", (active_source_id,))
+        assert (await result.fetchone())[0] == "active"  # unchanged, NOT retired
+
+    # An id that doesn't exist at all must also be refused, not crash.
+    nonexistent_confirmed = await confirm_retirement(db_pool, active_source_id + 999)
+    assert nonexistent_confirmed is False
 
 
 async def test_find_stale_brands_flags_brand_with_no_recent_events(db_pool):

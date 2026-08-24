@@ -150,11 +150,36 @@ def test_help_lists_fase3_commands():
 def test_curate_confirm_retirement_flag(db_pool):
     """`--confirm-retirement <id>` applies one retirement standalone (no full
     metrics/transitions/digest pass, so no Telegram call at all -- this must
-    work with zero network mocking).
+    work with zero network mocking) for a source that was actually flagged
+    into pending_retirements first (a real previously-flagged source, not an
+    empty table -- the old version of this test ran against an empty
+    `sources` table and asserted exit 0, which actively certified the unsafe
+    "any id silently succeeds" behavior instead of catching it).
     """
-    result = runner.invoke(app, ["curate", "--confirm-retirement", "1"])
+    rows = _fetchall(
+        "INSERT INTO sources (domain, feed_url, kind, tier, status) "
+        "VALUES ('flagged.com', 'https://flagged.com/feed', 'rss', 1, 'probation') RETURNING id"
+    )
+    source_id = rows[0][0]
+    _execute("INSERT INTO pending_retirements (source_id) VALUES (%s)", (source_id,))
+
+    result = runner.invoke(app, ["curate", "--confirm-retirement", str(source_id)])
+
     assert result.exit_code == 0
     assert "confirmed_retirement" in result.output
+    assert _fetchall("SELECT status FROM sources WHERE id = %s", (source_id,))[0][0] == "retired"
+
+
+def test_curate_confirm_retirement_flag_rejects_a_source_never_flagged(db_pool):
+    """A mistyped/non-flagged id must exit non-zero and change nothing --
+    regression test for the bug where --confirm-retirement <any id> exited 0
+    and silently retired an arbitrary source (or reported success even
+    against a completely empty `sources` table).
+    """
+    result = runner.invoke(app, ["curate", "--confirm-retirement", "999999"])
+
+    assert result.exit_code != 0
+    assert "not flagged" in result.output.lower()
 
 
 def test_publish_dry_run_counts_pending_events_without_sending(db_pool):

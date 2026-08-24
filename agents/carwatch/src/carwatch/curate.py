@@ -1,4 +1,5 @@
 """src/carwatch/curate.py"""
+import html
 from datetime import datetime, timedelta, timezone
 
 from carwatch.publishers.telegram import send_telegram_message
@@ -143,15 +144,39 @@ async def find_stale_brands(pool, now: datetime | None = None) -> list[str]:
     return sorted(b for b in all_brands if b not in recent_brands)
 
 
-async def confirm_retirement(pool, source_id: int) -> None:
+async def confirm_retirement(pool, source_id: int) -> bool:
+    """Apply a human-confirmed retirement decision -- SPEC.md §13's ONE
+    human-in-the-loop safety path ("Nada é aposentado sem o OK").
+
+    The UPDATE is gated on `source_id` actually being in
+    `pending_retirements`: without this, a mistyped id from the digest
+    message would silently retire an arbitrary source (active or otherwise),
+    with no error and no way to know a mistake happened. Returns False (and
+    leaves the source untouched) when `source_id` was never flagged.
+    """
     async with pool.connection() as conn:
-        await conn.execute("UPDATE sources SET status = 'retired' WHERE id = %s", (source_id,))
-        await conn.execute("DELETE FROM pending_retirements WHERE source_id = %s", (source_id,))
+        result = await conn.execute(
+            "UPDATE sources SET status = 'retired' WHERE id = %s "
+            "AND id IN (SELECT source_id FROM pending_retirements) "
+            "RETURNING id",
+            (source_id,),
+        )
+        confirmed = (await result.fetchone()) is not None
+        if confirmed:
+            await conn.execute("DELETE FROM pending_retirements WHERE source_id = %s", (source_id,))
+    return confirmed
 
 
 async def send_curation_digest(
-    pool, bot_token: str, chat_id: str, transitions: dict, stale_brands: list[str], logger
+    bot_token: str, chat_id: str, transitions: dict, stale_brands: list[str], logger
 ) -> bool:
+    # Dynamic content (source ids, brand names from config) is HTML-escaped
+    # before interpolation, matching the pattern Fase 2 established in
+    # publishers/telegram.py's format_event_message -- this message is also
+    # sent with parse_mode="HTML". Ids are ints so escaping is a no-op for
+    # them today, but brand names are config-sourced free text and this
+    # keeps both consistently escaped rather than relying on today's inputs
+    # never containing '&'/'<'/'>'.
     lines = ["📊 CarWatch — Curadoria semanal", ""]
     lines.append(f"Promovidas: {len(transitions['promoted'])}")
     lines.append(f"Rebaixadas: {len(transitions['demoted'])}")
@@ -160,12 +185,13 @@ async def send_curation_digest(
         f"{len(transitions['retirement_candidates'])}"
     )
     if transitions["retirement_candidates"]:
-        ids = ", ".join(str(i) for i in transitions["retirement_candidates"])
+        ids = ", ".join(html.escape(str(i)) for i in transitions["retirement_candidates"])
         lines.append(f"  IDs: {ids}")
         lines.append("  Confirme com: carwatch curate --confirm-retirement <id>")
     if stale_brands:
         lines.append("")
-        lines.append(f"⚠️ Marcas sem lançamento em {STALE_BRAND_DAYS} dias: " + ", ".join(stale_brands))
+        escaped_brands = ", ".join(html.escape(b) for b in stale_brands)
+        lines.append(f"⚠️ Marcas sem lançamento em {STALE_BRAND_DAYS} dias: " + escaped_brands)
 
     ok = await send_telegram_message(bot_token, chat_id, "\n".join(lines))
     if logger is not None:
@@ -181,5 +207,5 @@ async def run_curate(pool, bot_token: str, chat_id: str, logger, now: datetime |
     await recompute_source_metrics(pool, now)
     transitions = await apply_transitions(pool, now)
     stale_brands = await find_stale_brands(pool, now)
-    digest_sent = await send_curation_digest(pool, bot_token, chat_id, transitions, stale_brands, logger)
+    digest_sent = await send_curation_digest(bot_token, chat_id, transitions, stale_brands, logger)
     return {"transitions": transitions, "stale_brands": stale_brands, "digest_sent": digest_sent}
