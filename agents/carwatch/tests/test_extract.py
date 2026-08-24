@@ -52,6 +52,35 @@ def test_parse_extract_response_rejects_invalid_json():
     assert parse_extract_response("not json") is None
 
 
+def test_parse_extract_response_ignores_trailing_chatter_with_stray_braces():
+    """The old `re.search(r"\\{.*\\}", cleaned, re.DOTALL)` is greedy: it
+    matches from the FIRST `{` to the LAST `}` in the whole cleaned text. A
+    well-formed JSON object followed by trailing LLM chatter that itself
+    contains a `{`/`}` (e.g. "Nota: {sic}") would make the old regex capture
+    through the stray closing brace in "sic}", producing
+    `{...well-formed...} Nota: {sic}` -- not valid JSON, so json.loads()
+    would raise and parse_extract_response would return None even though the
+    real JSON object was perfectly parseable on its own.
+    JSONDecoder().raw_decode() instead parses only the first complete JSON
+    value and ignores everything after it, so this must still succeed.
+    """
+    well_formed = json.dumps(
+        {
+            "brand": "BYD", "model": "Seal 06", "generation": None, "body_type": "sedan",
+            "stage": "world_premiere", "is_new_generation": False, "markets": ["CN"],
+            "global_debut": True, "event_date": "2026-01-15", "sales_start": None,
+            "powertrain": None, "price": None, "highlights": ["Estreia mundial"], "confidence": 0.9,
+        }
+    )
+    raw = well_formed + " Nota: {sic} dados incompletos"
+
+    event = parse_extract_response(raw)
+
+    assert event is not None
+    assert event.brand == "BYD"
+    assert event.model == "Seal 06"
+
+
 def test_parse_extract_response_never_invents_missing_numeric_fields():
     raw = json.dumps(
         {

@@ -96,12 +96,20 @@ def truncate_for_llm(text: str) -> str:
 
 
 def parse_extract_response(raw_text: str) -> ExtractedEvent | None:
+    # A greedy `\{.*\}` regex would match from the FIRST `{` to the LAST `}`
+    # in the whole cleaned text -- if the LLM appends any trailing chatter
+    # after the JSON object that itself contains a stray `{`/`}`, the regex
+    # swallows that too and json.loads() fails on an otherwise well-formed
+    # object. JSONDecoder.raw_decode() instead parses the first complete,
+    # valid JSON value starting at `start` and reports exactly where it
+    # ends, correctly handling this schema's nested objects
+    # (powertrain/price) and simply ignoring whatever text follows.
     cleaned = re.sub(r"```(?:json)?", "", raw_text).replace("```", "").strip()
-    match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-    if not match:
+    start = cleaned.find("{")
+    if start == -1:
         return None
     try:
-        data = json.loads(match.group(0))
+        data, _end = json.JSONDecoder().raw_decode(cleaned, start)
     except json.JSONDecodeError:
         return None
     try:
