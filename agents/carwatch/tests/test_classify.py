@@ -3,6 +3,9 @@ import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import anthropic
+import httpx
+
 from carwatch.llm.classify import BATCH_SIZE, parse_classify_response, run_classify
 from carwatch.models import LaunchStage
 
@@ -118,6 +121,63 @@ async def test_run_classify_keeps_approved_items_as_new_with_classified_payload(
         result = await conn.execute("SELECT status FROM raw_items")
         row = await result.fetchone()
     assert row[0] == "new"
+
+
+async def test_run_classify_skips_already_classified_approved_items(db_pool):
+    """An approved-but-not-yet-notified item is written back by
+    _classify_batch with status still 'new' (only rejected items change
+    status) so that publishers/telegram.py can keep retrying notification.
+    Before this fix, run_classify's SELECT was `status='new' AND
+    prefilter_ok=TRUE` with no check on `classified`, so this exact row
+    would be re-selected and re-sent (re-billed) to the paid API on every
+    subsequent run, forever. Pre-fix, this row matches that WHERE clause and
+    call_classify WOULD be invoked for it -- this test fails against the
+    pre-fix SELECT because `calls` would be non-empty and stats["in"] would
+    be 1."""
+    async with db_pool.connection() as conn:
+        source = await conn.execute(
+            "INSERT INTO sources (domain, feed_url, kind, tier, status) "
+            "VALUES ('example.com', 'https://example.com/feed', 'rss', 1, 'active') RETURNING id"
+        )
+        source_id = (await source.fetchone())[0]
+        already_classified = json.dumps(
+            {"i": 0, "is_launch": True, "stage": "world_premiere", "brand": "BYD", "model": "Seal 06", "confidence": 0.92}
+        )
+        await conn.execute(
+            "INSERT INTO raw_items (source_id, url, url_hash, title, status, prefilter_ok, classified) "
+            "VALUES (%s, 'https://example.com/a', 'hash-a', 'BYD Seal 06 world premiere', 'new', TRUE, %s)",
+            (source_id, already_classified),
+        )
+
+    calls: list[int] = []
+
+    async def fake_call(system_prompt, user_content):
+        calls.append(len(json.loads(user_content)))
+        return _reply([_item(0)])
+
+    with patch("carwatch.llm.classify.call_classify", new=AsyncMock(side_effect=fake_call)):
+        stats = await run_classify(db_pool, logger=None, limit=100)
+
+    assert calls == []
+    assert stats == {"in": 0, "approved": 0, "rejected": 0, "parse_errors": 0}
+
+
+async def test_classify_batch_treats_raised_api_error_like_unparseable_response(db_pool):
+    """CRITICAL: a transient Anthropic SDK exception (rate limit, 5xx,
+    connection drop) raised inside call_classify used to propagate straight
+    out of _classify_batch -> run_classify -> weekly-run's asyncio.run(),
+    crashing the whole process before publish ever ran. It must instead be
+    caught and treated like today's unparseable-response give-up path for a
+    single-item batch: reuse the same split/give-up machinery and count the
+    item as a parse_errors-style outcome rather than raising."""
+    await _insert_items(db_pool, ["BYD Seal 0 premiere"])
+
+    api_error = anthropic.APIConnectionError(request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"))
+
+    with patch("carwatch.llm.classify.call_classify", new=AsyncMock(side_effect=api_error)):
+        stats = await run_classify(db_pool, logger=None, limit=100)
+
+    assert stats == {"in": 1, "approved": 0, "rejected": 0, "parse_errors": 1}
 
 
 async def _call_classify_against_fake_sdk() -> tuple[tuple[str, dict], dict]:

@@ -4,7 +4,7 @@ from urllib.parse import quote, urlencode
 
 import yaml
 
-from carwatch import fetcher
+from carwatch import breaker, fetcher
 from carwatch.models import BrandsConfig
 from carwatch.probe import validate_feed_content
 
@@ -86,6 +86,28 @@ async def seed_fixed_sources(pool, fixed_sources: list[dict], logger) -> dict:
         # One dead candidate domain (DNS failure, refused connection, TLS
         # error) must not abort seeding of every remaining candidate.
         try:
+            # fetcher.fetch() only consults the breaker when a source_id is
+            # passed, and this loop has none (the row may not exist yet) —
+            # so without this check a re-run of `seed-sources` would
+            # unconditionally re-probe a feed_url that already has a
+            # 'blocked' status or a live blocked_until from a prior run,
+            # exactly the "hammer a blocked source" case the breaker exists
+            # to prevent. Look up any existing row by feed_url first.
+            async with pool.connection() as conn:
+                existing = await conn.execute(
+                    "SELECT id FROM sources WHERE feed_url = %s",
+                    (candidate["feed_url"],),
+                )
+                existing_row = await existing.fetchone()
+            if existing_row is not None and await breaker.is_source_paused(
+                pool, existing_row[0]
+            ):
+                if logger is not None:
+                    logger.info(
+                        "discovery_seed.skipped_paused", feed_url=candidate["feed_url"]
+                    )
+                continue
+
             result = await fetcher.fetch(candidate["feed_url"], kind="feed")
             if result.status != 200 or result.blocked or not validate_feed_content(result.body):
                 if logger is not None:

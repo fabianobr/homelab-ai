@@ -209,7 +209,7 @@ def weekly_run():
     regardless of the zeroed publish stats a crash leaves behind) or when it
     ran but sent fewer events than were pending -- a quiet week with zero
     pending events, or a week where every pending event sent, is not a
-    failure. The other stages (ingest/prefilter+classify/extract) failing
+    failure. The other stages (ingest/prefilter/classify/extract) failing
     alone is tolerated: nothing is lost, there's a next run.
     """
 
@@ -238,6 +238,11 @@ def weekly_run():
 
             try:
                 prefilter_stats = await run_prefilter(pool, brands_config, keywords_config, logger)
+            except Exception as exc:
+                failed_stages.append("prefilter")
+                logger.error("weekly_run.stage_failed", stage="prefilter", error=f"{type(exc).__name__}: {exc}")
+
+            try:
                 classify_stats = await run_classify(pool, logger, limit=200)
             except Exception as exc:
                 failed_stages.append("classify")

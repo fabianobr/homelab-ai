@@ -55,7 +55,19 @@ async def ingest_source(pool, source_id: int, feed_url: str, logger) -> dict:
             published_at = None
             if entry.get("published_parsed"):
                 published_at = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
-            if published_at is not None and published_at < cutoff:
+            if published_at is None:
+                # No parseable date means recency can't be verified. Assuming
+                # "fine" here (the old behaviour) let a newly-seeded source
+                # whose feed format doesn't map to feedparser's
+                # published_parsed dump its ENTIRE historical backlog in as
+                # 'new' on first ingest, flooding prefilter/classify with
+                # months or years of irrelevant old articles. Skip
+                # conservatively instead, and log it so a feed producer whose
+                # dates genuinely aren't parsing can see this in logs.
+                if logger is not None:
+                    logger.info("ingest.entry_skipped_no_date", source_id=source_id, link=link)
+                continue
+            if published_at < cutoff:
                 continue
 
             normalized = normalize_url(link)
