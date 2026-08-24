@@ -18,6 +18,7 @@ from carwatch.cost import (
 from carwatch.llm.client import MODEL
 from carwatch.llm.client import call_extract as _call_extract_raw
 from carwatch.models import ExtractedEvent
+from carwatch.publishers.telegram import send_telegram_message
 
 CONFIG_DIR = Path(__file__).resolve().parents[3] / "config"  # src/carwatch/llm/ -> agents/carwatch/config
 
@@ -56,22 +57,14 @@ sales_start, powertrain, price, highlights, confidence. Sem markdown.
 async def call_extract(article_text: str) -> tuple[str, dict]:
     """Thin wrapper over the client's `(text, usage)` contract.
 
-    Logs the cost-observability event here, at the one call site, and then
-    passes `usage` on to the caller (extract_one_item) instead of
-    swallowing it -- Fase 3's cost cap (SPEC.md §18) needs each call's
-    token counts to record into `llm_usage` and compute the running
-    monthly total.
+    Passes `usage` on to the caller (extract_one_item) instead of swallowing
+    it -- Fase 3's cost cap (SPEC.md §18) needs each call's token counts to
+    record into `llm_usage` and compute the running monthly total. The
+    cost-observability `llm.call` log event is emitted by
+    _record_extract_usage below, once cost (usd) has actually been computed,
+    rather than here.
     """
-    text, usage = await _call_extract_raw(SYSTEM_PROMPT, article_text)
-    logger.info(
-        "llm.call",
-        op="extract",
-        model=MODEL,
-        tokens_in=usage.get("tokens_in"),
-        tokens_out=usage.get("tokens_out"),
-        stop_reason=usage.get("stop_reason"),
-    )
-    return text, usage
+    return await _call_extract_raw(SYSTEM_PROMPT, article_text)
 
 
 async def _record_extract_usage(pool, usage: dict) -> None:
@@ -79,6 +72,15 @@ async def _record_extract_usage(pool, usage: dict) -> None:
     cost = compute_cost_usd(
         usage["tokens_in"], usage["tokens_out"],
         input_usd_per_million=input_price, output_usd_per_million=output_price,
+    )
+    logger.info(
+        "llm.call",
+        op="extract",
+        model=MODEL,
+        tokens_in=usage.get("tokens_in"),
+        tokens_out=usage.get("tokens_out"),
+        stop_reason=usage.get("stop_reason"),
+        usd=cost,
     )
     await record_llm_usage(pool, "extract", MODEL, usage["tokens_in"], usage["tokens_out"], cost)
 
@@ -186,10 +188,22 @@ async def extract_one_item(pool, row: tuple, logger) -> str:
     return "extracted"
 
 
-async def run_extract(pool, logger, limit: int = 50) -> dict:
+async def run_extract(pool, logger, bot_token: str, chat_id: str, limit: int = 50) -> dict:
+    """Extract structured launch data from approved raw_items.
+
+    bot_token/chat_id mirror curate.py's run_curate convention (explicit
+    params, not settings read internally) -- SPEC.md §18/§19 require the
+    monthly cost cap to "notifica e pausa": a log line alone only reaches the
+    local systemd journal on this `Type=oneshot` unit, never the operator, so
+    the cap must also send a Telegram message, not just log a warning.
+    """
     if await is_extraction_cost_capped(pool):
         if logger is not None:
             logger.warning("extract.cost_capped", cap_usd=MONTHLY_COST_CAP_USD)
+        await send_telegram_message(
+            bot_token, chat_id,
+            f"⚠️ CarWatch: extração pausada — custo mensal de LLM ultrapassou US${MONTHLY_COST_CAP_USD:.0f}",
+        )
         return {"in": 0, "extracted": 0, "error": 0, "cost_capped": True}
 
     async with pool.connection() as conn:

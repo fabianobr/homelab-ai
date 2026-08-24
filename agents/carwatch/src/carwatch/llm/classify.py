@@ -115,6 +115,11 @@ async def _classify_batch(pool, batch: list[tuple], system_prompt: str, logger) 
                 error=f"{type(exc).__name__}: {exc}",
             )
     else:
+        input_price, output_price = load_llm_pricing(CONFIG_DIR / "settings.yaml", MODEL)
+        cost = compute_cost_usd(
+            usage["tokens_in"], usage["tokens_out"],
+            input_usd_per_million=input_price, output_usd_per_million=output_price,
+        )
         if logger is not None:
             logger.info(
                 "llm.call",
@@ -124,12 +129,8 @@ async def _classify_batch(pool, batch: list[tuple], system_prompt: str, logger) 
                 tokens_in=usage.get("tokens_in"),
                 tokens_out=usage.get("tokens_out"),
                 stop_reason=usage.get("stop_reason"),
+                usd=cost,
             )
-        input_price, output_price = load_llm_pricing(CONFIG_DIR / "settings.yaml", MODEL)
-        cost = compute_cost_usd(
-            usage["tokens_in"], usage["tokens_out"],
-            input_usd_per_million=input_price, output_usd_per_million=output_price,
-        )
         await record_llm_usage(pool, "classify", MODEL, usage["tokens_in"], usage["tokens_out"], cost)
 
         items = parse_classify_response(raw_response, batch_size=len(batch))

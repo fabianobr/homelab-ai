@@ -3,6 +3,9 @@ import json
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+import httpx
+import respx
+
 from carwatch.cost import record_llm_usage
 from carwatch.llm.client import MODEL
 from carwatch.llm.extract import (
@@ -127,7 +130,7 @@ async def test_run_extract_marks_success_as_extracted_and_calls_dedupe(db_pool):
     with patch("carwatch.llm.extract.fetcher.fetch", new=AsyncMock(
         return_value=type("R", (), {"status": 200, "body": "x" * 1000, "blocked": False})()
     )), patch("carwatch.llm.extract.call_extract", new=AsyncMock(return_value=(fake_extracted_json, _USAGE))):
-        stats = await run_extract(db_pool, logger=None, limit=10)
+        stats = await run_extract(db_pool, logger=None, bot_token="test-bot-token", chat_id="test-chat-id", limit=10)
 
     assert stats == {"in": 1, "extracted": 1, "error": 0}
     async with db_pool.connection() as conn:
@@ -155,7 +158,7 @@ async def test_run_extract_marks_unparseable_response_as_error_after_one_retry(d
     with patch("carwatch.llm.extract.fetcher.fetch", new=AsyncMock(
         return_value=type("R", (), {"status": 200, "body": "x" * 1000, "blocked": False})()
     )), patch("carwatch.llm.extract.call_extract", new=AsyncMock(return_value=("not json, ever", _USAGE))):
-        stats = await run_extract(db_pool, logger=None, limit=10)
+        stats = await run_extract(db_pool, logger=None, bot_token="test-bot-token", chat_id="test-chat-id", limit=10)
 
     assert stats == {"in": 1, "extracted": 0, "error": 1}
     async with db_pool.connection() as conn:
@@ -163,6 +166,7 @@ async def test_run_extract_marks_unparseable_response_as_error_after_one_retry(d
         assert (await result.fetchone())[0] == "error"
 
 
+@respx.mock
 async def test_run_extract_short_circuits_when_month_to_date_cost_exceeds_cap(db_pool):
     """SPEC.md §18's headline safety mechanism: once month-to-date extraction
     spend crosses MONTHLY_COST_CAP_USD, run_extract must refuse to run at all
@@ -172,7 +176,16 @@ async def test_run_extract_short_circuits_when_month_to_date_cost_exceeds_cap(db
     assert both the returned stats shape AND that call_extract was never
     invoked -- a regression that only checked the stats dict could still pass
     if the guard were accidentally moved after the first (unbilled) call.
+
+    Also asserts the operator is actually notified over Telegram (SPEC.md
+    §18/§19: "notifica e pausa") -- a plain log line only reaches the local
+    systemd journal on this Type=oneshot unit, never the operator. Before the
+    fix, this route sends no request at all, so a `respx` route mocked but
+    never asserted-called (route.called) would catch the regression.
     """
+    telegram_route = respx.post("https://api.telegram.org/bottest-bot-token/sendMessage").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
     await record_llm_usage(db_pool, "extract", MODEL, 1_000_000, 6_000_000, 31.0)
 
     async with db_pool.connection() as conn:
@@ -190,10 +203,15 @@ async def test_run_extract_short_circuits_when_month_to_date_cost_exceeds_cap(db
 
     call_extract_mock = AsyncMock(side_effect=AssertionError("call_extract must not be invoked while cost-capped"))
     with patch("carwatch.llm.extract.call_extract", new=call_extract_mock):
-        stats = await run_extract(db_pool, logger=None, limit=10)
+        stats = await run_extract(db_pool, logger=None, bot_token="test-bot-token", chat_id="test-chat-id", limit=10)
 
     assert stats == {"in": 0, "extracted": 0, "error": 0, "cost_capped": True}
     assert call_extract_mock.await_count == 0
+
+    assert telegram_route.called
+    sent_text = json.loads(telegram_route.calls[0].request.content)["text"]
+    assert "30" in sent_text
+    assert "custo" in sent_text.lower()
 
 
 async def _insert_approved_item(db_pool, *, title="BYD reveals Seal 06", summary=None) -> tuple[int, int]:
@@ -237,7 +255,7 @@ async def test_run_extract_degraded_short_body_caps_confidence_and_uses_title_su
         # MIN_TEXT_LEN_FOR_FULL_EXTRACT and the degraded path kicks in.
         return_value=type("R", (), {"status": 200, "body": "<html><body>tiny</body></html>", "blocked": False})()
     )), patch("carwatch.llm.extract.call_extract", new=call_extract_mock):
-        stats = await run_extract(db_pool, logger=None, limit=10)
+        stats = await run_extract(db_pool, logger=None, bot_token="test-bot-token", chat_id="test-chat-id", limit=10)
 
     assert stats == {"in": 1, "extracted": 1, "error": 0}
 
@@ -264,7 +282,7 @@ async def test_run_extract_blocked_fetch_degrades_to_title_summary_without_parsi
         # no body to even attempt extract_article_text() on.
         return_value=type("R", (), {"status": 200, "body": None, "blocked": True})()
     )), patch("carwatch.llm.extract.call_extract", new=call_extract_mock):
-        stats = await run_extract(db_pool, logger=None, limit=10)
+        stats = await run_extract(db_pool, logger=None, bot_token="test-bot-token", chat_id="test-chat-id", limit=10)
 
     assert stats == {"in": 1, "extracted": 1, "error": 0}
 
@@ -294,7 +312,7 @@ async def test_run_extract_full_article_path_preserves_confidence_and_uses_artic
     with patch("carwatch.llm.extract.fetcher.fetch", new=AsyncMock(
         return_value=type("R", (), {"status": 200, "body": long_article_html, "blocked": False})()
     )), patch("carwatch.llm.extract.call_extract", new=call_extract_mock):
-        stats = await run_extract(db_pool, logger=None, limit=10)
+        stats = await run_extract(db_pool, logger=None, bot_token="test-bot-token", chat_id="test-chat-id", limit=10)
 
     assert stats == {"in": 1, "extracted": 1, "error": 0}
 
@@ -318,7 +336,7 @@ async def test_run_extract_retries_once_with_error_appended_then_succeeds(db_poo
     with patch("carwatch.llm.extract.fetcher.fetch", new=AsyncMock(
         return_value=type("R", (), {"status": 200, "body": "x" * 1000, "blocked": False})()
     )), patch("carwatch.llm.extract.call_extract", new=call_extract_mock):
-        stats = await run_extract(db_pool, logger=None, limit=10)
+        stats = await run_extract(db_pool, logger=None, bot_token="test-bot-token", chat_id="test-chat-id", limit=10)
 
     assert stats == {"in": 1, "extracted": 1, "error": 0}
     assert call_extract_mock.await_count == 2

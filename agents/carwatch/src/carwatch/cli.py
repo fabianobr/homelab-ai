@@ -146,7 +146,10 @@ def extract(limit: int = typer.Option(50, "--limit")):
     async def _run():
         logger = _logger()
         pool = await get_open_pool()
-        stats = await run_extract(pool, logger, limit=limit)
+        settings = get_settings()
+        stats = await run_extract(
+            pool, logger, settings.telegram_bot_token, settings.telegram_chat_id, limit=limit
+        )
         await close_pool()
         return stats
 
@@ -193,8 +196,10 @@ def curate(confirm_retirement_id: int = typer.Option(None, "--confirm-retirement
     async def _run():
         pool = await get_open_pool()
         if confirm_retirement_id is not None:
-            await confirm_retirement(pool, confirm_retirement_id)
+            confirmed = await confirm_retirement(pool, confirm_retirement_id)
             await close_pool()
+            if not confirmed:
+                return {"confirmed_retirement": None, "reason": "not flagged for retirement"}
             return {"confirmed_retirement": confirm_retirement_id}
         logger = _logger()
         settings = get_settings()
@@ -202,7 +207,10 @@ def curate(confirm_retirement_id: int = typer.Option(None, "--confirm-retirement
         await close_pool()
         return result
 
-    typer.echo(asyncio.run(_run()))
+    result = asyncio.run(_run())
+    typer.echo(result)
+    if confirm_retirement_id is not None and result.get("confirmed_retirement") is None:
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -326,7 +334,9 @@ def weekly_run():
                 logger.error("weekly_run.stage_failed", stage="classify", error=f"{type(exc).__name__}: {exc}")
 
             try:
-                extract_stats = await run_extract(pool, logger, limit=200)
+                extract_stats = await run_extract(
+                    pool, logger, settings.telegram_bot_token, settings.telegram_chat_id, limit=200
+                )
             except Exception as exc:
                 failed_stages.append("extract")
                 logger.error("weekly_run.stage_failed", stage="extract", error=f"{type(exc).__name__}: {exc}")
