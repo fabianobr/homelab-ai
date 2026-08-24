@@ -2,6 +2,7 @@
 import importlib
 import os
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import psycopg
@@ -9,6 +10,7 @@ import respx
 from typer.testing import CliRunner
 
 from carwatch import cli as cli_module
+from carwatch import db as db_module
 from carwatch.cli import app
 
 runner = CliRunner()
@@ -170,3 +172,104 @@ def test_publish_sends_pending_event_and_writes_atom_feed(db_pool, monkeypatch, 
     atom_path = tmp_path / "feed.atom"
     assert atom_path.is_file()
     assert "Seal 06" in atom_path.read_text()
+
+
+def _insert_pending_event(dedupe_key: str, model: str, model_slug: str) -> None:
+    _execute(
+        "INSERT INTO launch_events (dedupe_key, brand, model, model_slug, stage, "
+        "highlights, confidence, published) VALUES "
+        "(%s, 'BYD', %s, %s, 'world_premiere', ARRAY['h'], 0.9, FALSE)",
+        (dedupe_key, model, model_slug),
+    )
+
+
+def test_weekly_run_exits_nonzero_on_partial_telegram_send_failure(db_pool, monkeypatch, tmp_path):
+    """Fix 1: `publish_pending_events` can report `sent < pending` (some but
+    not all pending events sent) without `sent == 0`. The old check
+    (`result["publish"]["pending"] > 0 and result["publish"]["sent"] == 0`)
+    only failed when EVERY pending event failed to send -- a run where 1 of
+    2 events silently failed to notify still exited 0. `send_telegram_message`
+    is patched directly (rather than routed through respx) so the two calls
+    can be given different outcomes deterministically.
+    """
+    monkeypatch.setenv("ATOM_FEED_PATH", str(tmp_path / "feed.atom"))
+    _insert_pending_event("k1", "Seal 06", "seal-06")
+    _insert_pending_event("k2", "Seal 07", "seal-07")
+
+    with patch(
+        "carwatch.publishers.telegram.send_telegram_message",
+        new=AsyncMock(side_effect=[True, False]),
+    ):
+        result = runner.invoke(app, ["weekly-run"])
+
+    assert result.exit_code == 1, result.output
+    assert "'pending': 2" in result.output
+    assert "'sent': 1" in result.output
+
+
+def test_weekly_run_exits_zero_when_all_pending_events_send(db_pool, monkeypatch, tmp_path):
+    """Companion to the partial-failure test above: `sent < pending` must
+    stay False (exit 0) when every pending event sends, confirming Fix 1
+    didn't flip the check into always failing.
+    """
+    monkeypatch.setenv("ATOM_FEED_PATH", str(tmp_path / "feed.atom"))
+    _insert_pending_event("k1", "Seal 06", "seal-06")
+
+    with patch(
+        "carwatch.publishers.telegram.send_telegram_message",
+        new=AsyncMock(return_value=True),
+    ):
+        result = runner.invoke(app, ["weekly-run"])
+
+    assert result.exit_code == 0, result.output
+    assert "'pending': 1" in result.output
+    assert "'sent': 1" in result.output
+
+
+def test_weekly_run_tolerates_a_single_upstream_stage_failure(db_pool, monkeypatch, tmp_path):
+    """Fix 2 (a): ingest/prefilter+classify/extract failing alone must not
+    crash weekly-run, and must not by itself force a non-zero exit -- their
+    work simply doesn't happen this run (nothing pending, so publish itself
+    still reports a clean 0/0 and the run exits 0).
+    """
+    monkeypatch.setenv("ATOM_FEED_PATH", str(tmp_path / "feed.atom"))
+
+    with patch("carwatch.cli.run_ingest", new=AsyncMock(side_effect=RuntimeError("ingest boom"))):
+        result = runner.invoke(app, ["weekly-run"])
+
+    assert result.exit_code == 0, result.output
+    assert "'ingest'" in result.output
+    assert "'sources_checked': 0" in result.output
+
+
+def test_weekly_run_exits_nonzero_when_publish_stage_itself_raises(db_pool, monkeypatch, tmp_path):
+    """Fix 2 (b): if `_publish_and_write_feed` raises outright (as opposed to
+    completing and merely reporting nothing sent), weekly-run must exit
+    non-zero even though the zeroed publish stats fallback
+    (`{"pending": 0, "sent": 0}`) would otherwise read as "nothing pending"
+    (0 < 0 is False) and be mistaken for a clean, quiet week.
+    """
+    monkeypatch.setenv("ATOM_FEED_PATH", str(tmp_path / "feed.atom"))
+
+    with patch(
+        "carwatch.cli._publish_and_write_feed",
+        new=AsyncMock(side_effect=RuntimeError("telegram is down")),
+    ):
+        result = runner.invoke(app, ["weekly-run"])
+
+    assert result.exit_code == 1, result.output
+    assert "'pending': 0" in result.output
+    assert "'sent': 0" in result.output
+
+
+def test_weekly_run_closes_pool_even_when_a_stage_raises(db_pool, monkeypatch, tmp_path):
+    """Fix 2 (c): close_pool() must run in a `finally`, regardless of which
+    stage raised, so the module-level pool is never leaked across the life
+    of the process.
+    """
+    monkeypatch.setenv("ATOM_FEED_PATH", str(tmp_path / "feed.atom"))
+
+    with patch("carwatch.cli.run_extract", new=AsyncMock(side_effect=RuntimeError("extract boom"))):
+        runner.invoke(app, ["weekly-run"])
+
+    assert db_module._pool is None

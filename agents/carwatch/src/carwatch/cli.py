@@ -199,34 +199,75 @@ def weekly_run():
     DESIGN.md §1: replaces SPEC.md's APScheduler daemon (`carwatch run`) with one
     synchronous run per systemd timer trigger. dedupe.py has no separate CLI
     entrypoint -- it's invoked per item inside run_extract (SPEC.md §3
-    architecture diagram: extract -> dedupe -> launch_events). Exits non-zero
-    only when there were pending launch_events and none of them sent -- a quiet
-    week with zero pending events is not a failure.
+    architecture diagram: extract -> dedupe -> launch_events). Each pipeline
+    stage is isolated in its own try/except: one stage crashing must not skip
+    the stages after it (in particular, publish must still get a chance to
+    send launch_events left over from a prior week) and must not skip
+    close_pool() (a pool leaked on every unhandled exception would never be
+    reclaimed for the life of the process). Exits non-zero when publish
+    itself failed to run to completion (`failed_stages` -- this must hold
+    regardless of the zeroed publish stats a crash leaves behind) or when it
+    ran but sent fewer events than were pending -- a quiet week with zero
+    pending events, or a week where every pending event sent, is not a
+    failure. The other stages (ingest/prefilter+classify/extract) failing
+    alone is tolerated: nothing is lost, there's a next run.
     """
 
     async def _run():
         logger = _logger()
         pool = await get_open_pool()
-        settings = get_settings()
-        brands_config = load_brands_config(CONFIG_DIR / "brands.yaml")
-        keywords_config = load_keywords_config(CONFIG_DIR / "keywords.yaml")
+        failed_stages: list[str] = []
+        ingest_stats = {"sources_checked": 0, "sources_failed": 0, "items_new": 0, "ms": 0}
+        prefilter_stats = {"in": 0, "out": 0, "pass_rate": 0.0}
+        classify_stats = {"in": 0, "approved": 0, "rejected": 0, "parse_errors": 0}
+        extract_stats = {"in": 0, "extracted": 0, "error": 0}
+        publish_stats = {"pending": 0, "sent": 0}
 
-        await run_migrations(pool, MIGRATIONS_DIR)
-        ingest_stats = await run_ingest(pool, logger)
-        prefilter_stats = await run_prefilter(pool, brands_config, keywords_config, logger)
-        classify_stats = await run_classify(pool, logger, limit=200)
-        extract_stats = await run_extract(pool, logger, limit=100)
-        publish_stats = await _publish_and_write_feed(pool, settings, logger)
-        await close_pool()
+        try:
+            settings = get_settings()
+            brands_config = load_brands_config(CONFIG_DIR / "brands.yaml")
+            keywords_config = load_keywords_config(CONFIG_DIR / "keywords.yaml")
+
+            await run_migrations(pool, MIGRATIONS_DIR)
+
+            try:
+                ingest_stats = await run_ingest(pool, logger)
+            except Exception as exc:
+                failed_stages.append("ingest")
+                logger.error("weekly_run.stage_failed", stage="ingest", error=f"{type(exc).__name__}: {exc}")
+
+            try:
+                prefilter_stats = await run_prefilter(pool, brands_config, keywords_config, logger)
+                classify_stats = await run_classify(pool, logger, limit=200)
+            except Exception as exc:
+                failed_stages.append("classify")
+                logger.error("weekly_run.stage_failed", stage="classify", error=f"{type(exc).__name__}: {exc}")
+
+            try:
+                extract_stats = await run_extract(pool, logger, limit=200)
+            except Exception as exc:
+                failed_stages.append("extract")
+                logger.error("weekly_run.stage_failed", stage="extract", error=f"{type(exc).__name__}: {exc}")
+
+            try:
+                publish_stats = await _publish_and_write_feed(pool, settings, logger)
+            except Exception as exc:
+                failed_stages.append("publish")
+                logger.error("weekly_run.stage_failed", stage="publish", error=f"{type(exc).__name__}: {exc}")
+        finally:
+            await close_pool()
+
         return {
             "ingest": ingest_stats,
             "prefilter": prefilter_stats,
             "classify": classify_stats,
             "extract": extract_stats,
             "publish": publish_stats,
+            "failed_stages": failed_stages,
         }
 
     result = asyncio.run(_run())
     typer.echo(result)
-    if result["publish"]["pending"] > 0 and result["publish"]["sent"] == 0:
+    publish_crashed = "publish" in result["failed_stages"]
+    if publish_crashed or result["publish"]["sent"] < result["publish"]["pending"]:
         raise typer.Exit(code=1)
