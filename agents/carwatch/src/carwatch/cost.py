@@ -1,10 +1,14 @@
 """src/carwatch/cost.py"""
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 
+import structlog
 import yaml
 
 MONTHLY_COST_CAP_USD = 30.0
+
+logger = structlog.get_logger()
 
 
 def compute_cost_usd(
@@ -17,9 +21,43 @@ def compute_cost_usd(
     )
 
 
-def load_llm_pricing(settings_path: Path, model: str) -> tuple[float, float]:
+@lru_cache(maxsize=None)
+def _load_pricing_table(settings_path: Path) -> dict:
+    """Parse settings.yaml's `llm_pricing` table once per process.
+
+    load_llm_pricing() below is called once per classify batch and up to
+    twice per extract item -- re-reading and re-parsing settings.yaml from
+    disk on every single call is wasted I/O for content that never changes
+    within a process's lifetime. Cached by settings_path so tests pointing at
+    a different file still get correct, independent results.
+    """
     data = yaml.safe_load(settings_path.read_text())
-    pricing = data["llm_pricing"][model]
+    return data.get("llm_pricing", {})
+
+
+def load_llm_pricing(settings_path: Path, model: str) -> tuple[float, float]:
+    """Return (input_usd_per_million, output_usd_per_million) for `model`.
+
+    Falls back to (0.0, 0.0) -- with a loud error log -- instead of raising
+    when `model` has no pricing entry in settings.yaml (e.g. after
+    llm/client.py's MODEL constant is bumped to a new dated snapshot without
+    a matching pricing entry being added). This is called from inside the
+    try/except-protected code paths in llm/classify.py and llm/extract.py
+    that exist specifically so a paid, already-billed API call's results are
+    never discarded just because of a bookkeeping gap -- cost
+    under-reporting (temporarily $0 for one model's calls) is strictly
+    better than losing already-paid-for extraction/classification results.
+    """
+    pricing_table = _load_pricing_table(settings_path)
+    pricing = pricing_table.get(model)
+    if pricing is None:
+        logger.error(
+            "cost.pricing_missing",
+            model=model,
+            settings_path=str(settings_path),
+            impact="cost_under_reported_as_zero_for_this_model",
+        )
+        return 0.0, 0.0
     return pricing["input_usd_per_million"], pricing["output_usd_per_million"]
 
 
