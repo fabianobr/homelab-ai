@@ -72,6 +72,45 @@ async def test_ingest_source_inserts_recent_item_and_skips_old_one(db_pool):
 
 
 @respx.mock
+async def test_ingest_source_skips_entry_with_no_parseable_date(db_pool):
+    """CRITICAL: an entry with no parseable published date used to bypass the
+    45-day backlog cutoff entirely (the `continue` only fired when
+    published_at WAS parseable and too old) and always get inserted -- so a
+    newly-seeded source whose feed omits/mis-formats dates would dump its
+    whole historical backlog in as 'new' on first ingest. A date-less entry
+    must now be skipped conservatively, while a normal dated entry in the
+    same feed still gets inserted."""
+    respx.get("https://example.com/robots.txt").mock(
+        return_value=httpx.Response(200, text="User-agent: *\nAllow: /\n")
+    )
+    now = datetime.now(timezone.utc)
+    recent = now - timedelta(days=5)
+    dated_entry = (
+        "<item><title>Dated launch</title><link>https://example.com/dated</link>"
+        f"<pubDate>{recent.strftime('%a, %d %b %Y %H:%M:%S +0000')}</pubDate></item>"
+    )
+    # No <pubDate> at all, so feedparser never sets published_parsed.
+    dateless_entry = (
+        "<item><title>Dateless launch</title><link>https://example.com/dateless</link></item>"
+    )
+    padding = "x" * 500
+    body = (
+        "<?xml version='1.0'?><rss version='2.0'><channel>"
+        f"<description>{padding}</description>{dated_entry}{dateless_entry}</channel></rss>"
+    )
+    respx.get("https://example.com/feed.xml").mock(return_value=httpx.Response(200, text=body))
+    source_id = await _insert_source(db_pool, "https://example.com/feed.xml")
+
+    stats = await ingest_source(db_pool, source_id, "https://example.com/feed.xml", logger=None)
+
+    assert stats["items_new"] == 1
+    async with db_pool.connection() as conn:
+        result = await conn.execute("SELECT title FROM raw_items")
+        rows = await result.fetchall()
+    assert rows == [("Dated launch",)]
+
+
+@respx.mock
 async def test_ingest_source_is_idempotent_on_second_run(db_pool):
     respx.get("https://example.com/robots.txt").mock(
         return_value=httpx.Response(200, text="User-agent: *\nAllow: /\n")
