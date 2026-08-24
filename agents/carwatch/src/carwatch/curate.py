@@ -32,12 +32,20 @@ async def recompute_source_metrics(pool, now: datetime | None = None) -> int:
             )
             events_30d = (await events_result.fetchone())[0]
 
+            # Uniqueness is a fact about the event's ENTIRE source history, not
+            # about what happens to still be inside the 30-day window — an
+            # event either has one source ever or it doesn't, and that doesn't
+            # change as older rows age out. Mirrors first_seen_30d below:
+            # compute the unrestricted global count per event, then filter the
+            # outer condition (this source's own row) by the window. Filtering
+            # event_sources to the window BEFORE the count(*) = 1 check would
+            # let an echo/republishing source get credited as "unique" once
+            # the original reporting source's row ages out — exactly the
+            # anti-gaming case SPEC.md §13 calls out.
             unique_result = await conn.execute(
-                "SELECT count(*) FROM ("
-                "  SELECT event_id FROM event_sources WHERE seen_at >= %s "
-                "  GROUP BY event_id HAVING count(*) = 1 AND bool_or(source_id = %s)"
-                ") sub",
-                (window_start, source_id),
+                "SELECT count(*) FROM event_sources es WHERE es.source_id = %s AND es.seen_at >= %s "
+                "AND (SELECT count(*) FROM event_sources es2 WHERE es2.event_id = es.event_id) = 1",
+                (source_id, window_start),
             )
             unique_events_30d = (await unique_result.fetchone())[0]
 

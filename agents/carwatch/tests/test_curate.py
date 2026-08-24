@@ -56,6 +56,57 @@ async def test_recompute_source_metrics_computes_yield_pct(db_pool):
     assert row == (1, 1, 1, 100.0)
 
 
+async def test_recompute_source_metrics_does_not_credit_echo_source_as_unique(db_pool):
+    # SPEC.md §13's anti-gaming case: an event has two sources. The ORIGINAL
+    # source's event_sources row is 40 days old (outside the 30-day window).
+    # A second, echoing/republishing source's row is only 5 days old (inside
+    # the window). The echoing source must NOT be credited with
+    # unique_events_30d=1 just because the original source's row aged out of
+    # the window first — uniqueness is a fact about the event's whole source
+    # history, not a windowed snapshot.
+    original_source_id = await _insert_source(db_pool, _unique=101)
+    echo_source_id = await _insert_source(db_pool, _unique=102)
+    now = datetime.now(timezone.utc)
+    async with db_pool.connection() as conn:
+        event = await conn.execute(
+            "INSERT INTO launch_events (dedupe_key, brand, model, model_slug, stage, highlights, confidence) "
+            "VALUES ('k-echo', 'BYD', 'Seal 06', 'seal-06', 'world_premiere', ARRAY['h'], 0.9) RETURNING id"
+        )
+        event_id = (await event.fetchone())[0]
+
+        item1 = await conn.execute(
+            "INSERT INTO raw_items (source_id, url, url_hash, title, prefilter_ok) "
+            "VALUES (%s, 'https://x.com/original', 'h-original', 't', TRUE) RETURNING id",
+            (original_source_id,),
+        )
+        item1_id = (await item1.fetchone())[0]
+        await conn.execute(
+            "INSERT INTO event_sources (event_id, item_id, source_id, is_primary, seen_at) "
+            "VALUES (%s, %s, %s, TRUE, %s)",
+            (event_id, item1_id, original_source_id, now - timedelta(days=40)),
+        )
+
+        item2 = await conn.execute(
+            "INSERT INTO raw_items (source_id, url, url_hash, title, prefilter_ok) "
+            "VALUES (%s, 'https://x.com/echo', 'h-echo', 't', TRUE) RETURNING id",
+            (echo_source_id,),
+        )
+        item2_id = (await item2.fetchone())[0]
+        await conn.execute(
+            "INSERT INTO event_sources (event_id, item_id, source_id, is_primary, seen_at) "
+            "VALUES (%s, %s, %s, FALSE, %s)",
+            (event_id, item2_id, echo_source_id, now - timedelta(days=5)),
+        )
+
+    await recompute_source_metrics(db_pool, now=now)
+
+    async with db_pool.connection() as conn:
+        result = await conn.execute(
+            "SELECT unique_events_30d FROM source_metrics WHERE source_id = %s", (echo_source_id,)
+        )
+        assert (await result.fetchone())[0] == 0
+
+
 async def test_apply_transitions_promotes_high_yield_probation_source(db_pool):
     source_id = await _insert_source(db_pool, _unique=2, status="probation")
     async with db_pool.connection() as conn:
@@ -123,6 +174,12 @@ async def test_confirm_retirement_applies_the_human_decision(db_pool):
 
 async def test_find_stale_brands_flags_brand_with_no_recent_events(db_pool):
     await _insert_source(db_pool, _unique=6, brand_scope=["Toyota"])
+    # BYD must also be a genuine candidate — scoped to a source, so the
+    # recent-event filter actually has something to exclude. Without this,
+    # "BYD" not in stale would be true even against a broken implementation
+    # that returns every brand unconditionally, since BYD would never appear
+    # in the sources.brand_scope candidate set at all.
+    await _insert_source(db_pool, _unique=7, brand_scope=["BYD"])
     async with db_pool.connection() as conn:
         await conn.execute(
             "INSERT INTO launch_events (dedupe_key, brand, model, model_slug, stage, highlights, confidence, first_seen_at) "
