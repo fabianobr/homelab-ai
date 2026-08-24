@@ -129,7 +129,13 @@ def test_weekly_run_end_to_end_ingests_classifies_and_publishes(db_pool, monkeyp
             "stop_reason": "end_turn",
         }
 
-    call_extract_patch = patch("carwatch.llm.extract.call_extract", new=AsyncMock(return_value=fake_extracted_json))
+    # call_extract returns (text, usage) -- Fase 3's cost tracking (cost.py)
+    # needs the usage dict alongside the raw text at this call site.
+    call_extract_usage = {"tokens_in": 200, "tokens_out": 150, "stop_reason": "end_turn"}
+    call_extract_patch = patch(
+        "carwatch.llm.extract.call_extract",
+        new=AsyncMock(return_value=(fake_extracted_json, call_extract_usage)),
+    )
 
     with patch("carwatch.llm.classify.call_classify", new=AsyncMock(side_effect=fake_classify)), call_extract_patch:
         result = runner.invoke(app, ["weekly-run"])

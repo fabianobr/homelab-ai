@@ -12,6 +12,8 @@ from carwatch.llm.extract import (
 
 FIXTURES = Path(__file__).parent / "fixtures" / "articles"
 
+_USAGE = {"tokens_in": 100, "tokens_out": 60, "stop_reason": "end_turn"}
+
 
 def test_extract_article_text_prefers_ld_json_when_present():
     html = (FIXTURES / "ld_json_article.html").read_text()
@@ -122,7 +124,7 @@ async def test_run_extract_marks_success_as_extracted_and_calls_dedupe(db_pool):
 
     with patch("carwatch.llm.extract.fetcher.fetch", new=AsyncMock(
         return_value=type("R", (), {"status": 200, "body": "x" * 1000, "blocked": False})()
-    )), patch("carwatch.llm.extract.call_extract", new=AsyncMock(return_value=fake_extracted_json)):
+    )), patch("carwatch.llm.extract.call_extract", new=AsyncMock(return_value=(fake_extracted_json, _USAGE))):
         stats = await run_extract(db_pool, logger=None, limit=10)
 
     assert stats == {"in": 1, "extracted": 1, "error": 0}
@@ -150,7 +152,7 @@ async def test_run_extract_marks_unparseable_response_as_error_after_one_retry(d
 
     with patch("carwatch.llm.extract.fetcher.fetch", new=AsyncMock(
         return_value=type("R", (), {"status": 200, "body": "x" * 1000, "blocked": False})()
-    )), patch("carwatch.llm.extract.call_extract", new=AsyncMock(return_value="not json, ever")):
+    )), patch("carwatch.llm.extract.call_extract", new=AsyncMock(return_value=("not json, ever", _USAGE))):
         stats = await run_extract(db_pool, logger=None, limit=10)
 
     assert stats == {"in": 1, "extracted": 0, "error": 1}
@@ -176,8 +178,9 @@ async def _insert_approved_item(db_pool, *, title="BYD reveals Seal 06", summary
     return item_id, source_id
 
 
-def _fake_extracted(confidence: float) -> str:
-    return json.dumps(
+def _fake_extracted(confidence: float) -> tuple[str, dict]:
+    """call_extract's (text, usage) contract."""
+    text = json.dumps(
         {
             "brand": "BYD", "model": "Seal 06", "generation": None, "body_type": "sedan",
             "stage": "world_premiere", "is_new_generation": False, "markets": ["CN"],
@@ -186,6 +189,7 @@ def _fake_extracted(confidence: float) -> str:
             "confidence": confidence,
         }
     )
+    return text, _USAGE
 
 
 async def test_run_extract_degraded_short_body_caps_confidence_and_uses_title_summary(db_pool):
@@ -275,7 +279,7 @@ async def test_run_extract_full_article_path_preserves_confidence_and_uses_artic
 async def test_run_extract_retries_once_with_error_appended_then_succeeds(db_pool):
     await _insert_approved_item(db_pool)
 
-    call_extract_mock = AsyncMock(side_effect=["not json at all", _fake_extracted(confidence=0.8)])
+    call_extract_mock = AsyncMock(side_effect=[("not json at all", _USAGE), _fake_extracted(confidence=0.8)])
     with patch("carwatch.llm.extract.fetcher.fetch", new=AsyncMock(
         return_value=type("R", (), {"status": 200, "body": "x" * 1000, "blocked": False})()
     )), patch("carwatch.llm.extract.call_extract", new=call_extract_mock):
