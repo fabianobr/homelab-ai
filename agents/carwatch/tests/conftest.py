@@ -57,8 +57,9 @@ async def db_pool():
     yield pool
     async with pool.connection() as conn:
         await conn.execute(
-            "TRUNCATE raw_items, source_metrics, sources, launch_events, "
-            "event_sources, source_incidents RESTART IDENTITY CASCADE"
+            "TRUNCATE raw_items, source_metrics, sources, launch_events, event_sources, "
+            "source_incidents, pending_retirements, llm_usage, daily_stats "
+            "RESTART IDENTITY CASCADE"
         )
     await pool.close()
 
