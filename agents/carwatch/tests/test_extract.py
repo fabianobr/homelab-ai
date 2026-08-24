@@ -3,6 +3,8 @@ import json
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from carwatch.cost import record_llm_usage
+from carwatch.llm.client import MODEL
 from carwatch.llm.extract import (
     extract_article_text,
     parse_extract_response,
@@ -161,6 +163,39 @@ async def test_run_extract_marks_unparseable_response_as_error_after_one_retry(d
         assert (await result.fetchone())[0] == "error"
 
 
+async def test_run_extract_short_circuits_when_month_to_date_cost_exceeds_cap(db_pool):
+    """SPEC.md §18's headline safety mechanism: once month-to-date extraction
+    spend crosses MONTHLY_COST_CAP_USD, run_extract must refuse to run at all
+    -- not just skip individual items, but never even query for pending rows
+    or call the paid API. Pre-populate llm_usage above the cap directly (the
+    same real db_pool/record_llm_usage path cost.py's own tests use), then
+    assert both the returned stats shape AND that call_extract was never
+    invoked -- a regression that only checked the stats dict could still pass
+    if the guard were accidentally moved after the first (unbilled) call.
+    """
+    await record_llm_usage(db_pool, "extract", MODEL, 1_000_000, 6_000_000, 31.0)
+
+    async with db_pool.connection() as conn:
+        source = await conn.execute(
+            "INSERT INTO sources (domain, feed_url, kind, tier, status) "
+            "VALUES ('x.com', 'https://x.com/feed', 'rss', 1, 'active') RETURNING id"
+        )
+        source_id = (await source.fetchone())[0]
+        classified = json.dumps({"i": 0, "is_launch": True, "stage": "world_premiere", "brand": "BYD", "model": "Seal 06", "confidence": 0.9})
+        await conn.execute(
+            "INSERT INTO raw_items (source_id, url, url_hash, title, status, classified) "
+            "VALUES (%s, 'https://x.com/article', 'hash-1', 'BYD reveals Seal 06', 'new', %s)",
+            (source_id, classified),
+        )
+
+    call_extract_mock = AsyncMock(side_effect=AssertionError("call_extract must not be invoked while cost-capped"))
+    with patch("carwatch.llm.extract.call_extract", new=call_extract_mock):
+        stats = await run_extract(db_pool, logger=None, limit=10)
+
+    assert stats == {"in": 0, "extracted": 0, "error": 0, "cost_capped": True}
+    assert call_extract_mock.await_count == 0
+
+
 async def _insert_approved_item(db_pool, *, title="BYD reveals Seal 06", summary=None) -> tuple[int, int]:
     async with db_pool.connection() as conn:
         source = await conn.execute(
@@ -289,3 +324,10 @@ async def test_run_extract_retries_once_with_error_appended_then_succeeds(db_poo
     assert call_extract_mock.await_count == 2
     retry_text = call_extract_mock.await_args_list[1].args[0]
     assert "não pôde ser validada" in retry_text
+
+    # record_llm_usage is real (not mocked) here, so both the failed initial
+    # attempt and the successful retry must each have recorded their own
+    # llm_usage row -- one row per call_extract invocation, not one per item.
+    async with db_pool.connection() as conn:
+        result = await conn.execute("SELECT count(*) FROM llm_usage WHERE op = 'extract'")
+        assert (await result.fetchone())[0] == 2
