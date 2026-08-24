@@ -256,6 +256,48 @@ async def test_spy_stage_has_no_earlier_stage_to_link_to(db_pool):
         assert (await result.fetchone())[0] is None
 
 
+async def test_merge_raises_confidence_but_never_lowers_it(db_pool):
+    """A degraded first-seen source (e.g. fetch blocked/thin body) caps
+    extract.py's `confidence` at 0.5, which used to stick forever: neither
+    UPDATE branch in `_merge_into_existing` touched `confidence`, so a
+    well-corroborated launch could stay permanently below the 0.7 publish
+    threshold in publishers/telegram.py even after several real tier-1
+    sources confirmed it. confidence must rise on stronger corroboration
+    (GREATEST) but never fall back down when a later, weaker source merges
+    into an already-confident event."""
+    degraded_first = await _make_extracted(confidence=0.5)
+    source_id_a, item_id_a = await _insert_source_and_item(db_pool, tier=3)
+    event_id = await process_extracted_event(
+        db_pool, degraded_first, source_id=source_id_a, raw_item_id=item_id_a, source_tier=3
+    )
+
+    async with db_pool.connection() as conn:
+        result = await conn.execute("SELECT confidence FROM launch_events WHERE id = %s", (event_id,))
+        assert float((await result.fetchone())[0]) == 0.5
+
+    corroborating = await _make_extracted(confidence=0.9)
+    source_id_b, item_id_b = await _insert_source_and_item(db_pool, tier=1)
+    second_id = await process_extracted_event(
+        db_pool, corroborating, source_id=source_id_b, raw_item_id=item_id_b, source_tier=1
+    )
+    assert second_id == event_id
+
+    async with db_pool.connection() as conn:
+        result = await conn.execute("SELECT confidence FROM launch_events WHERE id = %s", (event_id,))
+        assert float((await result.fetchone())[0]) == 0.9  # raised by corroboration
+
+    weaker_later = await _make_extracted(confidence=0.4)
+    source_id_c, item_id_c = await _insert_source_and_item(db_pool, tier=3)
+    third_id = await process_extracted_event(
+        db_pool, weaker_later, source_id=source_id_c, raw_item_id=item_id_c, source_tier=3
+    )
+    assert third_id == event_id
+
+    async with db_pool.connection() as conn:
+        result = await conn.execute("SELECT confidence FROM launch_events WHERE id = %s", (event_id,))
+        assert float((await result.fetchone())[0]) == 0.9  # not dragged back down
+
+
 async def test_stage_progression_creates_new_linked_event(db_pool):
     teaser = await _make_extracted(stage="teaser")
     source_id_a, item_id_a = await _insert_source_and_item(db_pool)

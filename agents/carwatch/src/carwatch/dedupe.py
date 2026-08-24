@@ -201,12 +201,14 @@ async def _merge_into_existing(
                 "is_new_generation = %s, "
                 "event_date = COALESCE(%s, event_date), sales_start = COALESCE(%s, sales_start), "
                 "powertrain = COALESCE(%s, powertrain), price = COALESCE(%s, price), "
+                "confidence = GREATEST(confidence, %s), "
                 "updated_at = now() WHERE id = %s",
                 (
                     extracted.body_type, extracted.generation, extracted.is_new_generation,
                     extracted.event_date, extracted.sales_start,
                     extracted.powertrain.model_dump_json() if extracted.powertrain else None,
                     extracted.price.model_dump_json() if extracted.price else None,
+                    extracted.confidence,
                     event_id,
                 ),
             )
@@ -216,12 +218,14 @@ async def _merge_into_existing(
                 "body_type = COALESCE(body_type, %s), generation = COALESCE(generation, %s), "
                 "event_date = COALESCE(event_date, %s), sales_start = COALESCE(sales_start, %s), "
                 "powertrain = COALESCE(powertrain, %s), price = COALESCE(price, %s), "
+                "confidence = GREATEST(confidence, %s), "
                 "updated_at = now() WHERE id = %s",
                 (
                     extracted.body_type, extracted.generation,
                     extracted.event_date, extracted.sales_start,
                     extracted.powertrain.model_dump_json() if extracted.powertrain else None,
                     extracted.price.model_dump_json() if extracted.price else None,
+                    extracted.confidence,
                     event_id,
                 ),
             )
