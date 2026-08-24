@@ -212,14 +212,27 @@ def test_weekly_run_exits_nonzero_on_partial_telegram_send_failure(db_pool, monk
     2 events silently failed to notify still exited 0. `send_telegram_message`
     is patched directly (rather than routed through respx) so the two calls
     can be given different outcomes deterministically.
+
+    `carwatch.curate` did `from carwatch.publishers.telegram import
+    send_telegram_message` at import time, binding its own separate name to
+    the same function object -- patching
+    `carwatch.publishers.telegram.send_telegram_message` (which controls the
+    PUBLISH stage's send outcome, the thing this test actually cares about)
+    does NOT intercept curate's later digest send, which would otherwise
+    reach the real network with a fake bot token. Patched separately here
+    with a fixed return value since this test has no assertions about
+    curate's own outcome.
     """
     monkeypatch.setenv("ATOM_FEED_PATH", str(tmp_path / "feed.atom"))
     _insert_pending_event("k1", "Seal 06", "seal-06")
     _insert_pending_event("k2", "Seal 07", "seal-07")
 
-    with patch(
-        "carwatch.publishers.telegram.send_telegram_message",
-        new=AsyncMock(side_effect=[True, False]),
+    with (
+        patch(
+            "carwatch.publishers.telegram.send_telegram_message",
+            new=AsyncMock(side_effect=[True, False]),
+        ),
+        patch("carwatch.curate.send_telegram_message", new=AsyncMock(return_value=True)),
     ):
         result = runner.invoke(app, ["weekly-run"])
 
@@ -232,13 +245,20 @@ def test_weekly_run_exits_zero_when_all_pending_events_send(db_pool, monkeypatch
     """Companion to the partial-failure test above: `sent < pending` must
     stay False (exit 0) when every pending event sends, confirming Fix 1
     didn't flip the check into always failing.
+
+    Same reasoning as above for the extra `carwatch.curate.send_telegram_message`
+    patch -- curate's digest send is a separately-bound reference to the same
+    function and isn't reached by patching the publish-stage one.
     """
     monkeypatch.setenv("ATOM_FEED_PATH", str(tmp_path / "feed.atom"))
     _insert_pending_event("k1", "Seal 06", "seal-06")
 
-    with patch(
-        "carwatch.publishers.telegram.send_telegram_message",
-        new=AsyncMock(return_value=True),
+    with (
+        patch(
+            "carwatch.publishers.telegram.send_telegram_message",
+            new=AsyncMock(return_value=True),
+        ),
+        patch("carwatch.curate.send_telegram_message", new=AsyncMock(return_value=True)),
     ):
         result = runner.invoke(app, ["weekly-run"])
 
@@ -247,13 +267,23 @@ def test_weekly_run_exits_zero_when_all_pending_events_send(db_pool, monkeypatch
     assert "'sent': 1" in result.output
 
 
+@respx.mock
 def test_weekly_run_tolerates_a_single_upstream_stage_failure(db_pool, monkeypatch, tmp_path):
     """Fix 2 (a): ingest/prefilter+classify/extract failing alone must not
     crash weekly-run, and must not by itself force a non-zero exit -- their
     work simply doesn't happen this run (nothing pending, so publish itself
     still reports a clean 0/0 and the run exits 0).
+
+    This test doesn't care about Telegram at all, but curate's digest send
+    (added after publish in Fase 3) fires unconditionally on every
+    weekly-run regardless of pending events -- `@respx.mock` + a blanket
+    stub keeps that send off the real network without changing what this
+    test is actually verifying (upstream-stage failure tolerance).
     """
     monkeypatch.setenv("ATOM_FEED_PATH", str(tmp_path / "feed.atom"))
+    respx.post("https://api.telegram.org/bottest-bot-token/sendMessage").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
 
     with patch("carwatch.cli.run_ingest", new=AsyncMock(side_effect=RuntimeError("ingest boom"))):
         result = runner.invoke(app, ["weekly-run"])
@@ -263,14 +293,22 @@ def test_weekly_run_tolerates_a_single_upstream_stage_failure(db_pool, monkeypat
     assert "'sources_checked': 0" in result.output
 
 
+@respx.mock
 def test_weekly_run_exits_nonzero_when_publish_stage_itself_raises(db_pool, monkeypatch, tmp_path):
     """Fix 2 (b): if `_publish_and_write_feed` raises outright (as opposed to
     completing and merely reporting nothing sent), weekly-run must exit
     non-zero even though the zeroed publish stats fallback
     (`{"pending": 0, "sent": 0}`) would otherwise read as "nothing pending"
     (0 < 0 is False) and be mistaken for a clean, quiet week.
+
+    `_publish_and_write_feed` is replaced wholesale here, so publish never
+    reaches Telegram either way -- but curate's digest still runs afterward
+    and fires unconditionally, hence the same blanket respx stub as above.
     """
     monkeypatch.setenv("ATOM_FEED_PATH", str(tmp_path / "feed.atom"))
+    respx.post("https://api.telegram.org/bottest-bot-token/sendMessage").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
 
     with patch(
         "carwatch.cli._publish_and_write_feed",
@@ -283,12 +321,20 @@ def test_weekly_run_exits_nonzero_when_publish_stage_itself_raises(db_pool, monk
     assert "'sent': 0" in result.output
 
 
+@respx.mock
 def test_weekly_run_closes_pool_even_when_a_stage_raises(db_pool, monkeypatch, tmp_path):
     """Fix 2 (c): close_pool() must run in a `finally`, regardless of which
     stage raised, so the module-level pool is never leaked across the life
     of the process.
+
+    No pending events here either, but curate's digest still fires after the
+    (real, unmocked) publish/curate stages run to completion -- same blanket
+    respx stub as the two tests above.
     """
     monkeypatch.setenv("ATOM_FEED_PATH", str(tmp_path / "feed.atom"))
+    respx.post("https://api.telegram.org/bottest-bot-token/sendMessage").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
 
     with patch("carwatch.cli.run_extract", new=AsyncMock(side_effect=RuntimeError("extract boom"))):
         runner.invoke(app, ["weekly-run"])
