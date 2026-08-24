@@ -106,6 +106,10 @@ def test_stats_reports_counts_by_status(db_pool):
     assert result.exit_code == 0
     assert "sources" in result.output
     assert "raw_items" in result.output
+    # Fase 3: stats also reports the last 7 daily_stats rows and the current
+    # month's LLM cost (cost.py's $30/month cap tracking).
+    assert "recent_days" in result.output
+    assert "month_to_date_cost_usd" in result.output
 
 
 @respx.mock
@@ -134,6 +138,23 @@ def test_help_lists_fase2_commands():
     assert result.exit_code == 0
     for command in ("extract", "review"):
         assert command in result.output
+
+
+def test_help_lists_fase3_commands():
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    for command in ("curate", "discover"):
+        assert command in result.output
+
+
+def test_curate_confirm_retirement_flag(db_pool):
+    """`--confirm-retirement <id>` applies one retirement standalone (no full
+    metrics/transitions/digest pass, so no Telegram call at all -- this must
+    work with zero network mocking).
+    """
+    result = runner.invoke(app, ["curate", "--confirm-retirement", "1"])
+    assert result.exit_code == 0
+    assert "confirmed_retirement" in result.output
 
 
 def test_publish_dry_run_counts_pending_events_without_sending(db_pool):
@@ -273,3 +294,53 @@ def test_weekly_run_closes_pool_even_when_a_stage_raises(db_pool, monkeypatch, t
         runner.invoke(app, ["weekly-run"])
 
     assert db_module._pool is None
+
+
+@respx.mock
+def test_weekly_run_succeeds_with_curate_discover_daily_stats_on_an_empty_db(db_pool, monkeypatch, tmp_path):
+    """Fase 3: curate/discover/daily_stats are appended as three more
+    isolated stages after publish. On a fully empty DB (nothing pending to
+    publish, nothing to curate/discover) weekly-run must still exit 0, and
+    the result dict must carry populated 'curate'/'discover'/'daily_stats'
+    keys reflecting each stage's real return shape (run_curate's
+    transitions/stale_brands/digest_sent, run_discovery's
+    scoop_candidates/outbound_candidates/total_registered,
+    aggregate_daily_stats' counters) rather than the pre-Fase-3 zeroed
+    fallbacks.
+    """
+    monkeypatch.setenv("ATOM_FEED_PATH", str(tmp_path / "feed.atom"))
+    respx.post("https://api.telegram.org/bottest-bot-token/sendMessage").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+
+    result = runner.invoke(app, ["weekly-run"])
+
+    assert result.exit_code == 0, result.output
+    assert "'curate'" in result.output
+    assert "'discover'" in result.output
+    assert "'daily_stats'" in result.output
+    assert "'total_registered': 0" in result.output
+    assert "'digest_sent': True" in result.output
+    assert "'failed_stages': []" in result.output
+
+
+def test_weekly_run_tolerates_a_lone_curate_stage_failure(db_pool, monkeypatch, tmp_path):
+    """Companion to test_weekly_run_tolerates_a_single_upstream_stage_failure
+    for the new Fase 3 curate stage: curate crashing outright must not crash
+    weekly-run, must not skip discover/daily_stats or close_pool(), and --
+    like ingest/prefilter/classify/extract -- must not by itself force a
+    non-zero exit. Only publish's own success/failure decides that (nothing
+    pending here, so publish itself reports a clean 0/0 and the run exits 0).
+    Patching run_curate directly also means no Telegram call happens for this
+    test, so no respx mocking is needed.
+    """
+    monkeypatch.setenv("ATOM_FEED_PATH", str(tmp_path / "feed.atom"))
+
+    with patch("carwatch.cli.run_curate", new=AsyncMock(side_effect=RuntimeError("curate boom"))):
+        result = runner.invoke(app, ["weekly-run"])
+
+    assert result.exit_code == 0, result.output
+    assert "'curate'" in result.output
+    assert "'digest_sent': False" in result.output
+    assert "'discover'" in result.output
+    assert "'daily_stats'" in result.output
