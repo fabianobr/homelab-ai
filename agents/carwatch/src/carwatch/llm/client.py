@@ -62,7 +62,12 @@ async def call_extract(system_prompt: str, article_text: str) -> tuple[str, dict
     client = get_anthropic_client()
     response = await client.messages.create(
         model=MODEL,
-        max_tokens=1024,
+        # 1024 was observed truncating (stop_reason="max_tokens") a real
+        # response for an article covering many vehicles; the anchor-context
+        # fix in extract.py's extract_one_item addresses the root cause, but
+        # a taller ceiling costs nothing extra on the normal ~300-500 token
+        # responses (Anthropic bills tokens actually generated, not the cap).
+        max_tokens=1536,
         temperature=0,
         system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
         messages=[{"role": "user", "content": article_text}],

@@ -82,11 +82,29 @@ class Powertrain(BaseModel):
             return _POWERTRAIN_TYPE_ALIASES.get(v.strip().lower(), v)
         return v
 
+    # Observed against the real API: drivetrain="AWD" (uppercase) against a
+    # lowercase-only literal. Case-folding to the schema's own casing is a
+    # mechanical normalization, not a guess at what the model meant.
+    @field_validator("drivetrain", mode="before")
+    @classmethod
+    def _lowercase_drivetrain(cls, v):
+        return v.lower() if isinstance(v, str) else v
+
+    @field_validator("range_cycle", mode="before")
+    @classmethod
+    def _uppercase_range_cycle(cls, v):
+        return v.upper() if isinstance(v, str) else v
+
 
 class Price(BaseModel):
     amount: float | None = None
     currency: str | None = None
     status: Literal["official", "estimated", "starting_from"] | None = None
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def _lowercase_status(cls, v):
+        return v.lower() if isinstance(v, str) else v
 
 
 class ExtractedEvent(BaseModel):

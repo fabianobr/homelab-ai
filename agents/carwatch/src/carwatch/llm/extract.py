@@ -166,7 +166,7 @@ def parse_extract_response(raw_text: str) -> ExtractedEvent | None:
 
 
 async def extract_one_item(pool, row: tuple, logger) -> str:
-    item_id, url, title, summary, source_id, source_tier = row
+    item_id, url, title, summary, source_id, source_tier, classified = row
 
     result = await fetcher.fetch(url, kind="page")
     degraded = result.status != 200 or result.blocked or not result.body
@@ -178,6 +178,22 @@ async def extract_one_item(pool, row: tuple, logger) -> str:
         if len(article_text) < MIN_TEXT_LEN_FOR_FULL_EXTRACT:
             degraded = True
             article_text = f"{title}\n\n{summary or ''}"
+
+    # classify already picked out which vehicle in this article is the
+    # launch (brand/model) -- without this anchor, a roundup/listicle
+    # article (e.g. "every new car coming in 2026") makes the model try to
+    # describe every vehicle it mentions instead of the one that got
+    # approved, blowing the output token budget and producing an answer
+    # that can't validate as a single ExtractedEvent no matter the budget.
+    target_brand = classified.get("brand") if classified else None
+    target_model = classified.get("model") if classified else None
+    if target_brand or target_model:
+        article_text = (
+            f"[Este item foi classificado como sendo especificamente sobre: "
+            f"{target_brand or '?'} {target_model or ''}. Se o artigo cobrir "
+            f"múltiplos veículos, extraia dados APENAS deste, ignorando os "
+            f"demais.]\n\n{article_text}"
+        )
 
     truncated = truncate_for_llm(article_text)
     raw_response, usage = await call_extract(truncated)
@@ -234,7 +250,7 @@ async def run_extract(pool, logger, bot_token: str, chat_id: str, limit: int = 5
 
     async with pool.connection() as conn:
         result = await conn.execute(
-            "SELECT ri.id, ri.url, ri.title, ri.summary, ri.source_id, s.tier "
+            "SELECT ri.id, ri.url, ri.title, ri.summary, ri.source_id, s.tier, ri.classified "
             "FROM raw_items ri JOIN sources s ON s.id = ri.source_id "
             "WHERE ri.status = 'new' AND ri.classified IS NOT NULL "
             "AND ri.classified->>'is_launch' = 'true' LIMIT %s",
