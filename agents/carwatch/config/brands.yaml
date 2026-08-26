@@ -1,0 +1,61 @@
+brands:
+  - name: "Toyota"
+    aliases: []
+    press_domain: "global.toyota"
+  - name: "Volkswagen"
+    aliases: ["VW"]
+    press_domain: "www.volkswagen-media-services.com"
+  - name: "BMW"
+    aliases: []
+    press_domain: "www.press.bmwgroup.com"
+  - name: "Mercedes-Benz"
+    aliases: ["Mercedes", "Daimler"]
+    press_domain: "media.mercedes-benz.com"
+  - name: "Audi"
+    aliases: []
+    press_domain: "www.audi-mediacenter.com"
+  - name: "Porsche"
+    aliases: []
+    press_domain: "newsroom.porsche.com"
+  - name: "Ford"
+    aliases: []
+    press_domain: "media.ford.com"
+  - name: "General Motors"
+    aliases: ["GM", "Chevrolet", "Chevy", "GMC", "Cadillac", "Buick"]
+    press_domain: "media.gm.com"
+  - name: "Stellantis"
+    aliases: ["Jeep", "Ram", "Dodge", "Chrysler", "Peugeot", "Citroen", "Fiat"]
+    press_domain: "media.stellantis.com"
+  - name: "Honda"
+    aliases: []
+    press_domain: "hondanews.com"
+  - name: "Nissan"
+    aliases: []
+    press_domain: "global.nissannews.com"
+  - name: "Hyundai"
+    aliases: []
+    press_domain: "www.hyundainews.com"
+  - name: "Kia"
+    aliases: []
+    press_domain: "www.kiamedia.com"
+  - name: "BYD"
+    aliases: ["比亚迪"]
+    press_domain: null
+  - name: "Volvo Cars"
+    aliases: ["Volvo"]
+    press_domain: "www.media.volvocars.com"
+  - name: "Renault"
+    aliases: []
+    press_domain: "media.renaultgroup.com"
+  - name: "Tesla"
+    aliases: []
+    press_domain: null
+  - name: "Subaru"
+    aliases: []
+    press_domain: "media.subaru.com"
+  - name: "Mazda"
+    aliases: []
+    press_domain: "newsroom.mazda.com"
+  - name: "Jaguar Land Rover"
+    aliases: ["Jaguar", "Land Rover", "JLR"]
+    press_domain: "media.jaguarlandrover.com"

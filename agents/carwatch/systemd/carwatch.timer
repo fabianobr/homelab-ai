@@ -1,0 +1,10 @@
+[Unit]
+Description=Dispara o carwatch toda sábado 09:00 (com catch-up)
+
+[Timer]
+OnCalendar=Sat 09:00
+Persistent=true
+RandomizedDelaySec=2min
+
+[Install]
+WantedBy=timers.target

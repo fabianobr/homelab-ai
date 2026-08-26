@@ -1,0 +1,47 @@
+positive:
+  en: [unveil, unveils, reveal, reveals, debut, debuts, world premiere,
+       all-new, new generation, launches, launched, introduces, introducing,
+       goes on sale, pricing announced, revealed, teaser, teased, facelift,
+       refreshed, order books, deliveries begin]
+  pt: [lançamento, lança, apresenta, revela, estreia, nova geração,
+       chega ao mercado, pré-venda, preços anunciados]
+  zh: [首发, 上市, 亮相, 全新, 官图, 预售, 发布]
+  ja: [新型, 発表, 発売, 世界初公開]
+negative_strong:
+  - recall
+  - quarterly results
+  - earnings
+  - dividend
+  - layoffs
+  - plant closure
+  - lawsuit
+  - appoints
+  - appointment
+  - obituary
+  - sponsorship
+  - esports
+  # SPEC.md §9 lists the bare terms `stock` and `shares` here, meaning
+  # financial-market news. Word-boundary matching (prefilter.py) does not
+  # save them: "now in stock nationwide" and "shares the platform with"
+  # contain the whole word and would veto legitimate launch announcements.
+  # Fase 1 final review replaced them with the financial phrasings they were
+  # actually aiming at — a deliberate, documented deviation from the literal
+  # spec list.
+  - stock price
+  - stock market
+  - stock plunges
+  - stock falls
+  - stock jumps
+  - stock surges
+  - share price
+  - shareholders
+  - shares fall
+  - shares rise
+  - shares plunge
+  - merger talks
+  - union
+  - strike
+  - dealer award
+  - sales figures
+  - monthly sales
+  - market share

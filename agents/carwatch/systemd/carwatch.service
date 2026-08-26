@@ -1,0 +1,9 @@
+[Unit]
+Description=CarWatch weekly run (lançamentos automotivos)
+
+[Service]
+Type=oneshot
+ExecStartPre=/bin/sleep 30
+ExecStart=%h/homelab-ai/agents/carwatch/run.sh
+WorkingDirectory=%h/homelab-ai/agents/carwatch
+TimeoutStartSec=20min

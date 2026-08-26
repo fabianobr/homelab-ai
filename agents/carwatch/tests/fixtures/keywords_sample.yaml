@@ -1,0 +1,6 @@
+positive:
+  en: [unveil, reveal, debut]
+  pt: [lançamento, revela]
+negative_strong:
+  - recall
+  - earnings
