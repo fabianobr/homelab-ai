@@ -70,16 +70,20 @@ async def _try_link_rel_discovery(press_domain: str) -> str | None:
 # validator), not just re-wiring the old function.
 
 
+async def discover_feed_for_domain(domain: str) -> str | None:
+    for strategy in (_try_candidate_paths, _try_link_rel_discovery):
+        feed_url = await strategy(domain)
+        if feed_url:
+            return feed_url
+    return None
+
+
 async def probe_brand(brand: BrandEntry) -> tuple[str | None, str]:
     if not brand.press_domain:
         return None, "no_press_domain"
 
-    for strategy in (_try_candidate_paths, _try_link_rel_discovery):
-        feed_url = await strategy(brand.press_domain)
-        if feed_url:
-            return feed_url, "ok"
-
-    return None, "no_feed_found"
+    feed_url = await discover_feed_for_domain(brand.press_domain)
+    return (feed_url, "ok") if feed_url else (None, "no_feed_found")
 
 
 async def run_probe(pool, brands: BrandsConfig, out_csv: Path, gaps_csv: Path, logger) -> dict:
@@ -108,8 +112,8 @@ async def run_probe(pool, brands: BrandsConfig, out_csv: Path, gaps_csv: Path, l
             found += 1
             async with pool.connection() as conn:
                 await conn.execute(
-                    "INSERT INTO sources (domain, feed_url, kind, tier, status, brand_scope) "
-                    "VALUES (%s, %s, 'rss', 1, 'probation', %s) "
+                    "INSERT INTO sources (domain, feed_url, kind, tier, status, brand_scope, probation_since) "
+                    "VALUES (%s, %s, 'rss', 1, 'probation', %s, now()) "
                     "ON CONFLICT (feed_url) DO NOTHING",
                     (brand.press_domain, feed_url, [brand.name]),
                 )

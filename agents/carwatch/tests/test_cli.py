@@ -106,6 +106,10 @@ def test_stats_reports_counts_by_status(db_pool):
     assert result.exit_code == 0
     assert "sources" in result.output
     assert "raw_items" in result.output
+    # Fase 3: stats also reports the last 7 daily_stats rows and the current
+    # month's LLM cost (cost.py's $30/month cap tracking).
+    assert "recent_days" in result.output
+    assert "month_to_date_cost_usd" in result.output
 
 
 @respx.mock
@@ -134,6 +138,48 @@ def test_help_lists_fase2_commands():
     assert result.exit_code == 0
     for command in ("extract", "review"):
         assert command in result.output
+
+
+def test_help_lists_fase3_commands():
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    for command in ("curate", "discover"):
+        assert command in result.output
+
+
+def test_curate_confirm_retirement_flag(db_pool):
+    """`--confirm-retirement <id>` applies one retirement standalone (no full
+    metrics/transitions/digest pass, so no Telegram call at all -- this must
+    work with zero network mocking) for a source that was actually flagged
+    into pending_retirements first (a real previously-flagged source, not an
+    empty table -- the old version of this test ran against an empty
+    `sources` table and asserted exit 0, which actively certified the unsafe
+    "any id silently succeeds" behavior instead of catching it).
+    """
+    rows = _fetchall(
+        "INSERT INTO sources (domain, feed_url, kind, tier, status) "
+        "VALUES ('flagged.com', 'https://flagged.com/feed', 'rss', 1, 'probation') RETURNING id"
+    )
+    source_id = rows[0][0]
+    _execute("INSERT INTO pending_retirements (source_id) VALUES (%s)", (source_id,))
+
+    result = runner.invoke(app, ["curate", "--confirm-retirement", str(source_id)])
+
+    assert result.exit_code == 0
+    assert "confirmed_retirement" in result.output
+    assert _fetchall("SELECT status FROM sources WHERE id = %s", (source_id,))[0][0] == "retired"
+
+
+def test_curate_confirm_retirement_flag_rejects_a_source_never_flagged(db_pool):
+    """A mistyped/non-flagged id must exit non-zero and change nothing --
+    regression test for the bug where --confirm-retirement <any id> exited 0
+    and silently retired an arbitrary source (or reported success even
+    against a completely empty `sources` table).
+    """
+    result = runner.invoke(app, ["curate", "--confirm-retirement", "999999"])
+
+    assert result.exit_code != 0
+    assert "not flagged" in result.output.lower()
 
 
 def test_publish_dry_run_counts_pending_events_without_sending(db_pool):
@@ -191,14 +237,27 @@ def test_weekly_run_exits_nonzero_on_partial_telegram_send_failure(db_pool, monk
     2 events silently failed to notify still exited 0. `send_telegram_message`
     is patched directly (rather than routed through respx) so the two calls
     can be given different outcomes deterministically.
+
+    `carwatch.curate` did `from carwatch.publishers.telegram import
+    send_telegram_message` at import time, binding its own separate name to
+    the same function object -- patching
+    `carwatch.publishers.telegram.send_telegram_message` (which controls the
+    PUBLISH stage's send outcome, the thing this test actually cares about)
+    does NOT intercept curate's later digest send, which would otherwise
+    reach the real network with a fake bot token. Patched separately here
+    with a fixed return value since this test has no assertions about
+    curate's own outcome.
     """
     monkeypatch.setenv("ATOM_FEED_PATH", str(tmp_path / "feed.atom"))
     _insert_pending_event("k1", "Seal 06", "seal-06")
     _insert_pending_event("k2", "Seal 07", "seal-07")
 
-    with patch(
-        "carwatch.publishers.telegram.send_telegram_message",
-        new=AsyncMock(side_effect=[True, False]),
+    with (
+        patch(
+            "carwatch.publishers.telegram.send_telegram_message",
+            new=AsyncMock(side_effect=[True, False]),
+        ),
+        patch("carwatch.curate.send_telegram_message", new=AsyncMock(return_value=True)),
     ):
         result = runner.invoke(app, ["weekly-run"])
 
@@ -211,13 +270,20 @@ def test_weekly_run_exits_zero_when_all_pending_events_send(db_pool, monkeypatch
     """Companion to the partial-failure test above: `sent < pending` must
     stay False (exit 0) when every pending event sends, confirming Fix 1
     didn't flip the check into always failing.
+
+    Same reasoning as above for the extra `carwatch.curate.send_telegram_message`
+    patch -- curate's digest send is a separately-bound reference to the same
+    function and isn't reached by patching the publish-stage one.
     """
     monkeypatch.setenv("ATOM_FEED_PATH", str(tmp_path / "feed.atom"))
     _insert_pending_event("k1", "Seal 06", "seal-06")
 
-    with patch(
-        "carwatch.publishers.telegram.send_telegram_message",
-        new=AsyncMock(return_value=True),
+    with (
+        patch(
+            "carwatch.publishers.telegram.send_telegram_message",
+            new=AsyncMock(return_value=True),
+        ),
+        patch("carwatch.curate.send_telegram_message", new=AsyncMock(return_value=True)),
     ):
         result = runner.invoke(app, ["weekly-run"])
 
@@ -226,13 +292,23 @@ def test_weekly_run_exits_zero_when_all_pending_events_send(db_pool, monkeypatch
     assert "'sent': 1" in result.output
 
 
+@respx.mock
 def test_weekly_run_tolerates_a_single_upstream_stage_failure(db_pool, monkeypatch, tmp_path):
     """Fix 2 (a): ingest/prefilter+classify/extract failing alone must not
     crash weekly-run, and must not by itself force a non-zero exit -- their
     work simply doesn't happen this run (nothing pending, so publish itself
     still reports a clean 0/0 and the run exits 0).
+
+    This test doesn't care about Telegram at all, but curate's digest send
+    (added after publish in Fase 3) fires unconditionally on every
+    weekly-run regardless of pending events -- `@respx.mock` + a blanket
+    stub keeps that send off the real network without changing what this
+    test is actually verifying (upstream-stage failure tolerance).
     """
     monkeypatch.setenv("ATOM_FEED_PATH", str(tmp_path / "feed.atom"))
+    respx.post("https://api.telegram.org/bottest-bot-token/sendMessage").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
 
     with patch("carwatch.cli.run_ingest", new=AsyncMock(side_effect=RuntimeError("ingest boom"))):
         result = runner.invoke(app, ["weekly-run"])
@@ -242,14 +318,22 @@ def test_weekly_run_tolerates_a_single_upstream_stage_failure(db_pool, monkeypat
     assert "'sources_checked': 0" in result.output
 
 
+@respx.mock
 def test_weekly_run_exits_nonzero_when_publish_stage_itself_raises(db_pool, monkeypatch, tmp_path):
     """Fix 2 (b): if `_publish_and_write_feed` raises outright (as opposed to
     completing and merely reporting nothing sent), weekly-run must exit
     non-zero even though the zeroed publish stats fallback
     (`{"pending": 0, "sent": 0}`) would otherwise read as "nothing pending"
     (0 < 0 is False) and be mistaken for a clean, quiet week.
+
+    `_publish_and_write_feed` is replaced wholesale here, so publish never
+    reaches Telegram either way -- but curate's digest still runs afterward
+    and fires unconditionally, hence the same blanket respx stub as above.
     """
     monkeypatch.setenv("ATOM_FEED_PATH", str(tmp_path / "feed.atom"))
+    respx.post("https://api.telegram.org/bottest-bot-token/sendMessage").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
 
     with patch(
         "carwatch.cli._publish_and_write_feed",
@@ -262,14 +346,72 @@ def test_weekly_run_exits_nonzero_when_publish_stage_itself_raises(db_pool, monk
     assert "'sent': 0" in result.output
 
 
+@respx.mock
 def test_weekly_run_closes_pool_even_when_a_stage_raises(db_pool, monkeypatch, tmp_path):
     """Fix 2 (c): close_pool() must run in a `finally`, regardless of which
     stage raised, so the module-level pool is never leaked across the life
     of the process.
+
+    No pending events here either, but curate's digest still fires after the
+    (real, unmocked) publish/curate stages run to completion -- same blanket
+    respx stub as the two tests above.
     """
     monkeypatch.setenv("ATOM_FEED_PATH", str(tmp_path / "feed.atom"))
+    respx.post("https://api.telegram.org/bottest-bot-token/sendMessage").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
 
     with patch("carwatch.cli.run_extract", new=AsyncMock(side_effect=RuntimeError("extract boom"))):
         runner.invoke(app, ["weekly-run"])
 
     assert db_module._pool is None
+
+
+@respx.mock
+def test_weekly_run_succeeds_with_curate_discover_daily_stats_on_an_empty_db(db_pool, monkeypatch, tmp_path):
+    """Fase 3: curate/discover/daily_stats are appended as three more
+    isolated stages after publish. On a fully empty DB (nothing pending to
+    publish, nothing to curate/discover) weekly-run must still exit 0, and
+    the result dict must carry populated 'curate'/'discover'/'daily_stats'
+    keys reflecting each stage's real return shape (run_curate's
+    transitions/stale_brands/digest_sent, run_discovery's
+    scoop_candidates/outbound_candidates/total_registered,
+    aggregate_daily_stats' counters) rather than the pre-Fase-3 zeroed
+    fallbacks.
+    """
+    monkeypatch.setenv("ATOM_FEED_PATH", str(tmp_path / "feed.atom"))
+    respx.post("https://api.telegram.org/bottest-bot-token/sendMessage").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+
+    result = runner.invoke(app, ["weekly-run"])
+
+    assert result.exit_code == 0, result.output
+    assert "'curate'" in result.output
+    assert "'discover'" in result.output
+    assert "'daily_stats'" in result.output
+    assert "'total_registered': 0" in result.output
+    assert "'digest_sent': True" in result.output
+    assert "'failed_stages': []" in result.output
+
+
+def test_weekly_run_tolerates_a_lone_curate_stage_failure(db_pool, monkeypatch, tmp_path):
+    """Companion to test_weekly_run_tolerates_a_single_upstream_stage_failure
+    for the new Fase 3 curate stage: curate crashing outright must not crash
+    weekly-run, must not skip discover/daily_stats or close_pool(), and --
+    like ingest/prefilter/classify/extract -- must not by itself force a
+    non-zero exit. Only publish's own success/failure decides that (nothing
+    pending here, so publish itself reports a clean 0/0 and the run exits 0).
+    Patching run_curate directly also means no Telegram call happens for this
+    test, so no respx mocking is needed.
+    """
+    monkeypatch.setenv("ATOM_FEED_PATH", str(tmp_path / "feed.atom"))
+
+    with patch("carwatch.cli.run_curate", new=AsyncMock(side_effect=RuntimeError("curate boom"))):
+        result = runner.invoke(app, ["weekly-run"])
+
+    assert result.exit_code == 0, result.output
+    assert "'curate'" in result.output
+    assert "'digest_sent': False" in result.output
+    assert "'discover'" in result.output
+    assert "'daily_stats'" in result.output

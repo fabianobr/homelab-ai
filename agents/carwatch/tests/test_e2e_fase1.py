@@ -129,7 +129,13 @@ def test_weekly_run_end_to_end_ingests_classifies_and_publishes(db_pool, monkeyp
             "stop_reason": "end_turn",
         }
 
-    call_extract_patch = patch("carwatch.llm.extract.call_extract", new=AsyncMock(return_value=fake_extracted_json))
+    # call_extract returns (text, usage) -- Fase 3's cost tracking (cost.py)
+    # needs the usage dict alongside the raw text at this call site.
+    call_extract_usage = {"tokens_in": 200, "tokens_out": 150, "stop_reason": "end_turn"}
+    call_extract_patch = patch(
+        "carwatch.llm.extract.call_extract",
+        new=AsyncMock(return_value=(fake_extracted_json, call_extract_usage)),
+    )
 
     with patch("carwatch.llm.classify.call_classify", new=AsyncMock(side_effect=fake_classify)), call_extract_patch:
         result = runner.invoke(app, ["weekly-run"])
@@ -150,9 +156,12 @@ def test_weekly_run_end_to_end_ingests_classifies_and_publishes(db_pool, monkeyp
     launch_events = _fetchall("SELECT brand, model, published FROM launch_events")
     assert launch_events == [("BYD", "Seal 06", True)]
 
-    # publish sent the one pending event over Telegram.
+    # publish sent the one pending event over Telegram. Fase 3's curate stage
+    # (now part of weekly-run, after publish) unconditionally sends its own
+    # curation digest message too, so this is 1 (publish) + 1 (curate
+    # digest), not just the publish send.
     telegram_calls = [c for c in respx.calls if "sendMessage" in str(c.request.url)]
-    assert len(telegram_calls) == 1
+    assert len(telegram_calls) == 2
 
     atom_path = tmp_path / "feed.atom"
     assert atom_path.is_file()
@@ -170,5 +179,7 @@ def test_weekly_run_end_to_end_ingests_classifies_and_publishes(db_pool, monkeyp
     assert second_result.exit_code == 0, second_result.output
     count = _fetchall("SELECT count(*) FROM raw_items")[0][0]
     assert count == 2  # no duplicates inserted on the second run
+    # No new publish send (nothing pending), but the second run's curate
+    # stage still sends its own digest -- one more than the first run's total.
     telegram_calls_after_second_run = [c for c in respx.calls if "sendMessage" in str(c.request.url)]
-    assert len(telegram_calls_after_second_run) == 1  # nothing new sent
+    assert len(telegram_calls_after_second_run) == 3

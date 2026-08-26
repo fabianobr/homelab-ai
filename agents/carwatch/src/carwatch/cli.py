@@ -6,7 +6,11 @@ from pathlib import Path
 import typer
 import yaml
 
+from carwatch.cost import month_to_date_cost_usd
+from carwatch.curate import confirm_retirement, run_curate
+from carwatch.daily_stats import aggregate_daily_stats
 from carwatch.db import close_pool, get_open_pool, run_migrations
+from carwatch.discovery import run_discovery
 from carwatch.discovery_seed import build_google_news_sources, load_fixed_sources, seed_fixed_sources
 from carwatch.ingest import run_ingest
 from carwatch.llm.classify import run_classify
@@ -142,7 +146,10 @@ def extract(limit: int = typer.Option(50, "--limit")):
     async def _run():
         logger = _logger()
         pool = await get_open_pool()
-        stats = await run_extract(pool, logger, limit=limit)
+        settings = get_settings()
+        stats = await run_extract(
+            pool, logger, settings.telegram_bot_token, settings.telegram_chat_id, limit=limit
+        )
         await close_pool()
         return stats
 
@@ -178,6 +185,51 @@ def publish(dry_run: bool = typer.Option(False, "--dry-run")):
 
 
 @app.command()
+def curate(confirm_retirement_id: int = typer.Option(None, "--confirm-retirement")):
+    """Full source-curation pass (metrics + promote/demote/retire + digest), or,
+    with --confirm-retirement <id>, apply a single previously-flagged
+    retirement instead of running the full pass -- mirrors weekly-run's
+    isolated-stage pattern (own get_open_pool()/close_pool() lifecycle) so it
+    can also be invoked standalone between weekly-run cycles.
+    """
+
+    async def _run():
+        pool = await get_open_pool()
+        if confirm_retirement_id is not None:
+            confirmed = await confirm_retirement(pool, confirm_retirement_id)
+            await close_pool()
+            if not confirmed:
+                return {"confirmed_retirement": None, "reason": "not flagged for retirement"}
+            return {"confirmed_retirement": confirm_retirement_id}
+        logger = _logger()
+        settings = get_settings()
+        result = await run_curate(pool, settings.telegram_bot_token, settings.telegram_chat_id, logger)
+        await close_pool()
+        return result
+
+    result = asyncio.run(_run())
+    typer.echo(result)
+    if confirm_retirement_id is not None and result.get("confirmed_retirement") is None:
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def discover():
+    """Standalone continuous source-discovery pass (scoop + outbound-link
+    candidates), also run as a weekly-run stage.
+    """
+
+    async def _run():
+        logger = _logger()
+        pool = await get_open_pool()
+        stats = await run_discovery(pool, logger)
+        await close_pool()
+        return stats
+
+    typer.echo(asyncio.run(_run()))
+
+
+@app.command()
 def stats():
     async def _run():
         pool = await get_open_pool()
@@ -186,15 +238,27 @@ def stats():
             sources_by_status = dict(await result.fetchall())
             result = await conn.execute("SELECT status, count(*) FROM raw_items GROUP BY status")
             items_by_status = dict(await result.fetchall())
+            result = await conn.execute(
+                "SELECT day, items_ingested, events_created, llm_cost_usd "
+                "FROM daily_stats ORDER BY day DESC LIMIT 7"
+            )
+            recent_days = await result.fetchall()
+        month_cost = await month_to_date_cost_usd(pool)
         await close_pool()
-        return {"sources": sources_by_status, "raw_items": items_by_status}
+        return {
+            "sources": sources_by_status,
+            "raw_items": items_by_status,
+            "recent_days": recent_days,
+            "month_to_date_cost_usd": month_cost,
+        }
 
     typer.echo(asyncio.run(_run()))
 
 
 @app.command(name="weekly-run")
 def weekly_run():
-    """Single composite pass: ingest -> prefilter -> classify -> extract -> publish (+ atom).
+    """Single composite pass: ingest -> prefilter -> classify -> extract ->
+    publish -> curate -> discover -> daily_stats.
 
     DESIGN.md §1: replaces SPEC.md's APScheduler daemon (`carwatch run`) with one
     synchronous run per systemd timer trigger. dedupe.py has no separate CLI
@@ -210,7 +274,12 @@ def weekly_run():
     ran but sent fewer events than were pending -- a quiet week with zero
     pending events, or a week where every pending event sent, is not a
     failure. The other stages (ingest/prefilter/classify/extract) failing
-    alone is tolerated: nothing is lost, there's a next run.
+    alone is tolerated: nothing is lost, there's a next run. Fase 3 adds
+    curate (source metrics + promote/demote/retirement-flagging + digest),
+    discover (continuous source discovery), and daily_stats (aggregation)
+    after publish, at the same tolerance level -- none of the three failing
+    alone forces a non-zero exit; only publish's own success/failure decides
+    that, unchanged from Fase 1/2.
     """
 
     async def _run():
@@ -222,6 +291,22 @@ def weekly_run():
         classify_stats = {"in": 0, "approved": 0, "rejected": 0, "parse_errors": 0}
         extract_stats = {"in": 0, "extracted": 0, "error": 0}
         publish_stats = {"pending": 0, "sent": 0}
+        curate_stats = {
+            "transitions": {"promoted": [], "demoted": [], "retirement_candidates": []},
+            "stale_brands": [],
+            "digest_sent": False,
+        }
+        discover_stats = {
+            "scoop_candidates": {"attempted": 0, "registered": 0},
+            "outbound_candidates": {"attempted": 0, "registered": 0},
+            "total_registered": 0,
+        }
+        daily_stats = {
+            "items_ingested": 0, "items_approved": 0, "items_extracted": 0,
+            "events_created": 0, "events_published": 0, "llm_calls": 0,
+            "llm_tokens_in": 0, "llm_tokens_out": 0, "llm_cost_usd": 0.0,
+            "sources_active": 0, "sources_blocked": 0,
+        }
 
         try:
             settings = get_settings()
@@ -249,7 +334,9 @@ def weekly_run():
                 logger.error("weekly_run.stage_failed", stage="classify", error=f"{type(exc).__name__}: {exc}")
 
             try:
-                extract_stats = await run_extract(pool, logger, limit=200)
+                extract_stats = await run_extract(
+                    pool, logger, settings.telegram_bot_token, settings.telegram_chat_id, limit=200
+                )
             except Exception as exc:
                 failed_stages.append("extract")
                 logger.error("weekly_run.stage_failed", stage="extract", error=f"{type(exc).__name__}: {exc}")
@@ -259,6 +346,26 @@ def weekly_run():
             except Exception as exc:
                 failed_stages.append("publish")
                 logger.error("weekly_run.stage_failed", stage="publish", error=f"{type(exc).__name__}: {exc}")
+
+            try:
+                curate_stats = await run_curate(
+                    pool, settings.telegram_bot_token, settings.telegram_chat_id, logger
+                )
+            except Exception as exc:
+                failed_stages.append("curate")
+                logger.error("weekly_run.stage_failed", stage="curate", error=f"{type(exc).__name__}: {exc}")
+
+            try:
+                discover_stats = await run_discovery(pool, logger)
+            except Exception as exc:
+                failed_stages.append("discover")
+                logger.error("weekly_run.stage_failed", stage="discover", error=f"{type(exc).__name__}: {exc}")
+
+            try:
+                daily_stats = await aggregate_daily_stats(pool)
+            except Exception as exc:
+                failed_stages.append("daily_stats")
+                logger.error("weekly_run.stage_failed", stage="daily_stats", error=f"{type(exc).__name__}: {exc}")
         finally:
             await close_pool()
 
@@ -268,6 +375,9 @@ def weekly_run():
             "classify": classify_stats,
             "extract": extract_stats,
             "publish": publish_stats,
+            "curate": curate_stats,
+            "discover": discover_stats,
+            "daily_stats": daily_stats,
             "failed_stages": failed_stages,
         }
 

@@ -1,12 +1,16 @@
 """src/carwatch/llm/classify.py"""
 import json
 import re
+from pathlib import Path
 
 from anthropic import APIError
 from pydantic import ValidationError
 
+from carwatch.cost import compute_cost_usd, load_llm_pricing, record_llm_usage
 from carwatch.llm.client import MODEL, call_classify
 from carwatch.models import ClassifyItem
+
+CONFIG_DIR = Path(__file__).resolve().parents[3] / "config"  # src/carwatch/llm/ -> agents/carwatch/config
 
 SYSTEM_PROMPT = """\
 Você classifica notícias automotivas. Para cada item, decida se anuncia
@@ -111,6 +115,11 @@ async def _classify_batch(pool, batch: list[tuple], system_prompt: str, logger) 
                 error=f"{type(exc).__name__}: {exc}",
             )
     else:
+        input_price, output_price = load_llm_pricing(CONFIG_DIR / "settings.yaml", MODEL)
+        cost = compute_cost_usd(
+            usage["tokens_in"], usage["tokens_out"],
+            input_usd_per_million=input_price, output_usd_per_million=output_price,
+        )
         if logger is not None:
             logger.info(
                 "llm.call",
@@ -120,7 +129,9 @@ async def _classify_batch(pool, batch: list[tuple], system_prompt: str, logger) 
                 tokens_in=usage.get("tokens_in"),
                 tokens_out=usage.get("tokens_out"),
                 stop_reason=usage.get("stop_reason"),
+                usd=cost,
             )
+        await record_llm_usage(pool, "classify", MODEL, usage["tokens_in"], usage["tokens_out"], cost)
 
         items = parse_classify_response(raw_response, batch_size=len(batch))
         if items is None:

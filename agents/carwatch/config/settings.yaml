@@ -53,3 +53,10 @@ tier4_google_news:
   extra_locales:
     zh: [{hl: "zh-CN", gl: "CN", ceid: "CN:zh-Hans"}]
     in: [{hl: "en-IN", gl: "IN", ceid: "IN:en"}]
+
+llm_pricing:
+  "claude-haiku-4-5-20251001":
+    # Looked up 2026-08-22 via Anthropic's current pricing for claude-haiku-4-5 (undated).
+    # Dated snapshots normally share base-model pricing — reconfirm before trusting the cap.
+    input_usd_per_million: 1.00
+    output_usd_per_million: 5.00

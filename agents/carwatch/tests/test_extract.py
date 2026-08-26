@@ -3,6 +3,11 @@ import json
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+import httpx
+import respx
+
+from carwatch.cost import record_llm_usage
+from carwatch.llm.client import MODEL
 from carwatch.llm.extract import (
     extract_article_text,
     parse_extract_response,
@@ -11,6 +16,8 @@ from carwatch.llm.extract import (
 )
 
 FIXTURES = Path(__file__).parent / "fixtures" / "articles"
+
+_USAGE = {"tokens_in": 100, "tokens_out": 60, "stop_reason": "end_turn"}
 
 
 def test_extract_article_text_prefers_ld_json_when_present():
@@ -122,8 +129,8 @@ async def test_run_extract_marks_success_as_extracted_and_calls_dedupe(db_pool):
 
     with patch("carwatch.llm.extract.fetcher.fetch", new=AsyncMock(
         return_value=type("R", (), {"status": 200, "body": "x" * 1000, "blocked": False})()
-    )), patch("carwatch.llm.extract.call_extract", new=AsyncMock(return_value=fake_extracted_json)):
-        stats = await run_extract(db_pool, logger=None, limit=10)
+    )), patch("carwatch.llm.extract.call_extract", new=AsyncMock(return_value=(fake_extracted_json, _USAGE))):
+        stats = await run_extract(db_pool, logger=None, bot_token="test-bot-token", chat_id="test-chat-id", limit=10)
 
     assert stats == {"in": 1, "extracted": 1, "error": 0}
     async with db_pool.connection() as conn:
@@ -150,13 +157,61 @@ async def test_run_extract_marks_unparseable_response_as_error_after_one_retry(d
 
     with patch("carwatch.llm.extract.fetcher.fetch", new=AsyncMock(
         return_value=type("R", (), {"status": 200, "body": "x" * 1000, "blocked": False})()
-    )), patch("carwatch.llm.extract.call_extract", new=AsyncMock(return_value="not json, ever")):
-        stats = await run_extract(db_pool, logger=None, limit=10)
+    )), patch("carwatch.llm.extract.call_extract", new=AsyncMock(return_value=("not json, ever", _USAGE))):
+        stats = await run_extract(db_pool, logger=None, bot_token="test-bot-token", chat_id="test-chat-id", limit=10)
 
     assert stats == {"in": 1, "extracted": 0, "error": 1}
     async with db_pool.connection() as conn:
         result = await conn.execute("SELECT status FROM raw_items WHERE id = %s", (item_id,))
         assert (await result.fetchone())[0] == "error"
+
+
+@respx.mock
+async def test_run_extract_short_circuits_when_month_to_date_cost_exceeds_cap(db_pool):
+    """SPEC.md §18's headline safety mechanism: once month-to-date extraction
+    spend crosses MONTHLY_COST_CAP_USD, run_extract must refuse to run at all
+    -- not just skip individual items, but never even query for pending rows
+    or call the paid API. Pre-populate llm_usage above the cap directly (the
+    same real db_pool/record_llm_usage path cost.py's own tests use), then
+    assert both the returned stats shape AND that call_extract was never
+    invoked -- a regression that only checked the stats dict could still pass
+    if the guard were accidentally moved after the first (unbilled) call.
+
+    Also asserts the operator is actually notified over Telegram (SPEC.md
+    §18/§19: "notifica e pausa") -- a plain log line only reaches the local
+    systemd journal on this Type=oneshot unit, never the operator. Before the
+    fix, this route sends no request at all, so a `respx` route mocked but
+    never asserted-called (route.called) would catch the regression.
+    """
+    telegram_route = respx.post("https://api.telegram.org/bottest-bot-token/sendMessage").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    await record_llm_usage(db_pool, "extract", MODEL, 1_000_000, 6_000_000, 31.0)
+
+    async with db_pool.connection() as conn:
+        source = await conn.execute(
+            "INSERT INTO sources (domain, feed_url, kind, tier, status) "
+            "VALUES ('x.com', 'https://x.com/feed', 'rss', 1, 'active') RETURNING id"
+        )
+        source_id = (await source.fetchone())[0]
+        classified = json.dumps({"i": 0, "is_launch": True, "stage": "world_premiere", "brand": "BYD", "model": "Seal 06", "confidence": 0.9})
+        await conn.execute(
+            "INSERT INTO raw_items (source_id, url, url_hash, title, status, classified) "
+            "VALUES (%s, 'https://x.com/article', 'hash-1', 'BYD reveals Seal 06', 'new', %s)",
+            (source_id, classified),
+        )
+
+    call_extract_mock = AsyncMock(side_effect=AssertionError("call_extract must not be invoked while cost-capped"))
+    with patch("carwatch.llm.extract.call_extract", new=call_extract_mock):
+        stats = await run_extract(db_pool, logger=None, bot_token="test-bot-token", chat_id="test-chat-id", limit=10)
+
+    assert stats == {"in": 0, "extracted": 0, "error": 0, "cost_capped": True}
+    assert call_extract_mock.await_count == 0
+
+    assert telegram_route.called
+    sent_text = json.loads(telegram_route.calls[0].request.content)["text"]
+    assert "30" in sent_text
+    assert "custo" in sent_text.lower()
 
 
 async def _insert_approved_item(db_pool, *, title="BYD reveals Seal 06", summary=None) -> tuple[int, int]:
@@ -176,8 +231,9 @@ async def _insert_approved_item(db_pool, *, title="BYD reveals Seal 06", summary
     return item_id, source_id
 
 
-def _fake_extracted(confidence: float) -> str:
-    return json.dumps(
+def _fake_extracted(confidence: float) -> tuple[str, dict]:
+    """call_extract's (text, usage) contract."""
+    text = json.dumps(
         {
             "brand": "BYD", "model": "Seal 06", "generation": None, "body_type": "sedan",
             "stage": "world_premiere", "is_new_generation": False, "markets": ["CN"],
@@ -186,6 +242,7 @@ def _fake_extracted(confidence: float) -> str:
             "confidence": confidence,
         }
     )
+    return text, _USAGE
 
 
 async def test_run_extract_degraded_short_body_caps_confidence_and_uses_title_summary(db_pool):
@@ -198,7 +255,7 @@ async def test_run_extract_degraded_short_body_caps_confidence_and_uses_title_su
         # MIN_TEXT_LEN_FOR_FULL_EXTRACT and the degraded path kicks in.
         return_value=type("R", (), {"status": 200, "body": "<html><body>tiny</body></html>", "blocked": False})()
     )), patch("carwatch.llm.extract.call_extract", new=call_extract_mock):
-        stats = await run_extract(db_pool, logger=None, limit=10)
+        stats = await run_extract(db_pool, logger=None, bot_token="test-bot-token", chat_id="test-chat-id", limit=10)
 
     assert stats == {"in": 1, "extracted": 1, "error": 0}
 
@@ -225,7 +282,7 @@ async def test_run_extract_blocked_fetch_degrades_to_title_summary_without_parsi
         # no body to even attempt extract_article_text() on.
         return_value=type("R", (), {"status": 200, "body": None, "blocked": True})()
     )), patch("carwatch.llm.extract.call_extract", new=call_extract_mock):
-        stats = await run_extract(db_pool, logger=None, limit=10)
+        stats = await run_extract(db_pool, logger=None, bot_token="test-bot-token", chat_id="test-chat-id", limit=10)
 
     assert stats == {"in": 1, "extracted": 1, "error": 0}
 
@@ -255,7 +312,7 @@ async def test_run_extract_full_article_path_preserves_confidence_and_uses_artic
     with patch("carwatch.llm.extract.fetcher.fetch", new=AsyncMock(
         return_value=type("R", (), {"status": 200, "body": long_article_html, "blocked": False})()
     )), patch("carwatch.llm.extract.call_extract", new=call_extract_mock):
-        stats = await run_extract(db_pool, logger=None, limit=10)
+        stats = await run_extract(db_pool, logger=None, bot_token="test-bot-token", chat_id="test-chat-id", limit=10)
 
     assert stats == {"in": 1, "extracted": 1, "error": 0}
 
@@ -275,13 +332,20 @@ async def test_run_extract_full_article_path_preserves_confidence_and_uses_artic
 async def test_run_extract_retries_once_with_error_appended_then_succeeds(db_pool):
     await _insert_approved_item(db_pool)
 
-    call_extract_mock = AsyncMock(side_effect=["not json at all", _fake_extracted(confidence=0.8)])
+    call_extract_mock = AsyncMock(side_effect=[("not json at all", _USAGE), _fake_extracted(confidence=0.8)])
     with patch("carwatch.llm.extract.fetcher.fetch", new=AsyncMock(
         return_value=type("R", (), {"status": 200, "body": "x" * 1000, "blocked": False})()
     )), patch("carwatch.llm.extract.call_extract", new=call_extract_mock):
-        stats = await run_extract(db_pool, logger=None, limit=10)
+        stats = await run_extract(db_pool, logger=None, bot_token="test-bot-token", chat_id="test-chat-id", limit=10)
 
     assert stats == {"in": 1, "extracted": 1, "error": 0}
     assert call_extract_mock.await_count == 2
     retry_text = call_extract_mock.await_args_list[1].args[0]
     assert "não pôde ser validada" in retry_text
+
+    # record_llm_usage is real (not mocked) here, so both the failed initial
+    # attempt and the successful retry must each have recorded their own
+    # llm_usage row -- one row per call_extract invocation, not one per item.
+    async with db_pool.connection() as conn:
+        result = await conn.execute("SELECT count(*) FROM llm_usage WHERE op = 'extract'")
+        assert (await result.fetchone())[0] == 2
