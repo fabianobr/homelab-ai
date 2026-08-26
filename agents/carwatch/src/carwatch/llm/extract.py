@@ -30,16 +30,44 @@ SYSTEM_PROMPT = """\
 Extraia dados estruturados de lançamento de veículo do artigo fornecido.
 
 REGRAS:
-- Use null para qualquer campo não afirmado explicitamente no texto.
+- Use null para qualquer campo não afirmado explicitamente no texto —
+  EXCETO is_new_generation, global_debut, markets e highlights, que têm
+  regra própria abaixo e NUNCA devem ser null.
 - NUNCA infira, estime ou complete com conhecimento externo.
 - Converta unidades para o padrão do schema (hp, Nm, kWh, km).
-- Se o artigo citar múltiplas versões, registre a de entrada e liste as
-  demais em highlights.
-- is_new_generation: true APENAS se o texto indicar plataforma nova ou
-  geração nova. Facelift, restyling, "atualizado", "renovado" => false.
-  Na dúvida => false.
-- markets: códigos ISO-3166-1 alpha-2. Global/mundial => listar os
-  mercados citados; se nenhum, usar [].
+- Se o artigo citar múltiplas versões/motorizações, powertrain é UM ÚNICO
+  objeto (nunca uma lista) descrevendo a versão de entrada/mais relevante;
+  liste as demais motorizações em highlights como texto.
+- generation é sempre string (ex: "ND", "Mk4", "W223"), nunca um número —
+  mesmo que o artigo se refira a ela por um número ordinal (ex: "4th
+  generation" => generation="4th generation" ou o código se o artigo
+  citar um, nunca o inteiro 4).
+
+stage: exatamente um destes 8 valores, nunca outro (ex: "facelift" não é
+um valor válido — uma atualização de ficha técnica é specs_release):
+  spy            - flagra de protótipo camuflado
+  teaser         - imagem/vídeo parcial oficial pré-estreia
+  concept        - conceito, não previsto para produção
+  world_premiere - primeira apresentação pública oficial do veículo
+  specs_release  - divulgação/mudança de ficha técnica (inclui facelift,
+                   remoção ou adição de motorização, restyling)
+  pricing        - anúncio oficial de preço
+  on_sale        - abertura de pedidos/pré-venda
+  market_launch  - chegada a um mercado onde já existia em outro
+
+powertrain.type: exatamente um destes 5 valores (nunca a palavra do
+artigo diretamente) — mapeie: petrol/gasoline/diesel/combustão => ice;
+elétrico/battery/EV => bev; híbrido (sem plug-in) => hev; híbrido
+plug-in => phev; hidrogênio/fuel cell => fcev.
+
+- is_new_generation: true ou false, NUNCA null. true APENAS se o texto
+  indicar plataforma nova ou geração nova. Facelift, restyling,
+  "atualizado", "renovado" => false. Na dúvida => false.
+- global_debut: true ou false, NUNCA null. true APENAS se o texto afirmar
+  que é a primeira apresentação mundial do veículo. Na dúvida => false.
+- markets: códigos ISO-3166-1 alpha-2, NUNCA null. Se nenhum mercado for
+  citado, usar [].
+- highlights: NUNCA null — se não houver destaques factuais claros, usar [].
 - event_date: data do anúncio (formato ISO). Não confundir com data de venda.
 - Artigo em qualquer idioma; saída sempre em inglês, exceto highlights
   que devem sair em português do Brasil.

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class LaunchStage(str, Enum):
@@ -51,6 +51,20 @@ def load_keywords_config(path: Path) -> KeywordsConfig:
     return KeywordsConfig.model_validate(yaml.safe_load(path.read_text()))
 
 
+# The prompt tells the model to use these 5 literal codes directly, but
+# LLMs sometimes answer in the article's own natural-language word instead
+# (e.g. "petrol") despite the instruction. These are unambiguous synonyms,
+# not a business-logic guess -- unlike an invalid `stage`, there's no
+# judgment call in mapping "diesel" to "ice".
+_POWERTRAIN_TYPE_ALIASES = {
+    "petrol": "ice", "gasoline": "ice", "gas": "ice", "diesel": "ice",
+    "electric": "bev", "battery": "bev", "battery electric": "bev", "ev": "bev",
+    "hybrid": "hev",
+    "plug-in hybrid": "phev", "plugin hybrid": "phev", "plug in hybrid": "phev",
+    "hydrogen": "fcev", "fuel cell": "fcev",
+}
+
+
 class Powertrain(BaseModel):
     type: Literal["bev", "phev", "hev", "ice", "fcev"]
     power_hp: int | None = None
@@ -60,6 +74,13 @@ class Powertrain(BaseModel):
     range_cycle: Literal["WLTP", "CLTC", "EPA"] | None = None
     drivetrain: Literal["fwd", "rwd", "awd"] | None = None
     zero_to_100_s: float | None = None
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def _normalize_type_synonyms(cls, v):
+        if isinstance(v, str):
+            return _POWERTRAIN_TYPE_ALIASES.get(v.strip().lower(), v)
+        return v
 
 
 class Price(BaseModel):
@@ -83,3 +104,40 @@ class ExtractedEvent(BaseModel):
     price: Price | None = None
     highlights: list[str] = []
     confidence: float
+
+    # A field's `= default` only applies when the key is absent from the
+    # input -- it does NOT cover the model explicitly answering `null` for
+    # a field the prompt marks as "never null". Observed against the real
+    # API: despite the prompt saying so, is_new_generation/global_debut came
+    # back null often enough to fail 100% of a live extract batch. False/[]
+    # is exactly what the field's own default already says "unstated" means.
+    @field_validator("is_new_generation", "global_debut", mode="before")
+    @classmethod
+    def _null_means_false(cls, v):
+        return False if v is None else v
+
+    @field_validator("markets", "highlights", mode="before")
+    @classmethod
+    def _null_means_empty_list(cls, v):
+        return [] if v is None else v
+
+    # Observed against the real API: the model answered generation=4 (an
+    # int ordinal) instead of a generation code/name string. Stringifying
+    # an int the model already committed to is a safe, unambiguous
+    # normalization -- it's still exactly the value the model meant.
+    @field_validator("generation", mode="before")
+    @classmethod
+    def _stringify_generation(cls, v):
+        return str(v) if isinstance(v, int) else v
+
+    # Observed against the real API: despite the prompt already saying
+    # "record the entry-level/most relevant version" for multiple engines,
+    # the model sometimes wraps that single answer in a list instead of a
+    # bare object. Taking the first element is a mechanical implementation
+    # of the prompt's own already-stated intent, not a new judgment call.
+    @field_validator("powertrain", mode="before")
+    @classmethod
+    def _first_of_list(cls, v):
+        if isinstance(v, list):
+            return v[0] if v else None
+        return v
