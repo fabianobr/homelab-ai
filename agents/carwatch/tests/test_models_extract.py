@@ -31,6 +31,20 @@ def test_powertrain_rejects_truly_invalid_type():
         Powertrain.model_validate({"type": "nonsense_fuel_type"})
 
 
+def test_powertrain_normalizes_drivetrain_and_range_cycle_case():
+    """A real extract call against the live API returned drivetrain="AWD"
+    (uppercase) against a lowercase-only literal.
+    """
+    pt = Powertrain.model_validate({"type": "bev", "drivetrain": "AWD", "range_cycle": "wltp"})
+    assert pt.drivetrain == "awd"
+    assert pt.range_cycle == "WLTP"
+
+
+def test_price_normalizes_status_case():
+    price = Price.model_validate({"status": "Official"})
+    assert price.status == "official"
+
+
 def test_price_all_fields_optional():
     price = Price()
     assert price.amount is None

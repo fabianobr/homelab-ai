@@ -140,6 +140,48 @@ async def test_run_extract_marks_success_as_extracted_and_calls_dedupe(db_pool):
         assert (await result.fetchone())[0] == 1
 
 
+async def test_run_extract_anchors_the_prompt_to_classifys_target_vehicle(db_pool):
+    """A real extract call against a roundup article ("every new car coming
+    in 2026") tried to describe every vehicle it mentioned instead of just
+    the one classify had already identified, blowing the output token
+    budget. Without an anchor, extract has no way to know which of several
+    vehicles in the article is the one that was actually approved.
+    """
+    async with db_pool.connection() as conn:
+        source = await conn.execute(
+            "INSERT INTO sources (domain, feed_url, kind, tier, status) "
+            "VALUES ('x.com', 'https://x.com/feed', 'rss', 1, 'active') RETURNING id"
+        )
+        source_id = (await source.fetchone())[0]
+        classified = json.dumps(
+            {"i": 0, "is_launch": True, "stage": "on_sale", "brand": "Aion", "model": "UT", "confidence": 0.95}
+        )
+        await conn.execute(
+            "INSERT INTO raw_items (source_id, url, url_hash, title, status, classified) "
+            "VALUES (%s, 'https://x.com/roundup', 'hash-anchor', 'Every new car coming in 2026', 'new', %s)",
+            (source_id, classified),
+        )
+
+    fake_extracted_json = json.dumps(
+        {
+            "brand": "Aion", "model": "UT", "generation": None, "body_type": None,
+            "stage": "on_sale", "is_new_generation": False, "markets": [],
+            "global_debut": False, "event_date": None, "sales_start": None,
+            "powertrain": None, "price": None, "highlights": [], "confidence": 0.7,
+        }
+    )
+    call_extract_mock = AsyncMock(return_value=(fake_extracted_json, _USAGE))
+
+    with patch("carwatch.llm.extract.fetcher.fetch", new=AsyncMock(
+        return_value=type("R", (), {"status": 200, "body": "x" * 1000, "blocked": False})()
+    )), patch("carwatch.llm.extract.call_extract", new=call_extract_mock):
+        await run_extract(db_pool, logger=None, bot_token="test-bot-token", chat_id="test-chat-id", limit=10)
+
+    sent_text = call_extract_mock.call_args.args[0]
+    assert "Aion" in sent_text
+    assert "UT" in sent_text
+
+
 async def test_run_extract_marks_unparseable_response_as_error_after_one_retry(db_pool):
     async with db_pool.connection() as conn:
         source = await conn.execute(
