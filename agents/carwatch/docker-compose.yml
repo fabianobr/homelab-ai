@@ -28,6 +28,15 @@ services:
         required: false
     environment:
       DATABASE_URL: postgresql://carwatch:carwatch@db:5432/carwatch
+    # `docker compose run --rm app ...` (used by both `publish` and the
+    # weekly-run cron via run.sh) destroys the container's filesystem the
+    # moment the command exits. Without this mount, `feed.atom` was written
+    # inside that throwaway filesystem and never reached the host at all --
+    # nginx or any static host serving SPEC.md's "servido por nginx ou
+    # qualquer static host" would have nothing to read, forever, no matter
+    # how many weekly-run cycles executed.
+    volumes:
+      - ./data:/app/data
 
 volumes:
   carwatch_db_data:

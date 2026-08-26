@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import psycopg
 import respx
+import yaml
 from typer.testing import CliRunner
 
 from carwatch import db as db_module
@@ -87,6 +88,32 @@ def test_dockerfile_sets_carwatch_root_to_its_workdir():
         if line.startswith("WORKDIR ")
     )
     assert f"ENV CARWATCH_ROOT={workdir}" in dockerfile
+
+
+def test_docker_compose_mounts_a_persistent_volume_for_app_output():
+    """`docker compose run --rm app ...` (used by both `publish` and the
+    weekly-run cron via run.sh) destroys the container's filesystem the
+    moment the command exits. Verified for real: without this mount,
+    `data/feed.atom` was written inside that throwaway filesystem and
+    never reached the host, no matter how many times weekly-run ran --
+    nginx or any static host serving SPEC.md's feed had nothing to read.
+    """
+    compose = yaml.safe_load((PROJECT_ROOT / "docker-compose.yml").read_text())
+    app_volumes = compose["services"]["app"].get("volumes", [])
+    assert any(v.split(":")[1] == "/app/data" for v in app_volumes), (
+        f"app service has no volume mounting a host path onto /app/data: {app_volumes}"
+    )
+
+
+def test_atom_feed_path_default_lands_under_the_mounted_volume():
+    from carwatch.settings import Settings
+
+    default_path = Settings.model_fields["atom_feed_path"].default
+    assert default_path.startswith("data/"), (
+        f"atom_feed_path default {default_path!r} must live under the "
+        "docker-compose app service's mounted volume (data/) or it will "
+        "never persist past a `docker compose run --rm` container"
+    )
 
 
 def test_help_lists_all_fase1_commands():
