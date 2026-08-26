@@ -1,10 +1,14 @@
 """src/carwatch/db.py"""
+import logging
 from pathlib import Path
 
+import psycopg
 from pgvector.psycopg import register_vector_async
 from psycopg_pool import AsyncConnectionPool
 
 from carwatch.settings import get_settings
+
+logger = logging.getLogger(__name__)
 
 _pool: AsyncConnectionPool | None = None
 
@@ -16,8 +20,22 @@ async def configure_connection(conn) -> None:
     lets `vector` columns come back as numpy arrays instead of raw text.
     Passed as the pool's `configure=` callback so it runs on every connection
     the pool opens, not just the first one.
+
+    On a genuinely fresh database the `vector` extension doesn't exist yet —
+    001_init.sql is what creates it, and that migration runs through this
+    same pool. Without this guard, `db migrate` on a fresh database can never
+    get a working connection to run the migration that would fix it.
     """
-    await register_vector_async(conn)
+    try:
+        await register_vector_async(conn)
+    except psycopg.ProgrammingError as exc:
+        if "vector type not found" not in str(exc):
+            raise
+        logger.warning(
+            "pgvector extension not installed yet; skipping vector type "
+            "registration on this connection (expected only before the "
+            "first `db migrate` bootstraps a fresh database)"
+        )
 
 
 def get_pool() -> AsyncConnectionPool:
