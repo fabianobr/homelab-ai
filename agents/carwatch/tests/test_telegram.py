@@ -5,6 +5,7 @@ import httpx
 import respx
 
 from carwatch.publishers.telegram import (
+    fetch_usd_rates,
     format_event_message,
     get_pending_events,
     mark_published,
@@ -102,6 +103,101 @@ def test_format_event_message_escapes_html_special_characters_in_llm_controlled_
     stripped = re.sub(r"</?(b|a)( href=\"[^\"]*\")?>", "", text)
     assert "<" not in stripped
     assert ">" not in stripped
+
+
+def test_format_event_message_shows_flag_and_country_name_for_known_markets():
+    event = {
+        "brand": "BYD", "model": "Seal 06", "stage": "world_premiere",
+        "markets": ["CN", "DE"], "highlights": [], "powertrain": None,
+        "price": None, "sales_start": None,
+    }
+    text = format_event_message(event, source_count=1, primary_url="https://x.com/a")
+    assert "🇨🇳 China" in text
+    assert "🇩🇪 Alemanha" in text
+    # raw ISO codes should no longer be shown standalone
+    assert "CN, DE" not in text
+
+
+def test_format_event_message_falls_back_to_flag_and_code_for_unknown_market():
+    event = {
+        "brand": "Acme", "model": "X", "stage": "teaser", "markets": ["XX"],
+        "highlights": [], "powertrain": None, "price": None, "sales_start": None,
+    }
+    text = format_event_message(event, source_count=1, primary_url="https://x.com/a")
+    assert "🇽🇽 XX" in text
+
+
+def test_format_event_message_shows_no_markets_as_global():
+    event = {
+        "brand": "Acme", "model": "X", "stage": "teaser", "markets": [],
+        "highlights": [], "powertrain": None, "price": None, "sales_start": None,
+    }
+    text = format_event_message(event, source_count=1, primary_url="https://x.com/a")
+    assert "Global" in text
+
+
+def test_format_event_message_shows_usd_conversion_when_rate_available():
+    event = {
+        "brand": "BYD", "model": "Seal 06", "stage": "pricing", "markets": [],
+        "highlights": [], "powertrain": None,
+        "price": {"amount": 109800, "currency": "CNY", "status": "official"},
+        "sales_start": None,
+    }
+    text = format_event_message(
+        event, source_count=1, primary_url="https://x.com/a", usd_rates={"CNY": 7.32}
+    )
+    assert "CNY 109,800" in text
+    assert "≈ US$ 15,000" in text
+
+
+def test_format_event_message_omits_usd_conversion_when_no_rate_for_currency():
+    event = {
+        "brand": "BYD", "model": "Seal 06", "stage": "pricing", "markets": [],
+        "highlights": [], "powertrain": None,
+        "price": {"amount": 109800, "currency": "CNY", "status": "official"},
+        "sales_start": None,
+    }
+    text = format_event_message(event, source_count=1, primary_url="https://x.com/a", usd_rates={})
+    assert "CNY 109,800" in text
+    assert "US$" not in text
+
+
+def test_format_event_message_omits_redundant_usd_conversion_when_price_already_usd():
+    event = {
+        "brand": "Acme", "model": "X", "stage": "pricing", "markets": [],
+        "highlights": [], "powertrain": None,
+        "price": {"amount": 50000, "currency": "USD", "status": "official"},
+        "sales_start": None,
+    }
+    text = format_event_message(
+        event, source_count=1, primary_url="https://x.com/a", usd_rates={"CNY": 7.32}
+    )
+    assert "USD 50,000" in text
+    assert "≈ US$" not in text
+
+
+@respx.mock
+async def test_fetch_usd_rates_returns_rates_on_success():
+    respx.get("https://api.frankfurter.app/latest", params={"from": "USD", "to": "CNY,EUR"}).mock(
+        return_value=httpx.Response(200, json={"amount": 1.0, "base": "USD", "rates": {"CNY": 7.32, "EUR": 0.92}})
+    )
+    rates = await fetch_usd_rates({"CNY", "EUR"})
+    assert rates == {"CNY": 7.32, "EUR": 0.92}
+
+
+@respx.mock
+async def test_fetch_usd_rates_returns_empty_dict_on_http_error():
+    respx.get("https://api.frankfurter.app/latest").mock(return_value=httpx.Response(500))
+    rates = await fetch_usd_rates({"CNY"})
+    assert rates == {}
+
+
+async def test_fetch_usd_rates_skips_network_call_when_only_usd_requested():
+    # No respx route registered at all -- a call to a route respx doesn't
+    # know about raises, so this proves fetch_usd_rates short-circuits
+    # before making any HTTP request when nothing needs converting.
+    rates = await fetch_usd_rates({"USD"})
+    assert rates == {}
 
 
 async def test_get_pending_events_excludes_published_and_low_confidence(db_pool):
