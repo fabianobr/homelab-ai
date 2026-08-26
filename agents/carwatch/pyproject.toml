@@ -21,6 +21,8 @@ dependencies = [
     # Fixed upstream in later typer releases; revisit if typer is ever
     # bumped past 0.13.
     "click>=8.1,<8.2",
+    "sentence-transformers>=3.0,<4.0",
+    "pgvector>=0.3,<0.4",
 ]
 
 [project.scripts]
@@ -43,3 +45,6 @@ packages = ["src/carwatch"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "embeddings: marks tests for multilingual embeddings (deselect with '-m \"not embeddings\"')",
+]

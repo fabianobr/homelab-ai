@@ -1,32 +1,14 @@
 """tests/test_telegram.py"""
-import json
-from unittest.mock import MagicMock
-
 import httpx
 import respx
 
 from carwatch.publishers.telegram import (
-    format_smoke_summary,
-    get_approved_items_for_notification,
-    mark_notified,
-    run_publish_smoke,
+    format_event_message,
+    get_pending_events,
+    mark_published,
+    publish_pending_events,
     send_telegram_message,
 )
-
-
-def test_format_smoke_summary_lists_each_approved_item():
-    items = [
-        {"title": "BYD reveals Seal 06", "url": "https://x/1", "brand": "BYD", "model": "Seal 06", "stage": "world_premiere", "confidence": 0.92},
-    ]
-    text = format_smoke_summary(items)
-    assert "BYD" in text
-    assert "Seal 06" in text
-    assert "https://x/1" in text
-
-
-def test_format_smoke_summary_handles_empty_list():
-    text = format_smoke_summary([])
-    assert "Nenhum" in text
 
 
 @respx.mock
@@ -34,243 +16,151 @@ async def test_send_telegram_message_returns_true_on_success():
     respx.post("https://api.telegram.org/bottoken123/sendMessage").mock(
         return_value=httpx.Response(200, json={"ok": True})
     )
-    ok = await send_telegram_message("token123", "chat1", "hello")
-    assert ok is True
+    assert await send_telegram_message("token123", "chat1", "hello") is True
 
 
 @respx.mock
 async def test_send_telegram_message_returns_false_on_http_error():
-    respx.post("https://api.telegram.org/bottoken123/sendMessage").mock(
-        return_value=httpx.Response(500)
-    )
-    ok = await send_telegram_message("token123", "chat1", "hello")
-    assert ok is False
+    respx.post("https://api.telegram.org/bottoken123/sendMessage").mock(return_value=httpx.Response(500))
+    assert await send_telegram_message("token123", "chat1", "hello") is False
 
 
-async def test_get_approved_items_excludes_rejected_and_unclassified(db_pool):
+def test_format_event_message_includes_brand_model_stage_and_source_link():
+    event = {
+        "brand": "BYD", "model": "Seal 06", "stage": "world_premiere",
+        "markets": ["CN"], "highlights": ["Estreia mundial em Shenzhen"],
+        "powertrain": {"type": "bev", "power_hp": 212, "range_km": 520, "range_cycle": "WLTP"},
+        "price": {"amount": 109800, "currency": "CNY", "status": "official"},
+        "sales_start": "2026-Q2",
+    }
+    text = format_event_message(event, source_count=3, primary_url="https://x.com/a")
+
+    assert "BYD Seal 06" in text
+    assert "🌍" in text
+    assert "Estreia mundial em Shenzhen" in text
+    assert "212 cv" in text
+    assert "CNY" in text
+    assert "3 fonte(s)" in text
+    assert 'href="https://x.com/a"' in text
+
+
+def test_format_event_message_omits_stray_empty_parenthetical_when_price_status_is_none():
+    # `status` is a valid None value on the Price model even when `amount` is
+    # present (e.g. extraction couldn't determine official/estimated/starting_from).
+    # PRICE_STATUS_LABEL.get(None, "") returns "", so the parenthetical must be
+    # omitted entirely rather than rendered as a stray "()".
+    event = {
+        "brand": "Acme", "model": "X", "stage": "teaser", "markets": [],
+        "highlights": [], "powertrain": None,
+        "price": {"amount": 109800, "currency": "CNY", "status": None},
+        "sales_start": None,
+    }
+    text = format_event_message(event, source_count=1, primary_url="https://x.com/a")
+    assert "CNY 109,800" in text
+    assert "()" not in text
+
+
+def test_format_event_message_handles_missing_powertrain_and_price():
+    event = {
+        "brand": "Acme", "model": "X", "stage": "teaser", "markets": [],
+        "highlights": [], "powertrain": None, "price": None, "sales_start": None,
+    }
+    text = format_event_message(event, source_count=1, primary_url="https://x.com/a")
+    assert "não informado" in text
+    assert "não divulgado" in text
+
+
+def test_format_event_message_escapes_html_special_characters_in_llm_controlled_fields():
+    # brand/model/highlights/markets/sales_start come from the LLM extraction
+    # pipeline, not a fixed vocabulary, and the message is sent with
+    # parse_mode="HTML" -- unescaped '<'/'>'/'&' would corrupt Telegram's
+    # HTML parsing and fail the send.
+    event = {
+        "brand": "Foo & <Bar>", "model": "X < 5 & Y > 3", "stage": "teaser",
+        "markets": ["CN & TW"], "highlights": ["Power < 300 hp & torque > 400 Nm"],
+        "powertrain": {"type": "bev", "power_hp": None, "range_km": None, "range_cycle": None},
+        "price": {"amount": 1000, "currency": "R$ <fake>", "status": "official"},
+        "sales_start": "Q2 <2026> & beyond",
+    }
+    text = format_event_message(event, source_count=1, primary_url="https://x.com/a?x=1&y=2")
+
+    assert "Foo &amp; &lt;Bar&gt;" in text
+    assert "X &lt; 5 &amp; Y &gt; 3" in text
+    assert "CN &amp; TW" in text
+    assert "Power &lt; 300 hp &amp; torque &gt; 400 Nm" in text
+    assert "Q2 &lt;2026&gt; &amp; beyond" in text
+    assert "R$ &lt;fake&gt;" in text
+    assert 'href="https://x.com/a?x=1&amp;y=2"' in text
+
+    # No raw '<' or '>' should survive anywhere in the message -- the only
+    # unescaped angle brackets allowed are the literal tags we build
+    # ourselves (<b>, </b>, <a href="...">, </a>).
+    import re
+
+    stripped = re.sub(r"</?(b|a)( href=\"[^\"]*\")?>", "", text)
+    assert "<" not in stripped
+    assert ">" not in stripped
+
+
+async def test_get_pending_events_excludes_published_and_low_confidence(db_pool):
     async with db_pool.connection() as conn:
         source = await conn.execute(
             "INSERT INTO sources (domain, feed_url, kind, tier, status) "
-            "VALUES ('example.com', 'https://example.com/feed', 'rss', 1, 'active') RETURNING id"
+            "VALUES ('x.com', 'https://x.com/feed', 'rss', 1, 'active') RETURNING id"
         )
         source_id = (await source.fetchone())[0]
-        approved = json.dumps({"i": 0, "is_launch": True, "stage": "world_premiere", "brand": "BYD", "model": "Seal 06", "confidence": 0.92})
-        rejected = json.dumps({"i": 0, "is_launch": False, "stage": None, "brand": None, "model": None, "confidence": 0.1})
+        item = await conn.execute(
+            "INSERT INTO raw_items (source_id, url, url_hash, title) "
+            "VALUES (%s, 'https://x.com/a', 'h1', 't') RETURNING id",
+            (source_id,),
+        )
+        item_id = (await item.fetchone())[0]
+
+        pending = await conn.execute(
+            "INSERT INTO launch_events (dedupe_key, brand, model, model_slug, stage, "
+            "highlights, confidence, published) VALUES "
+            "('k1', 'BYD', 'Seal 06', 'seal-06', 'world_premiere', ARRAY['h'], 0.9, FALSE) RETURNING id"
+        )
+        pending_id = (await pending.fetchone())[0]
         await conn.execute(
-            "INSERT INTO raw_items (source_id, url, url_hash, title, status, classified) VALUES "
-            "(%s, 'https://x/1', 'h1', 'Approved item', 'new', %s), "
-            "(%s, 'https://x/2', 'h2', 'Rejected item', 'rejected', %s), "
-            "(%s, 'https://x/3', 'h3', 'Unclassified item', 'new', NULL)",
-            (source_id, approved, source_id, rejected, source_id),
+            "INSERT INTO launch_events (dedupe_key, brand, model, model_slug, stage, "
+            "highlights, confidence, published) VALUES "
+            "('k2', 'BYD', 'Seal 07', 'seal-07', 'world_premiere', ARRAY['h'], 0.9, TRUE)"
         )
-
-    items = await get_approved_items_for_notification(db_pool)
-
-    assert len(items) == 1
-    assert items[0]["brand"] == "BYD"
-
-
-@respx.mock
-async def test_run_publish_smoke_sends_and_reports_count(db_pool):
-    respx.post("https://api.telegram.org/bottoken123/sendMessage").mock(
-        return_value=httpx.Response(200, json={"ok": True})
-    )
-    async with db_pool.connection() as conn:
-        source = await conn.execute(
-            "INSERT INTO sources (domain, feed_url, kind, tier, status) "
-            "VALUES ('example.com', 'https://example.com/feed', 'rss', 1, 'active') RETURNING id"
-        )
-        source_id = (await source.fetchone())[0]
-        approved = json.dumps({"i": 0, "is_launch": True, "stage": "world_premiere", "brand": "BYD", "model": "Seal 06", "confidence": 0.92})
         await conn.execute(
-            "INSERT INTO raw_items (source_id, url, url_hash, title, status, classified) "
-            "VALUES (%s, 'https://x/1', 'h1', 'Approved item', 'new', %s)",
-            (source_id, approved),
+            "INSERT INTO launch_events (dedupe_key, brand, model, model_slug, stage, "
+            "highlights, confidence, published) VALUES "
+            "('k3', 'BYD', 'Seal 08', 'seal-08', 'world_premiere', ARRAY['h'], 0.5, FALSE)"
+        )
+        await conn.execute(
+            "INSERT INTO event_sources (event_id, item_id, source_id, is_primary) VALUES (%s, %s, %s, TRUE)",
+            (pending_id, item_id, source_id),
         )
 
-    stats = await run_publish_smoke(db_pool, "token123", "chat1", logger=None)
+    events = await get_pending_events(db_pool)
 
-    # "sent" is the int count of items actually marked notified, not a bool
-    # of "did the API call succeed" (True == 1 made the old literal pass by
-    # coincidence).
-    assert stats == {"sent": 1, "item_count": 1}
+    assert len(events) == 1
+    assert events[0]["id"] == pending_id
+    assert events[0]["primary_url"] == "https://x.com/a"
+    assert events[0]["source_count"] == 1
 
 
 @respx.mock
-async def test_run_publish_smoke_marks_items_notified_and_excludes_from_next_run(db_pool):
+async def test_publish_pending_events_marks_published_only_on_success(db_pool):
     respx.post("https://api.telegram.org/bottoken123/sendMessage").mock(
         return_value=httpx.Response(200, json={"ok": True})
     )
-    async with db_pool.connection() as conn:
-        source = await conn.execute(
-            "INSERT INTO sources (domain, feed_url, kind, tier, status) "
-            "VALUES ('example.com', 'https://example.com/feed', 'rss', 1, 'active') RETURNING id"
-        )
-        source_id = (await source.fetchone())[0]
-        approved = json.dumps({"i": 0, "is_launch": True, "stage": "world_premiere", "brand": "BYD", "model": "Seal 06", "confidence": 0.92})
-        row = await conn.execute(
-            "INSERT INTO raw_items (source_id, url, url_hash, title, status, classified) "
-            "VALUES (%s, 'https://x/1', 'h1', 'Approved item', 'new', %s) RETURNING id",
-            (source_id, approved),
-        )
-        item_id = (await row.fetchone())[0]
-
-    stats = await run_publish_smoke(db_pool, "token123", "chat1", logger=None)
-    # "sent" is the int count of items marked notified (True == 1 made the
-    # old literal pass by coincidence, not because it was re-verified
-    # against the new int contract).
-    assert stats == {"sent": 1, "item_count": 1}
-
-    async with db_pool.connection() as conn:
-        result = await conn.execute("SELECT status FROM raw_items WHERE id = %s", (item_id,))
-        (status,) = await result.fetchone()
-    assert status == "notified"
-
-    # A second run must not re-select or re-send the now-notified item. This
-    # is the zero-eligible-items ("quiet week") case, which sends the
-    # heartbeat text successfully but has zero items to mark notified --
-    # "sent" now counts items marked notified (not "did the API call
-    # succeed"), so this must be 0 rather than the old True.
-    second_stats = await run_publish_smoke(db_pool, "token123", "chat1", logger=None)
-    assert second_stats == {"sent": 0, "item_count": 0}
-
-
-@respx.mock
-async def test_run_publish_smoke_leaves_status_new_when_send_fails(db_pool):
-    respx.post("https://api.telegram.org/bottoken123/sendMessage").mock(
-        return_value=httpx.Response(500)
-    )
-    async with db_pool.connection() as conn:
-        source = await conn.execute(
-            "INSERT INTO sources (domain, feed_url, kind, tier, status) "
-            "VALUES ('example.com', 'https://example.com/feed', 'rss', 1, 'active') RETURNING id"
-        )
-        source_id = (await source.fetchone())[0]
-        approved = json.dumps({"i": 0, "is_launch": True, "stage": "world_premiere", "brand": "BYD", "model": "Seal 06", "confidence": 0.92})
-        row = await conn.execute(
-            "INSERT INTO raw_items (source_id, url, url_hash, title, status, classified) "
-            "VALUES (%s, 'https://x/1', 'h1', 'Approved item', 'new', %s) RETURNING id",
-            (source_id, approved),
-        )
-        item_id = (await row.fetchone())[0]
-
-    stats = await run_publish_smoke(db_pool, "token123", "chat1", logger=None)
-    # "sent" is the int count of items marked notified -- 0 here because the
-    # send failed (False == 0 made the old literal pass by coincidence, not
-    # because it was re-verified against the new int contract).
-    assert stats == {"sent": 0, "item_count": 1}
-
-    async with db_pool.connection() as conn:
-        result = await conn.execute("SELECT status FROM raw_items WHERE id = %s", (item_id,))
-        (status,) = await result.fetchone()
-    assert status == "new"
-
-
-async def _insert_bulky_approved_items(db_pool, count: int) -> list[int]:
-    """Insert `count` approved-and-unnotified raw_items rows with a long
-    enough `model` field that the combined single-message summary exceeds
-    the chunk budget, forcing run_publish_smoke to split across multiple
-    Telegram messages."""
-    long_highlight = "x" * 400
-    item_ids: list[int] = []
-    async with db_pool.connection() as conn:
-        source = await conn.execute(
-            "INSERT INTO sources (domain, feed_url, kind, tier, status) "
-            "VALUES ('example.com', 'https://example.com/feed', 'rss', 1, 'active') RETURNING id"
-        )
-        source_id = (await source.fetchone())[0]
-        for n in range(count):
-            classified = json.dumps(
-                {
-                    "i": 0,
-                    "is_launch": True,
-                    "stage": "world_premiere",
-                    "brand": "BYD",
-                    "model": f"Seal {n} {long_highlight}",
-                    "confidence": 0.9,
-                }
-            )
-            row = await conn.execute(
-                "INSERT INTO raw_items (source_id, url, url_hash, title, status, classified) "
-                "VALUES (%s, %s, %s, %s, 'new', %s) RETURNING id",
-                (source_id, f"https://x/{n}", f"h{n}", f"Bulky item {n}", classified),
-            )
-            item_ids.append((await row.fetchone())[0])
-    return item_ids
-
-
-@respx.mock
-async def test_run_publish_smoke_chunks_large_backlog_into_multiple_messages_and_marks_all_notified(db_pool):
-    """CRITICAL: a single-message summary has no 4096-char chunking, so a
-    large enough backlog (worsened by the classify.py re-billing bug, but
-    possible even after that fix on the first run after an outage) made the
-    ENTIRE send fail as one giant rejected message -- mark_notified never ran
-    for ANY item, and they stayed 'new' forever. A large backlog must now be
-    split across multiple Telegram messages, with every item across every
-    chunk ending up notified when every chunk sends successfully."""
-    respx.post("https://api.telegram.org/bottoken123/sendMessage").mock(
-        return_value=httpx.Response(200, json={"ok": True})
-    )
-    item_ids = await _insert_bulky_approved_items(db_pool, 15)
-
-    stats = await run_publish_smoke(db_pool, "token123", "chat1", logger=None)
-
-    telegram_calls = [c for c in respx.calls if "sendMessage" in str(c.request.url)]
-    assert len(telegram_calls) > 1, "expected the backlog to be split across more than one message"
-    assert stats == {"sent": 15, "item_count": 15}
-
     async with db_pool.connection() as conn:
         result = await conn.execute(
-            "SELECT count(*) FROM raw_items WHERE id = ANY(%s) AND status = 'notified'", (item_ids,)
+            "INSERT INTO launch_events (dedupe_key, brand, model, model_slug, stage, "
+            "highlights, confidence, published) VALUES "
+            "('k1', 'BYD', 'Seal 06', 'seal-06', 'world_premiere', ARRAY['h'], 0.9, FALSE) RETURNING id"
         )
-        assert (await result.fetchone())[0] == 15
+        event_id = (await result.fetchone())[0]
 
+    stats = await publish_pending_events(db_pool, "token123", "chat1", logger=None)
 
-@respx.mock
-async def test_run_publish_smoke_marks_only_the_successfully_sent_chunk_when_one_chunk_fails(db_pool):
-    """A failed chunk must not block a different, successfully-sent chunk's
-    items from being marked notified -- the failed chunk's items must stay
-    'new' (retried next week) while the other chunk's items become
-    'notified'."""
-
-    def _responder(request: httpx.Request) -> httpx.Response:
-        # Fail exactly the first part; succeed every other part.
-        if b"parte 1/" in request.content:
-            return httpx.Response(500)
-        return httpx.Response(200, json={"ok": True})
-
-    respx.post("https://api.telegram.org/bottoken123/sendMessage").mock(side_effect=_responder)
-    item_ids = await _insert_bulky_approved_items(db_pool, 15)
-
-    stats = await run_publish_smoke(db_pool, "token123", "chat1", logger=None)
-
-    telegram_calls = [c for c in respx.calls if "sendMessage" in str(c.request.url)]
-    assert len(telegram_calls) > 1
-    assert stats["item_count"] == 15
-    # Not everything got notified (the failed chunk's items didn't)...
-    assert 0 < stats["sent"] < 15
-
+    assert stats == {"pending": 1, "sent": 1}
     async with db_pool.connection() as conn:
-        result = await conn.execute(
-            "SELECT status, count(*) FROM raw_items WHERE id = ANY(%s) GROUP BY status", (item_ids,)
-        )
-        counts = dict(await result.fetchall())
-    # ...and exactly matches the DB: sent items are 'notified', the rest are
-    # still 'new' (unaffected by the other chunk's failure) and will be
-    # retried on the next weekly-run.
-    assert counts.get("notified", 0) == stats["sent"]
-    assert counts.get("new", 0) == 15 - stats["sent"]
-
-
-async def test_mark_notified_with_empty_list_is_a_noop(db_pool):
-    # An empty item_ids list must short-circuit before ever touching the
-    # database -- not merely produce a query that happens to match zero
-    # rows. Spy on pool.connection (wrapping the real bound method so any
-    # call that does slip through still works) and assert it's never
-    # entered.
-    spy = MagicMock(side_effect=db_pool.connection)
-    db_pool.connection = spy
-
-    await mark_notified(db_pool, [])
-
-    spy.assert_not_called()
+        result = await conn.execute("SELECT published FROM launch_events WHERE id = %s", (event_id,))
+        assert (await result.fetchone())[0] is True

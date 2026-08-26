@@ -10,11 +10,14 @@ from carwatch.db import close_pool, get_open_pool, run_migrations
 from carwatch.discovery_seed import build_google_news_sources, load_fixed_sources, seed_fixed_sources
 from carwatch.ingest import run_ingest
 from carwatch.llm.classify import run_classify
+from carwatch.llm.extract import run_extract
 from carwatch.logging_setup import configure_logging
 from carwatch.models import load_brands_config, load_keywords_config
 from carwatch.prefilter import run_prefilter
 from carwatch.probe import run_probe
-from carwatch.publishers.telegram import get_approved_items_for_notification, run_publish_smoke
+from carwatch.publishers.atom import write_atom_feed
+from carwatch.publishers.telegram import get_pending_events, publish_pending_events
+from carwatch.review import run_review
 from carwatch.settings import get_settings
 
 app = typer.Typer()
@@ -37,6 +40,18 @@ MIGRATIONS_DIR = CARWATCH_ROOT / "migrations"
 
 def _logger():
     return configure_logging(get_settings().log_level)
+
+
+async def _publish_and_write_feed(pool, settings, logger):
+    """Send pending launch_events over Telegram, then (re)write the Atom feed.
+
+    Shared by `publish` (non-dry-run path) and `weekly-run` -- both need the
+    identical publish-then-write-feed sequence, and letting them drift would
+    risk one route writing a stale feed after a publish.
+    """
+    stats = await publish_pending_events(pool, settings.telegram_bot_token, settings.telegram_chat_id, logger)
+    await write_atom_feed(pool, Path(settings.atom_feed_path), settings.atom_feed_url)
+    return stats
 
 
 @db_app.command("migrate")
@@ -123,16 +138,39 @@ def classify(limit: int = typer.Option(100, "--limit")):
 
 
 @app.command()
+def extract(limit: int = typer.Option(50, "--limit")):
+    async def _run():
+        logger = _logger()
+        pool = await get_open_pool()
+        stats = await run_extract(pool, logger, limit=limit)
+        await close_pool()
+        return stats
+
+    typer.echo(asyncio.run(_run()))
+
+
+@app.command()
+def review(limit: int = typer.Option(15, "--limit")):
+    async def _run():
+        pool = await get_open_pool()
+        counts = await run_review(pool, limit, input_fn=input, print_fn=typer.echo)
+        await close_pool()
+        return counts
+
+    typer.echo(asyncio.run(_run()))
+
+
+@app.command()
 def publish(dry_run: bool = typer.Option(False, "--dry-run")):
     async def _run():
         logger = _logger()
         pool = await get_open_pool()
         if dry_run:
-            items = await get_approved_items_for_notification(pool)
+            events = await get_pending_events(pool)
             await close_pool()
-            return {"would_send": len(items)}
+            return {"would_send": len(events)}
         settings = get_settings()
-        stats = await run_publish_smoke(pool, settings.telegram_bot_token, settings.telegram_chat_id, logger)
+        stats = await _publish_and_write_feed(pool, settings, logger)
         await close_pool()
         return stats
 
@@ -154,40 +192,37 @@ def stats():
     typer.echo(asyncio.run(_run()))
 
 
-_EMPTY_INGEST_STATS = {"sources_checked": 0, "sources_failed": 0, "items_new": 0, "ms": 0}
-_EMPTY_PREFILTER_STATS = {"in": 0, "out": 0, "pass_rate": 0.0}
-_EMPTY_CLASSIFY_STATS = {"in": 0, "approved": 0, "rejected": 0, "parse_errors": 0}
-_EMPTY_PUBLISH_STATS = {"sent": 0, "item_count": 0}
-
-
 @app.command(name="weekly-run")
 def weekly_run():
-    """Single composite pass: ingest -> prefilter -> classify -> publish.
+    """Single composite pass: ingest -> prefilter -> classify -> extract -> publish (+ atom).
 
     DESIGN.md §1: replaces SPEC.md's APScheduler daemon (`carwatch run`) with one
-    synchronous run per systemd timer trigger. Exits non-zero when there WERE
-    items eligible for notification but none of them got sent, OR when the
-    publish stage itself raised -- a quiet week with nothing to notify is not
-    a failure, but publish crashing means "we may have had things to tell
-    someone and didn't," which must never exit 0 even though its zeroed
-    fallback stats (`{"sent": 0, "item_count": 0}`) look identical to a quiet
-    week's. ingest/prefilter/classify failing alone is more tolerable (that
-    stage's work just doesn't happen this run, and there's usually a next
-    run), so only publish's own failure is treated as always-fatal.
-
-    Each stage is isolated in its own try/except: a crash in one stage (e.g. a
-    DB error inside run_classify that Fix 3's per-batch handling doesn't
-    catch, or a bug in run_prefilter) must not prevent the OTHER stages from
-    still attempting to run -- in particular, publish alone can still
-    successfully notify about items approved in a prior week even if this
-    week's classify pass melts down. close_pool() is wrapped in try/finally
-    so the pool is always released, even when every stage above it raised.
+    synchronous run per systemd timer trigger. dedupe.py has no separate CLI
+    entrypoint -- it's invoked per item inside run_extract (SPEC.md §3
+    architecture diagram: extract -> dedupe -> launch_events). Each pipeline
+    stage is isolated in its own try/except: one stage crashing must not skip
+    the stages after it (in particular, publish must still get a chance to
+    send launch_events left over from a prior week) and must not skip
+    close_pool() (a pool leaked on every unhandled exception would never be
+    reclaimed for the life of the process). Exits non-zero when publish
+    itself failed to run to completion (`failed_stages` -- this must hold
+    regardless of the zeroed publish stats a crash leaves behind) or when it
+    ran but sent fewer events than were pending -- a quiet week with zero
+    pending events, or a week where every pending event sent, is not a
+    failure. The other stages (ingest/prefilter/classify/extract) failing
+    alone is tolerated: nothing is lost, there's a next run.
     """
 
     async def _run():
         logger = _logger()
         pool = await get_open_pool()
         failed_stages: list[str] = []
+        ingest_stats = {"sources_checked": 0, "sources_failed": 0, "items_new": 0, "ms": 0}
+        prefilter_stats = {"in": 0, "out": 0, "pass_rate": 0.0}
+        classify_stats = {"in": 0, "approved": 0, "rejected": 0, "parse_errors": 0}
+        extract_stats = {"in": 0, "extracted": 0, "error": 0}
+        publish_stats = {"pending": 0, "sent": 0}
+
         try:
             settings = get_settings()
             brands_config = load_brands_config(CONFIG_DIR / "brands.yaml")
@@ -198,54 +233,46 @@ def weekly_run():
             try:
                 ingest_stats = await run_ingest(pool, logger)
             except Exception as exc:
-                logger.error("weekly_run.stage_failed", stage="ingest", error=f"{type(exc).__name__}: {exc}")
-                ingest_stats = dict(_EMPTY_INGEST_STATS)
                 failed_stages.append("ingest")
+                logger.error("weekly_run.stage_failed", stage="ingest", error=f"{type(exc).__name__}: {exc}")
 
             try:
                 prefilter_stats = await run_prefilter(pool, brands_config, keywords_config, logger)
             except Exception as exc:
-                logger.error("weekly_run.stage_failed", stage="prefilter", error=f"{type(exc).__name__}: {exc}")
-                prefilter_stats = dict(_EMPTY_PREFILTER_STATS)
                 failed_stages.append("prefilter")
+                logger.error("weekly_run.stage_failed", stage="prefilter", error=f"{type(exc).__name__}: {exc}")
 
             try:
                 classify_stats = await run_classify(pool, logger, limit=200)
             except Exception as exc:
-                logger.error("weekly_run.stage_failed", stage="classify", error=f"{type(exc).__name__}: {exc}")
-                classify_stats = dict(_EMPTY_CLASSIFY_STATS)
                 failed_stages.append("classify")
+                logger.error("weekly_run.stage_failed", stage="classify", error=f"{type(exc).__name__}: {exc}")
 
             try:
-                publish_stats = await run_publish_smoke(
-                    pool, settings.telegram_bot_token, settings.telegram_chat_id, logger
-                )
+                extract_stats = await run_extract(pool, logger, limit=200)
             except Exception as exc:
-                logger.error("weekly_run.stage_failed", stage="publish", error=f"{type(exc).__name__}: {exc}")
-                publish_stats = dict(_EMPTY_PUBLISH_STATS)
-                failed_stages.append("publish")
+                failed_stages.append("extract")
+                logger.error("weekly_run.stage_failed", stage="extract", error=f"{type(exc).__name__}: {exc}")
 
-            return {
-                "ingest": ingest_stats,
-                "prefilter": prefilter_stats,
-                "classify": classify_stats,
-                "publish": publish_stats,
-                "failed_stages": failed_stages,
-            }
+            try:
+                publish_stats = await _publish_and_write_feed(pool, settings, logger)
+            except Exception as exc:
+                failed_stages.append("publish")
+                logger.error("weekly_run.stage_failed", stage="publish", error=f"{type(exc).__name__}: {exc}")
         finally:
             await close_pool()
 
+        return {
+            "ingest": ingest_stats,
+            "prefilter": prefilter_stats,
+            "classify": classify_stats,
+            "extract": extract_stats,
+            "publish": publish_stats,
+            "failed_stages": failed_stages,
+        }
+
     result = asyncio.run(_run())
     typer.echo(result)
-    publish_had_unsent_items = result["publish"]["item_count"] > 0 and result["publish"]["sent"] == 0
-    # A lone publish-stage crash zeroes publish_stats to the exact same
-    # {"sent": 0, "item_count": 0} shape as a legitimate quiet week, so
-    # publish_had_unsent_items alone can never catch it (item_count > 0 is
-    # required, and a crash-before-counting-anything can't satisfy that).
-    # Check whether publish specifically raised, independent of item_count,
-    # so this failure mode is never silently reported as a clean exit 0.
-    # This also subsumes the "every stage raised" total-meltdown case, since
-    # that can only happen when publish is among the failed stages too.
-    publish_stage_crashed = "publish" in result["failed_stages"]
-    if publish_had_unsent_items or publish_stage_crashed:
+    publish_crashed = "publish" in result["failed_stages"]
+    if publish_crashed or result["publish"]["sent"] < result["publish"]["pending"]:
         raise typer.Exit(code=1)

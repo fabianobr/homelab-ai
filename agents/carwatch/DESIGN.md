@@ -188,6 +188,50 @@ fetch (não só gravado), a heurística de corpo curto <500 chars só vale para
 eventos `fetch.result`/`breaker.trip`/`llm.call` do §18 passaram a ser
 emitidos de fato.
 
+### 7. Fase 2 — `dedupe.py`: terceiro gate além dos dois limiares do §12
+
+O fuzzy match do SPEC.md §12 usa dois limiares: `similarity(model)` via
+`pg_trgm` ≥ **0.55** e cosseno do embedding ≥ **0.86**, ambos obrigatórios
+("Só embedding produz falso positivo entre modelos irmãos (ex.: Seal 05 vs
+Seal 06)" — ou seja, o spec assume que o gate de trigram sozinho já barra
+esse par).
+
+Medido empiricamente contra o modelo de embedding real
+(`paraphrase-multilingual-MiniLM-L12-v2`) e o `pg_trgm` real do Postgres, os
+dois limiares do §12 **passam** para o próprio par que o spec cita como
+exemplo canônico de falso positivo:
+
+- `similarity('Seal 05', 'Seal 06')` = **0.6** (acima do gate de 0.55)
+- cosseno do embedding sobre `f"{brand} {model} {generation or ''} {' '.join(highlights)}"`
+  para esse par = **~0.95–0.97** — e **pior ainda** (0.9652) com
+  `highlights=[]`, que é o valor default real de `ExtractedEvent.highlights`,
+  não um caso de borda.
+
+Ou seja: o caso comum (item sem highlights extraídos) falha a garantia que o
+próprio §12 promete, não só um cenário raro. Duas causas, nenhuma
+específica de dado de teste: strings curtas diferindo por um caractere têm
+similaridade de trigram inerentemente alta (poucos trigramas no total), e
+este modelo de embedding não pesa fortemente sufixos numéricos finais —
+achado também vale para o par sem dígito nenhum de um lado ("Model 3" vs
+"Model Y": trigram 0.6, cosseno ~0.90).
+
+**Correção adotada:** um terceiro gate, aditivo, não substitui nem afrouxa
+os dois limiares do spec — `dedupe.py`'s `_digit_signature()` extrai os
+grupos de dígitos de cada string de modelo (`"Seal 05"` → `("05",)`,
+`"Model Y"` → `()`) e rejeita um candidato de fuzzy match cujos dígitos
+sejam diferentes dos do evento recebido, mesmo que ambos os limiares do
+§12 passem. A tupla vazia conta como assinatura válida (não é curinga) —
+uma versão inicial dessa guarda só comparava quando os dois lados tinham
+algum dígito, o que deixava "Model 3"/"Model Y" colapsarem.
+
+**Questão de design aberta, não resolvida aqui:** o problema de fundo é o
+texto embutido no embedding (`_embedding_text`) ser dominado por
+`highlights`/contexto e não pelo `brand`+`model` que precisa discriminar.
+Retrabalhar essa entrada (ou os dois limiares do §12) fica para quem
+revisitar o dedupe engine em uma próxima fase — o gate de dígitos aqui é
+uma correção pontual e comprovada empiricamente, não uma reformulação do
+algoritmo do spec.
+
 ## O que **não** muda em relação ao `SPEC.md`
 
 - Schema do banco (§5) inteiro, incluindo `source_metrics`,
@@ -203,7 +247,8 @@ emitidos de fato.
 - `probe.py` (§7), `prefilter.py` (§9), `llm/classify.py` (§10),
   `llm/extract.py` (§11), `dedupe.py` (§12) completos, incluindo os
   prompts, os limiares (0.55 trigram / 0.86 cosseno), e a regra de
-  progressão de estágio — com as exceções registradas na seção 6 abaixo.
+  progressão de estágio — com as exceções registradas nas seções 6 e 7
+  acima (a seção 7 documenta um terceiro gate, aditivo, no fuzzy match).
 - `curate.py` (§13) e `discovery.py` (§14) completos — aliás, a cadência
   semanal do spec original para `curate` já era semanal; aqui ela só
   passa a rodar *dentro* do mesmo processo de `weekly-run` em vez de via

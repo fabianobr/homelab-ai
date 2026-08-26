@@ -58,7 +58,14 @@ def _feed(items: list[tuple[str, str, int]]) -> str:
 
 
 @respx.mock
-def test_weekly_run_end_to_end_ingests_classifies_and_publishes(db_pool):
+def test_weekly_run_end_to_end_ingests_classifies_and_publishes(db_pool, monkeypatch, tmp_path):
+    # Fase 2 Task 9 wires `extract` (and its article fetch) and `publish`'s
+    # Telegram send into `weekly-run`, so both need routes now. `extract`'s
+    # own fetch/LLM-call boundary is exercised in isolation by test_extract.py
+    # (fetcher.fetch + call_extract) -- here it's patched directly rather than
+    # via respx, matching that file's pattern, since asserting on the exact
+    # HTML fetched isn't this test's concern.
+    monkeypatch.setenv("ATOM_FEED_PATH", str(tmp_path / "feed.atom"))
     respx.get("https://press.example.com/robots.txt").mock(
         return_value=httpx.Response(200, text="User-agent: *\nAllow: /\n")
     )
@@ -73,6 +80,24 @@ def test_weekly_run_end_to_end_ingests_classifies_and_publishes(db_pool):
     )
     respx.post("https://api.telegram.org/bottest-bot-token/sendMessage").mock(
         return_value=httpx.Response(200, json={"ok": True})
+    )
+    # `extract` fetches the article body through the same shared
+    # `carwatch.fetcher.fetch()` ingest uses, so this is mocked via respx
+    # (scoped to this URL) rather than by patching `fetcher.fetch` itself --
+    # a global patch there would also swallow ingest's own feed fetch in this
+    # same run. >=500 chars avoids fetcher._is_blocked()'s short-page heuristic.
+    article_html = (
+        "<html><body><article>" + ("BYD Seal 06 estreou mundialmente em Shenzhen. " * 15) + "</article></body></html>"
+    )
+    respx.get("https://press.example.com/byd-seal-06").mock(return_value=httpx.Response(200, text=article_html))
+
+    fake_extracted_json = json.dumps(
+        {
+            "brand": "BYD", "model": "Seal 06", "generation": None, "body_type": "sedan",
+            "stage": "world_premiere", "is_new_generation": False, "markets": ["CN"],
+            "global_debut": True, "event_date": "2026-01-15", "sales_start": None,
+            "powertrain": None, "price": None, "highlights": ["Estreia mundial"], "confidence": 0.9,
+        }
     )
 
     _execute(
@@ -104,24 +129,38 @@ def test_weekly_run_end_to_end_ingests_classifies_and_publishes(db_pool):
             "stop_reason": "end_turn",
         }
 
-    with patch("carwatch.llm.classify.call_classify", new=AsyncMock(side_effect=fake_classify)):
+    call_extract_patch = patch("carwatch.llm.extract.call_extract", new=AsyncMock(return_value=fake_extracted_json))
+
+    with patch("carwatch.llm.classify.call_classify", new=AsyncMock(side_effect=fake_classify)), call_extract_patch:
         result = runner.invoke(app, ["weekly-run"])
 
     assert result.exit_code == 0, result.output
 
-    rows = _fetchall("SELECT title, status FROM raw_items ORDER BY id")
-    statuses = {title: status for title, status in rows}
-    # approved, classified populated, and marked 'notified' after a successful
-    # Telegram send (prep fix: without this, weekly-run would re-notify the
-    # same item every subsequent run -- see publishers/telegram.mark_notified).
-    assert statuses["BYD unveils Seal 06 world premiere"] == "notified"
+    rows = _fetchall("SELECT title, status, classified FROM raw_items ORDER BY id")
+    statuses = {title: status for title, status, _ in rows}
+    classified = {title: data for title, _, data in rows}
+    # `extract` (Fase 2 Task 9) now runs between classify and publish: the
+    # approved BYD item is picked up (status 'new' + classified.is_launch),
+    # fetched/extracted into a launch_events row via dedupe, and its
+    # raw_items row moves to 'extracted'.
+    assert statuses["BYD unveils Seal 06 world premiere"] == "extracted"
+    assert classified["BYD unveils Seal 06 world premiere"]["brand"] == "BYD"
     assert statuses["Random unrelated corporate news"] == "filtered"  # no positive keyword term
 
+    launch_events = _fetchall("SELECT brand, model, published FROM launch_events")
+    assert launch_events == [("BYD", "Seal 06", True)]
+
+    # publish sent the one pending event over Telegram.
     telegram_calls = [c for c in respx.calls if "sendMessage" in str(c.request.url)]
     assert len(telegram_calls) == 1
-    assert b"BYD" in telegram_calls[0].request.content
+
+    atom_path = tmp_path / "feed.atom"
+    assert atom_path.is_file()
+    assert "Seal 06" in atom_path.read_text()
 
     # Second run: same feed, unchanged -> conditional GET must short-circuit via 304.
+    # The BYD item is no longer 'new' (it's 'extracted'), so extract has
+    # nothing left to pick up and publish has nothing new to send.
     feed_route.side_effect = None
     respx.get("https://press.example.com/feed.xml").mock(return_value=httpx.Response(304))
 
@@ -131,3 +170,5 @@ def test_weekly_run_end_to_end_ingests_classifies_and_publishes(db_pool):
     assert second_result.exit_code == 0, second_result.output
     count = _fetchall("SELECT count(*) FROM raw_items")[0][0]
     assert count == 2  # no duplicates inserted on the second run
+    telegram_calls_after_second_run = [c for c in respx.calls if "sendMessage" in str(c.request.url)]
+    assert len(telegram_calls_after_second_run) == 1  # nothing new sent

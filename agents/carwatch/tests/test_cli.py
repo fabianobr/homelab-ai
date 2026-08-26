@@ -2,18 +2,39 @@
 import importlib
 import os
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import httpx
-import pytest
+import psycopg
 import respx
 from typer.testing import CliRunner
 
 from carwatch import cli as cli_module
+from carwatch import db as db_module
 from carwatch.cli import app
 
 runner = CliRunner()
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]  # agents/carwatch/
+
+# Mirrors tests/conftest.py's TEST_DB_URL / tests/test_e2e_fase1.py's pattern:
+# `publish` runs its own asyncio.run() internally, so a sync test can't reuse
+# the `db_pool` fixture's AsyncConnectionPool (opened on pytest-asyncio's own
+# event loop) for setup/assertion queries -- it talks to the same physical
+# test database directly via a plain synchronous psycopg connection instead.
+TEST_DB_URL = os.environ.get(
+    "DATABASE_URL_TEST", "postgresql://carwatch:carwatch@localhost:5433/carwatch_test"
+)
+
+
+def _execute(sql: str, params: tuple = ()) -> None:
+    with psycopg.connect(TEST_DB_URL) as conn:
+        conn.execute(sql, params)
+
+
+def _fetchall(sql: str, params: tuple = ()) -> list:
+    with psycopg.connect(TEST_DB_URL) as conn:
+        return conn.execute(sql, params).fetchall()
 
 
 def _reload_cli():
@@ -88,95 +109,6 @@ def test_stats_reports_counts_by_status(db_pool):
 
 
 @respx.mock
-def test_weekly_run_survives_a_raising_stage_and_still_closes_the_pool(db_pool, monkeypatch):
-    """CRITICAL: weekly_run had no exception handling around any pipeline
-    stage, and close_pool() only ran on the happy path. An unhandled
-    exception from any stage used to leak the connection pool (close_pool()
-    skipped entirely) AND abort every later stage, even ones that don't
-    depend on the failing one -- e.g. publish alone could otherwise still
-    successfully notify about items approved in a prior week. Simulate
-    run_ingest raising and confirm: the CLI still exits cleanly (no unhandled
-    traceback), the LATER stages (prefilter onward) still ran, and the pool
-    was closed."""
-    respx.post("https://api.telegram.org/bottest-bot-token/sendMessage").mock(
-        return_value=httpx.Response(200, json={"ok": True})
-    )
-
-    from carwatch import db as db_module
-
-    async def raising_ingest(pool, logger):
-        raise RuntimeError("simulated stage crash")
-
-    real_run_prefilter = cli_module.run_prefilter
-    prefilter_calls: list[bool] = []
-
-    async def spying_prefilter(pool, brands, keywords, logger):
-        prefilter_calls.append(True)
-        return await real_run_prefilter(pool, brands, keywords, logger)
-
-    monkeypatch.setattr(cli_module, "run_ingest", raising_ingest)
-    monkeypatch.setattr(cli_module, "run_prefilter", spying_prefilter)
-
-    result = runner.invoke(app, ["weekly-run"])
-
-    assert result.exc_info is None or not isinstance(result.exc_info[1], RuntimeError), (
-        "the stage exception must be caught inside weekly-run, not propagate to the CLI runner"
-    )
-    # Nothing was eligible to notify (empty DB) and not every stage failed,
-    # so this is not a reportable failure.
-    assert result.exit_code == 0, result.output
-    assert prefilter_calls, "the stage after the failing one must still have run"
-    assert db_module._pool is None, "close_pool() must run even when an earlier stage raised"
-
-
-@pytest.mark.parametrize("stage_attr", ["run_ingest", "run_prefilter", "run_classify"])
-@respx.mock
-def test_weekly_run_exits_zero_when_ingest_prefilter_or_classify_fails_alone(db_pool, monkeypatch, stage_attr):
-    """ingest/prefilter/classify failing alone is tolerable -- that stage's
-    work just doesn't happen this run, no data is lost, and there's usually a
-    next run -- so it must NOT force a non-zero exit on its own. Companion to
-    the publish-crash test below, which asserts the opposite for the one
-    stage whose failure IS always fatal."""
-    respx.post("https://api.telegram.org/bottest-bot-token/sendMessage").mock(
-        return_value=httpx.Response(200, json={"ok": True})
-    )
-
-    async def raising_stage(*args, **kwargs):
-        raise RuntimeError(f"simulated {stage_attr} crash")
-
-    monkeypatch.setattr(cli_module, stage_attr, raising_stage)
-
-    result = runner.invoke(app, ["weekly-run"])
-
-    assert result.exit_code == 0, result.output
-
-
-@respx.mock
-def test_weekly_run_exits_nonzero_when_publish_stage_crashes_alone(db_pool, monkeypatch):
-    """Post-review Finding 1: a lone run_publish_smoke crash zeroes
-    publish_stats to the exact same {"sent": 0, "item_count": 0} shape as a
-    legitimate quiet week, so the item_count>0 check can never catch it, and
-    the total-meltdown check requires all 4 stages to fail. Pre-Fix4 this
-    crash propagated loudly (non-zero exit, traceback); after stage isolation
-    it must still fail the run rather than going silent, since publish
-    crashing means "we may have had things to tell someone and didn't"."""
-    from carwatch import db as db_module
-
-    async def raising_publish(*args, **kwargs):
-        raise RuntimeError("simulated publish crash")
-
-    monkeypatch.setattr(cli_module, "run_publish_smoke", raising_publish)
-
-    result = runner.invoke(app, ["weekly-run"])
-
-    assert result.exc_info is None or not isinstance(result.exc_info[1], RuntimeError), (
-        "the stage exception must be caught inside weekly-run, not propagate to the CLI runner"
-    )
-    assert result.exit_code == 1, result.output
-    assert db_module._pool is None, "close_pool() must still run even though the run exits non-zero"
-
-
-@respx.mock
 def test_seed_sources_wires_fixed_and_google_news_sources_into_db(db_pool):
     """Task 14's seed_fixed_sources/build_google_news_sources/load_fixed_sources
     otherwise have no caller anywhere in the plan; this exercises the `seed-sources`
@@ -195,3 +127,149 @@ def test_seed_sources_wires_fixed_and_google_news_sources_into_db(db_pool):
     assert result.exit_code == 0
     assert "attempted" in result.output
     assert "seeded" in result.output
+
+
+def test_help_lists_fase2_commands():
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    for command in ("extract", "review"):
+        assert command in result.output
+
+
+def test_publish_dry_run_counts_pending_events_without_sending(db_pool):
+    result = runner.invoke(app, ["publish", "--dry-run"])
+    assert result.exit_code == 0
+    assert "would_send" in result.output
+
+
+@respx.mock
+def test_publish_sends_pending_event_and_writes_atom_feed(db_pool, monkeypatch, tmp_path):
+    """Direct, isolated coverage of `publish`'s non-dry-run path (previously
+    only exercised indirectly, mixed in with ingest/classify/extract, by
+    test_e2e_fase1.py's weekly-run end-to-end test). Also exercises the
+    _publish_and_write_feed helper shared with weekly-run.
+    """
+    monkeypatch.setenv("ATOM_FEED_PATH", str(tmp_path / "feed.atom"))
+    # env default from conftest.py's session-scoped _cli_test_env fixture.
+    respx.post("https://api.telegram.org/bottest-bot-token/sendMessage").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+
+    _execute(
+        "INSERT INTO launch_events (dedupe_key, brand, model, model_slug, stage, "
+        "highlights, confidence, published) VALUES "
+        "('k1', 'BYD', 'Seal 06', 'seal-06', 'world_premiere', ARRAY['h'], 0.9, FALSE)"
+    )
+
+    cli_result = runner.invoke(app, ["publish"])
+
+    assert cli_result.exit_code == 0, cli_result.output
+    assert "'sent': 1" in cli_result.output
+
+    rows = _fetchall("SELECT published FROM launch_events WHERE dedupe_key = 'k1'")
+    assert rows == [(True,)]
+
+    atom_path = tmp_path / "feed.atom"
+    assert atom_path.is_file()
+    assert "Seal 06" in atom_path.read_text()
+
+
+def _insert_pending_event(dedupe_key: str, model: str, model_slug: str) -> None:
+    _execute(
+        "INSERT INTO launch_events (dedupe_key, brand, model, model_slug, stage, "
+        "highlights, confidence, published) VALUES "
+        "(%s, 'BYD', %s, %s, 'world_premiere', ARRAY['h'], 0.9, FALSE)",
+        (dedupe_key, model, model_slug),
+    )
+
+
+def test_weekly_run_exits_nonzero_on_partial_telegram_send_failure(db_pool, monkeypatch, tmp_path):
+    """Fix 1: `publish_pending_events` can report `sent < pending` (some but
+    not all pending events sent) without `sent == 0`. The old check
+    (`result["publish"]["pending"] > 0 and result["publish"]["sent"] == 0`)
+    only failed when EVERY pending event failed to send -- a run where 1 of
+    2 events silently failed to notify still exited 0. `send_telegram_message`
+    is patched directly (rather than routed through respx) so the two calls
+    can be given different outcomes deterministically.
+    """
+    monkeypatch.setenv("ATOM_FEED_PATH", str(tmp_path / "feed.atom"))
+    _insert_pending_event("k1", "Seal 06", "seal-06")
+    _insert_pending_event("k2", "Seal 07", "seal-07")
+
+    with patch(
+        "carwatch.publishers.telegram.send_telegram_message",
+        new=AsyncMock(side_effect=[True, False]),
+    ):
+        result = runner.invoke(app, ["weekly-run"])
+
+    assert result.exit_code == 1, result.output
+    assert "'pending': 2" in result.output
+    assert "'sent': 1" in result.output
+
+
+def test_weekly_run_exits_zero_when_all_pending_events_send(db_pool, monkeypatch, tmp_path):
+    """Companion to the partial-failure test above: `sent < pending` must
+    stay False (exit 0) when every pending event sends, confirming Fix 1
+    didn't flip the check into always failing.
+    """
+    monkeypatch.setenv("ATOM_FEED_PATH", str(tmp_path / "feed.atom"))
+    _insert_pending_event("k1", "Seal 06", "seal-06")
+
+    with patch(
+        "carwatch.publishers.telegram.send_telegram_message",
+        new=AsyncMock(return_value=True),
+    ):
+        result = runner.invoke(app, ["weekly-run"])
+
+    assert result.exit_code == 0, result.output
+    assert "'pending': 1" in result.output
+    assert "'sent': 1" in result.output
+
+
+def test_weekly_run_tolerates_a_single_upstream_stage_failure(db_pool, monkeypatch, tmp_path):
+    """Fix 2 (a): ingest/prefilter+classify/extract failing alone must not
+    crash weekly-run, and must not by itself force a non-zero exit -- their
+    work simply doesn't happen this run (nothing pending, so publish itself
+    still reports a clean 0/0 and the run exits 0).
+    """
+    monkeypatch.setenv("ATOM_FEED_PATH", str(tmp_path / "feed.atom"))
+
+    with patch("carwatch.cli.run_ingest", new=AsyncMock(side_effect=RuntimeError("ingest boom"))):
+        result = runner.invoke(app, ["weekly-run"])
+
+    assert result.exit_code == 0, result.output
+    assert "'ingest'" in result.output
+    assert "'sources_checked': 0" in result.output
+
+
+def test_weekly_run_exits_nonzero_when_publish_stage_itself_raises(db_pool, monkeypatch, tmp_path):
+    """Fix 2 (b): if `_publish_and_write_feed` raises outright (as opposed to
+    completing and merely reporting nothing sent), weekly-run must exit
+    non-zero even though the zeroed publish stats fallback
+    (`{"pending": 0, "sent": 0}`) would otherwise read as "nothing pending"
+    (0 < 0 is False) and be mistaken for a clean, quiet week.
+    """
+    monkeypatch.setenv("ATOM_FEED_PATH", str(tmp_path / "feed.atom"))
+
+    with patch(
+        "carwatch.cli._publish_and_write_feed",
+        new=AsyncMock(side_effect=RuntimeError("telegram is down")),
+    ):
+        result = runner.invoke(app, ["weekly-run"])
+
+    assert result.exit_code == 1, result.output
+    assert "'pending': 0" in result.output
+    assert "'sent': 0" in result.output
+
+
+def test_weekly_run_closes_pool_even_when_a_stage_raises(db_pool, monkeypatch, tmp_path):
+    """Fix 2 (c): close_pool() must run in a `finally`, regardless of which
+    stage raised, so the module-level pool is never leaked across the life
+    of the process.
+    """
+    monkeypatch.setenv("ATOM_FEED_PATH", str(tmp_path / "feed.atom"))
+
+    with patch("carwatch.cli.run_extract", new=AsyncMock(side_effect=RuntimeError("extract boom"))):
+        runner.invoke(app, ["weekly-run"])
+
+    assert db_module._pool is None
