@@ -1,7 +1,6 @@
 """src/carwatch/llm/classify.py"""
 import json
 import re
-from pathlib import Path
 
 from anthropic import APIError
 from pydantic import ValidationError
@@ -9,8 +8,7 @@ from pydantic import ValidationError
 from carwatch.cost import compute_cost_usd, load_llm_pricing, record_llm_usage
 from carwatch.llm.client import MODEL, call_classify
 from carwatch.models import ClassifyItem
-
-CONFIG_DIR = Path(__file__).resolve().parents[3] / "config"  # src/carwatch/llm/ -> agents/carwatch/config
+from carwatch.settings import CONFIG_DIR
 
 SYSTEM_PROMPT = """\
 Você classifica notícias automotivas. Para cada item, decida se anuncia

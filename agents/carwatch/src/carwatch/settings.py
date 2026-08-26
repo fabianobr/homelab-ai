@@ -1,7 +1,25 @@
 """src/carwatch/settings.py"""
+import os
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# `config/` and `migrations/` are DATA directories that live next to the
+# package, not inside it, so they are not part of the installed wheel. Under
+# an editable/source-tree checkout `parents[2]` is `agents/carwatch/` and the
+# fallback works; under the Dockerfile's non-editable
+# `uv pip install --system .` `__file__` resolves inside site-packages and
+# `parents[2]` lands outside the project entirely. CARWATCH_ROOT makes the
+# deployment declare where those directories actually are — the Dockerfile
+# sets it to its WORKDIR. Every module that needs `config/` or `migrations/`
+# must resolve them from here rather than computing its own `__file__`-relative
+# path — see the git history of cli.py's CARWATCH_ROOT and cost.py's
+# load_llm_pricing() call sites for two real deploy-breaking bugs caused by
+# re-deriving this independently.
+CARWATCH_ROOT = Path(os.environ.get("CARWATCH_ROOT", Path(__file__).resolve().parents[2]))
+CONFIG_DIR = CARWATCH_ROOT / "config"
+MIGRATIONS_DIR = CARWATCH_ROOT / "migrations"
 
 
 class Settings(BaseSettings):
