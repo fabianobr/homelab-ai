@@ -65,6 +65,16 @@ systemctl --user list-timers carwatch.timer
 `Persistent=true` garante catch-up se a máquina estava desligada no
 horário agendado.
 
+## Servindo o feed Atom
+
+`publish` escreve `data/feed.atom` a cada execução — `data/` é montado do
+host (`docker-compose.yml`) porque `docker compose run --rm app` destrói o
+filesystem do container ao sair; sem esse mount o arquivo nunca chegaria
+ao host. Aponte seu nginx/static host/Cloudflare para
+`~/homelab-ai/agents/carwatch/data/feed.atom` (SPEC.md §16: "servido por
+nginx ou qualquer static host, sem framework web") e ajuste `ATOM_FEED_URL`
+no `.env` pra URL pública real.
+
 ## Riscos operacionais conhecidos
 
 - `llm/classify.py` usava `max_tokens=300` por lote de 20 itens (valor exato

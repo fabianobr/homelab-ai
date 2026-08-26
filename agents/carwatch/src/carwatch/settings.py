@@ -34,7 +34,11 @@ class Settings(BaseSettings):
     fetch_min_interval_sec: float = 3.0
     fetch_global_concurrency: int = 10
     log_level: str = "INFO"
-    atom_feed_path: str = "feed.atom"
+    # Must land under the docker-compose `app` service's `./data:/app/data`
+    # mount -- anything written outside it (e.g. a bare "feed.atom") only
+    # ever exists inside the throwaway filesystem of a `docker compose run
+    # --rm` container and is never reachable by nginx or any static host.
+    atom_feed_path: str = "data/feed.atom"
     atom_feed_url: str = "https://example.com/feed.atom"
 
     @property
