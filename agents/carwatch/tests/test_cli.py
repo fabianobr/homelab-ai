@@ -9,8 +9,8 @@ import psycopg
 import respx
 from typer.testing import CliRunner
 
-from carwatch import cli as cli_module
 from carwatch import db as db_module
+from carwatch import settings as settings_module
 from carwatch.cli import app
 
 runner = CliRunner()
@@ -37,8 +37,8 @@ def _fetchall(sql: str, params: tuple = ()) -> list:
         return conn.execute(sql, params).fetchall()
 
 
-def _reload_cli():
-    return importlib.reload(cli_module)
+def _reload_settings():
+    return importlib.reload(settings_module)
 
 
 def test_config_and_migrations_resolve_from_carwatch_root(monkeypatch):
@@ -48,10 +48,15 @@ def test_config_and_migrations_resolve_from_carwatch_root(monkeypatch):
     expression pointed outside the project — `db migrate` then silently
     applied ZERO migrations and `weekly-run` crashed on a missing
     config/brands.yaml. CARWATCH_ROOT is what the Dockerfile sets to /app.
+
+    CARWATCH_ROOT/CONFIG_DIR/MIGRATIONS_DIR live in settings.py (every module
+    that needs config/ or migrations/ imports them from there), so it's
+    settings.py that must be reloaded to pick up the env var change —
+    reloading cli.py alone would just re-bind the names it already imported.
     """
     monkeypatch.setenv("CARWATCH_ROOT", str(PROJECT_ROOT))
     try:
-        reloaded = _reload_cli()
+        reloaded = _reload_settings()
         assert reloaded.CARWATCH_ROOT == PROJECT_ROOT
         sql_files = list(reloaded.MIGRATIONS_DIR.glob("*.sql"))
         assert sql_files, f"no *.sql found under {reloaded.MIGRATIONS_DIR}"
@@ -60,18 +65,18 @@ def test_config_and_migrations_resolve_from_carwatch_root(monkeypatch):
         assert (reloaded.CONFIG_DIR / "settings.yaml").is_file()
     finally:
         monkeypatch.delenv("CARWATCH_ROOT", raising=False)
-        _reload_cli()
+        _reload_settings()
 
 
 def test_carwatch_root_env_var_overrides_the_source_tree_fallback(monkeypatch, tmp_path):
     monkeypatch.setenv("CARWATCH_ROOT", str(tmp_path))
     try:
-        reloaded = _reload_cli()
+        reloaded = _reload_settings()
         assert reloaded.CONFIG_DIR == tmp_path / "config"
         assert reloaded.MIGRATIONS_DIR == tmp_path / "migrations"
     finally:
         monkeypatch.delenv("CARWATCH_ROOT", raising=False)
-        _reload_cli()
+        _reload_settings()
 
 
 def test_dockerfile_sets_carwatch_root_to_its_workdir():

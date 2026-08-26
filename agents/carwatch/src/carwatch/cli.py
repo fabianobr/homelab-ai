@@ -1,6 +1,5 @@
 """src/carwatch/cli.py"""
 import asyncio
-import os
 from pathlib import Path
 
 import typer
@@ -22,24 +21,11 @@ from carwatch.probe import run_probe
 from carwatch.publishers.atom import write_atom_feed
 from carwatch.publishers.telegram import get_pending_events, publish_pending_events
 from carwatch.review import run_review
-from carwatch.settings import get_settings
+from carwatch.settings import CONFIG_DIR, MIGRATIONS_DIR, get_settings
 
 app = typer.Typer()
 db_app = typer.Typer()
 app.add_typer(db_app, name="db")
-
-# `config/` and `migrations/` are DATA directories that live next to the
-# package, not inside it, so they are not part of the installed wheel. Under
-# an editable/source-tree checkout `parents[2]` is `agents/carwatch/` and the
-# fallback works; under the Dockerfile's non-editable
-# `uv pip install --system .` `__file__` resolves inside site-packages and
-# `parents[2]` lands outside the project entirely (`db migrate` would then
-# silently apply zero migrations and `weekly-run` would crash on a missing
-# `config/brands.yaml`). CARWATCH_ROOT makes the deployment declare where
-# those directories actually are — the Dockerfile sets it to its WORKDIR.
-CARWATCH_ROOT = Path(os.environ.get("CARWATCH_ROOT", Path(__file__).resolve().parents[2]))
-CONFIG_DIR = CARWATCH_ROOT / "config"
-MIGRATIONS_DIR = CARWATCH_ROOT / "migrations"
 
 
 def _logger():

@@ -1,7 +1,6 @@
 """src/carwatch/llm/extract.py"""
 import json
 import re
-from pathlib import Path
 
 import structlog
 from pydantic import ValidationError
@@ -19,8 +18,7 @@ from carwatch.llm.client import MODEL
 from carwatch.llm.client import call_extract as _call_extract_raw
 from carwatch.models import ExtractedEvent
 from carwatch.publishers.telegram import send_telegram_message
-
-CONFIG_DIR = Path(__file__).resolve().parents[3] / "config"  # src/carwatch/llm/ -> agents/carwatch/config
+from carwatch.settings import CONFIG_DIR
 
 MAX_CHARS = 6000 * 4  # approximate 4 chars/token (SPEC.md §11.3 caps at 6000 tokens)
 MIN_TEXT_LEN_FOR_FULL_EXTRACT = 400
