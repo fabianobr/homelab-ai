@@ -5,6 +5,12 @@ import html
 import httpx
 
 TELEGRAM_API_BASE = "https://api.telegram.org"
+# frankfurter.app 301-redirects here now; httpx doesn't follow redirects by
+# default and raise_for_status() rejects 3xx too, so pointing this at the old
+# host makes fetch_usd_rates() silently return {} on every real call. Point
+# straight at the live host, and still pass follow_redirects=True below as a
+# defense-in-depth against the next such move.
+FRANKFURTER_API = "https://api.frankfurter.dev/v1/latest"
 
 STAGE_EMOJI = {
     "spy": "🕵️", "teaser": "🎬", "concept": "💭", "world_premiere": "🌍",
@@ -22,6 +28,67 @@ POWERTRAIN_TYPE_LABEL = {
 }
 PRICE_STATUS_LABEL = {"official": "oficial", "estimated": "estimado", "starting_from": "a partir de"}
 
+# extract.py's prompt constrains `markets` to ISO-3166-1 alpha-2 codes, so
+# lookups here are keyed on that. Covers UN member states plus a few
+# territories relevant to automotive markets (TW, HK, MO, PR); an unlisted
+# code still renders correctly via _format_market's fallback to the raw code.
+COUNTRY_NAME_PT = {
+    "AD": "Andorra", "AE": "Emirados Árabes Unidos", "AF": "Afeganistão",
+    "AG": "Antígua e Barbuda", "AI": "Anguilla", "AL": "Albânia", "AM": "Armênia",
+    "AO": "Angola", "AR": "Argentina", "AS": "Samoa Americana", "AT": "Áustria",
+    "AU": "Austrália", "AW": "Aruba", "AZ": "Azerbaijão", "BA": "Bósnia e Herzegovina",
+    "BB": "Barbados", "BD": "Bangladesh", "BE": "Bélgica", "BF": "Burkina Faso",
+    "BG": "Bulgária", "BH": "Bahrein", "BI": "Burundi", "BJ": "Benin",
+    "BM": "Bermudas", "BN": "Brunei", "BO": "Bolívia", "BR": "Brasil",
+    "BS": "Bahamas", "BT": "Butão", "BW": "Botsuana", "BY": "Belarus",
+    "BZ": "Belize", "CA": "Canadá", "CD": "República Democrática do Congo",
+    "CF": "República Centro-Africana", "CG": "Congo", "CH": "Suíça",
+    "CI": "Costa do Marfim", "CK": "Ilhas Cook", "CL": "Chile", "CM": "Camarões",
+    "CN": "China", "CO": "Colômbia", "CR": "Costa Rica", "CU": "Cuba",
+    "CV": "Cabo Verde", "CY": "Chipre", "CZ": "República Tcheca", "DE": "Alemanha",
+    "DJ": "Djibuti", "DK": "Dinamarca", "DM": "Dominica", "DO": "República Dominicana",
+    "DZ": "Argélia", "EC": "Equador", "EE": "Estônia", "EG": "Egito",
+    "ER": "Eritreia", "ES": "Espanha", "ET": "Etiópia", "FI": "Finlândia",
+    "FJ": "Fiji", "FM": "Micronésia", "FR": "França", "GA": "Gabão",
+    "GB": "Reino Unido", "GD": "Granada", "GE": "Geórgia", "GH": "Gana",
+    "GI": "Gibraltar", "GL": "Groenlândia", "GM": "Gâmbia", "GN": "Guiné",
+    "GQ": "Guiné Equatorial", "GR": "Grécia", "GT": "Guatemala", "GU": "Guam",
+    "GW": "Guiné-Bissau", "GY": "Guiana", "HK": "Hong Kong", "HN": "Honduras",
+    "HR": "Croácia", "HT": "Haiti", "HU": "Hungria", "ID": "Indonésia",
+    "IE": "Irlanda", "IL": "Israel", "IN": "Índia", "IQ": "Iraque", "IR": "Irã",
+    "IS": "Islândia", "IT": "Itália", "JM": "Jamaica", "JO": "Jordânia",
+    "JP": "Japão", "KE": "Quênia", "KG": "Quirguistão", "KH": "Camboja",
+    "KI": "Kiribati", "KM": "Comores", "KN": "São Cristóvão e Névis",
+    "KP": "Coreia do Norte", "KR": "Coreia do Sul", "KW": "Kuwait",
+    "KY": "Ilhas Cayman", "KZ": "Cazaquistão", "LA": "Laos", "LB": "Líbano",
+    "LC": "Santa Lúcia", "LI": "Liechtenstein", "LK": "Sri Lanka", "LR": "Libéria",
+    "LS": "Lesoto", "LT": "Lituânia", "LU": "Luxemburgo", "LV": "Letônia",
+    "LY": "Líbia", "MA": "Marrocos", "MC": "Mônaco", "MD": "Moldávia",
+    "ME": "Montenegro", "MG": "Madagascar", "MH": "Ilhas Marshall",
+    "MK": "Macedônia do Norte", "ML": "Mali", "MM": "Mianmar", "MN": "Mongólia",
+    "MO": "Macau", "MR": "Mauritânia", "MT": "Malta", "MU": "Maurício",
+    "MV": "Maldivas", "MW": "Malaui", "MX": "México", "MY": "Malásia",
+    "MZ": "Moçambique", "NA": "Namíbia", "NE": "Níger", "NG": "Nigéria",
+    "NI": "Nicarágua", "NL": "Países Baixos", "NO": "Noruega", "NP": "Nepal",
+    "NR": "Nauru", "NZ": "Nova Zelândia", "OM": "Omã", "PA": "Panamá",
+    "PE": "Peru", "PG": "Papua-Nova Guiné", "PH": "Filipinas", "PK": "Paquistão",
+    "PL": "Polônia", "PR": "Porto Rico", "PS": "Palestina", "PT": "Portugal",
+    "PW": "Palau", "PY": "Paraguai", "QA": "Catar", "RO": "Romênia",
+    "RS": "Sérvia", "RU": "Rússia", "RW": "Ruanda", "SA": "Arábia Saudita",
+    "SB": "Ilhas Salomão", "SC": "Seicheles", "SD": "Sudão", "SE": "Suécia",
+    "SG": "Singapura", "SI": "Eslovênia", "SK": "Eslováquia", "SL": "Serra Leoa",
+    "SM": "San Marino", "SN": "Senegal", "SO": "Somália", "SR": "Suriname",
+    "SS": "Sudão do Sul", "ST": "São Tomé e Príncipe", "SV": "El Salvador",
+    "SY": "Síria", "SZ": "Essuatíni", "TD": "Chade", "TG": "Togo",
+    "TH": "Tailândia", "TJ": "Tajiquistão", "TL": "Timor-Leste",
+    "TM": "Turcomenistão", "TN": "Tunísia", "TO": "Tonga", "TR": "Turquia",
+    "TT": "Trinidad e Tobago", "TV": "Tuvalu", "TW": "Taiwan", "TZ": "Tanzânia",
+    "UA": "Ucrânia", "UG": "Uganda", "US": "Estados Unidos", "UY": "Uruguai",
+    "UZ": "Uzbequistão", "VA": "Vaticano", "VC": "São Vicente e Granadinas",
+    "VE": "Venezuela", "VN": "Vietnã", "VU": "Vanuatu", "WS": "Samoa",
+    "YE": "Iêmen", "ZA": "África do Sul", "ZM": "Zâmbia", "ZW": "Zimbábue",
+}
+
 
 async def send_telegram_message(bot_token: str, chat_id: str, text: str) -> bool:
     url = f"{TELEGRAM_API_BASE}/bot{bot_token}/sendMessage"
@@ -32,6 +99,60 @@ async def send_telegram_message(bot_token: str, chat_id: str, text: str) -> bool
             return True
     except httpx.HTTPError:
         return False
+
+
+def _flag_emoji(iso_code: str) -> str:
+    letters = iso_code.strip().upper()
+    if len(letters) != 2 or not letters.isalpha():
+        return ""
+    # Regional indicator symbols are Unicode code points offset from 'A' at
+    # U+1F1E6; a two-letter ISO code maps directly to the flag emoji pair.
+    return "".join(chr(0x1F1E6 + ord(ch) - ord("A")) for ch in letters)
+
+
+def _format_market(code: str) -> str:
+    flag = _flag_emoji(code)
+    name = COUNTRY_NAME_PT.get(code.strip().upper())
+    label = html.escape(name) if name else html.escape(code)
+    return f"{flag} {label}".strip()
+
+
+async def fetch_usd_rates(currencies: set[str], logger=None) -> dict[str, float]:
+    """Return units-of-currency-per-1-USD for each code, via frankfurter.dev.
+
+    Best-effort only: on any failure (network error, timeout, malformed JSON
+    body) this returns {} so callers just omit the USD conversion instead of
+    failing message publishing over an unrelated FX API outage. An
+    unsupported currency code doesn't trigger this path -- frankfurter still
+    replies 200 and simply omits that code from `rates`, which
+    _convert_to_usd already treats as "no rate available" for that currency.
+    """
+    to_fetch = {c.strip().upper() for c in currencies if c and c.strip().upper() != "USD"}
+    if not to_fetch:
+        return {}
+    try:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+            response = await client.get(FRANKFURTER_API, params={"from": "USD", "to": ",".join(sorted(to_fetch))})
+            response.raise_for_status()
+            return response.json().get("rates", {})
+    except (httpx.HTTPError, ValueError) as exc:
+        if logger is not None:
+            logger.warning(
+                "publish.usd_rates_failed", currencies=sorted(to_fetch), error=f"{type(exc).__name__}: {exc}"
+            )
+        return {}
+
+
+def _convert_to_usd(amount: float, currency: str | None, usd_rates: dict[str, float] | None) -> float | None:
+    if not usd_rates or not currency:
+        return None
+    currency = currency.strip().upper()
+    if currency == "USD":
+        return None
+    rate = usd_rates.get(currency)
+    if not rate:
+        return None
+    return amount / rate
 
 
 def _format_powertrain(powertrain: dict | None) -> str:
@@ -47,16 +168,22 @@ def _format_powertrain(powertrain: dict | None) -> str:
     return " · ".join(parts)
 
 
-def _format_price(price: dict | None) -> str:
+def _format_price(price: dict | None, usd_rates: dict[str, float] | None = None) -> str:
     if not price or price.get("amount") is None:
         return "não divulgado"
-    currency = html.escape(price.get("currency") or "")
-    amount_str = f"{currency} {price['amount']:,.0f}".strip()
+    amount = price["amount"]
+    currency = price.get("currency") or ""
+    amount_str = f"{html.escape(currency)} {amount:,.0f}".strip()
+    usd = _convert_to_usd(amount, currency, usd_rates)
+    if usd is not None:
+        amount_str += f" (≈ US$ {usd:,.0f})"
     status = PRICE_STATUS_LABEL.get(price.get("status"), "")
-    return f"{amount_str} ({status})" if status else amount_str
+    return f"{amount_str} · {status}" if status else amount_str
 
 
-def format_event_message(event: dict, source_count: int, primary_url: str) -> str:
+def format_event_message(
+    event: dict, source_count: int, primary_url: str, usd_rates: dict[str, float] | None = None
+) -> str:
     # brand/model/markets/highlights/sales_start are free-text fields sourced
     # from the LLM extraction pipeline (ExtractedEvent), not from a fixed
     # vocabulary, and this message is sent with parse_mode="HTML" -- any
@@ -68,7 +195,7 @@ def format_event_message(event: dict, source_count: int, primary_url: str) -> st
     stage = event["stage"]
     emoji = STAGE_EMOJI.get(stage, "🚗")
     label = STAGE_LABEL_PT.get(stage, html.escape(stage))
-    markets = ", ".join(html.escape(m) for m in (event.get("markets") or [])) or "Global"
+    markets = ", ".join(_format_market(m) for m in (event.get("markets") or [])) or "Global"
 
     brand = html.escape(event["brand"])
     model = html.escape(event["model"])
@@ -79,7 +206,7 @@ def format_event_message(event: dict, source_count: int, primary_url: str) -> st
         lines.append("\n".join(f"• {html.escape(h)}" for h in highlights))
         lines.append("")
     lines.append(f"⚡ {_format_powertrain(event.get('powertrain'))}")
-    lines.append(f"💰 {_format_price(event.get('price'))}")
+    lines.append(f"💰 {_format_price(event.get('price'), usd_rates)}")
     if event.get("sales_start"):
         lines.append(f"📅 Vendas: {html.escape(event['sales_start'])}")
     lines.append("")
@@ -119,9 +246,17 @@ async def mark_published(pool, event_id: int) -> None:
 
 async def publish_pending_events(pool, bot_token: str, chat_id: str, logger) -> dict:
     events = await get_pending_events(pool)
+    currencies = {
+        event["price"]["currency"]
+        for event in events
+        if event.get("price") and event["price"].get("amount") is not None and event["price"].get("currency")
+    }
+    usd_rates = await fetch_usd_rates(currencies, logger)
+    if logger is not None and currencies:
+        logger.info("publish.usd_rates", requested=sorted(currencies), resolved=sorted(usd_rates.keys()))
     sent = 0
     for i, event in enumerate(events):
-        text = format_event_message(event, event["source_count"], event["primary_url"] or "")
+        text = format_event_message(event, event["source_count"], event["primary_url"] or "", usd_rates)
         ok = await send_telegram_message(bot_token, chat_id, text)
         if ok:
             await mark_published(pool, event["id"])
