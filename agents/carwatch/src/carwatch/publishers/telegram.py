@@ -5,7 +5,12 @@ import html
 import httpx
 
 TELEGRAM_API_BASE = "https://api.telegram.org"
-FRANKFURTER_API = "https://api.frankfurter.app/latest"
+# frankfurter.app 301-redirects here now; httpx doesn't follow redirects by
+# default and raise_for_status() rejects 3xx too, so pointing this at the old
+# host makes fetch_usd_rates() silently return {} on every real call. Point
+# straight at the live host, and still pass follow_redirects=True below as a
+# defense-in-depth against the next such move.
+FRANKFURTER_API = "https://api.frankfurter.dev/v1/latest"
 
 STAGE_EMOJI = {
     "spy": "🕵️", "teaser": "🎬", "concept": "💭", "world_premiere": "🌍",
@@ -71,7 +76,7 @@ COUNTRY_NAME_PT = {
     "PW": "Palau", "PY": "Paraguai", "QA": "Catar", "RO": "Romênia",
     "RS": "Sérvia", "RU": "Rússia", "RW": "Ruanda", "SA": "Arábia Saudita",
     "SB": "Ilhas Salomão", "SC": "Seicheles", "SD": "Sudão", "SE": "Suécia",
-    "SG": "Cingapura", "SI": "Eslovênia", "SK": "Eslováquia", "SL": "Serra Leoa",
+    "SG": "Singapura", "SI": "Eslovênia", "SK": "Eslováquia", "SL": "Serra Leoa",
     "SM": "San Marino", "SN": "Senegal", "SO": "Somália", "SR": "Suriname",
     "SS": "Sudão do Sul", "ST": "São Tomé e Príncipe", "SV": "El Salvador",
     "SY": "Síria", "SZ": "Essuatíni", "TD": "Chade", "TG": "Togo",
@@ -112,23 +117,29 @@ def _format_market(code: str) -> str:
     return f"{flag} {label}".strip()
 
 
-async def fetch_usd_rates(currencies: set[str]) -> dict[str, float]:
-    """Return units-of-currency-per-1-USD for each code, via frankfurter.app.
+async def fetch_usd_rates(currencies: set[str], logger=None) -> dict[str, float]:
+    """Return units-of-currency-per-1-USD for each code, via frankfurter.dev.
 
-    Best-effort only: on any failure (network error, timeout, an unsupported
-    currency code causing the whole request to be rejected) this returns {}
-    so callers just omit the USD conversion instead of failing message
-    publishing over an unrelated FX API outage.
+    Best-effort only: on any failure (network error, timeout, malformed JSON
+    body) this returns {} so callers just omit the USD conversion instead of
+    failing message publishing over an unrelated FX API outage. An
+    unsupported currency code doesn't trigger this path -- frankfurter still
+    replies 200 and simply omits that code from `rates`, which
+    _convert_to_usd already treats as "no rate available" for that currency.
     """
     to_fetch = {c.strip().upper() for c in currencies if c and c.strip().upper() != "USD"}
     if not to_fetch:
         return {}
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
             response = await client.get(FRANKFURTER_API, params={"from": "USD", "to": ",".join(sorted(to_fetch))})
             response.raise_for_status()
             return response.json().get("rates", {})
-    except (httpx.HTTPError, ValueError):
+    except (httpx.HTTPError, ValueError) as exc:
+        if logger is not None:
+            logger.warning(
+                "publish.usd_rates_failed", currencies=sorted(to_fetch), error=f"{type(exc).__name__}: {exc}"
+            )
         return {}
 
 
@@ -240,7 +251,9 @@ async def publish_pending_events(pool, bot_token: str, chat_id: str, logger) -> 
         for event in events
         if event.get("price") and event["price"].get("amount") is not None and event["price"].get("currency")
     }
-    usd_rates = await fetch_usd_rates(currencies)
+    usd_rates = await fetch_usd_rates(currencies, logger)
+    if logger is not None and currencies:
+        logger.info("publish.usd_rates", requested=sorted(currencies), resolved=sorted(usd_rates.keys()))
     sent = 0
     for i, event in enumerate(events):
         text = format_event_message(event, event["source_count"], event["primary_url"] or "", usd_rates)

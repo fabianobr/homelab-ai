@@ -4,10 +4,14 @@ from pathlib import Path
 
 SRC_ROOT = Path(__file__).resolve().parents[1] / "src" / "carwatch"
 # fetcher.py is the sole egress point for anonymous web crawling (SPEC.md §3/§6).
-# publishers/telegram.py is a deliberate, documented exception (see Task 15): it POSTs
-# to the authenticated Telegram Bot API, not anonymous content crawling — fetcher's
-# robots.txt checks, conditional-GET, and silent-block heuristics (short body < 500
-# chars, which a small Telegram JSON ack would trip) don't apply and would misfire.
+# publishers/telegram.py is a deliberate, documented exception (see Task 15) for two
+# calls, neither of which is anonymous content crawling that fetcher's robots.txt
+# checks, conditional-GET, and silent-block heuristics (short body < 500 chars, which
+# a small JSON ack would trip) are meant to police:
+#   - send_telegram_message() POSTs to the authenticated Telegram Bot API.
+#   - fetch_usd_rates() GETs a single well-known JSON currency-rate API (not a
+#     monitored content source), needed once per publish batch with its own
+#     short timeout and best-effort failure handling (see its docstring).
 ALLOWED_FILES = {"fetcher.py", "telegram.py"}
 FORBIDDEN_ATTRS = {"get", "post", "put", "delete", "patch", "request", "stream"}
 FORBIDDEN_MODULES = {"httpx", "requests", "urllib.request"}

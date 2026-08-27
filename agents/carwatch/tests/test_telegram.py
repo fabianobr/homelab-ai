@@ -1,9 +1,11 @@
 """tests/test_telegram.py"""
+import json
 from datetime import datetime, timedelta, timezone
 
 import httpx
 import respx
 
+from carwatch.publishers import telegram
 from carwatch.publishers.telegram import (
     fetch_usd_rates,
     format_event_message,
@@ -12,6 +14,20 @@ from carwatch.publishers.telegram import (
     publish_pending_events,
     send_telegram_message,
 )
+
+
+class _ListLogger:
+    """Minimal stand-in for structlog's logger, just enough to assert on calls."""
+
+    def __init__(self):
+        self.warnings = []
+        self.infos = []
+
+    def warning(self, event, **kwargs):
+        self.warnings.append((event, kwargs))
+
+    def info(self, event, **kwargs):
+        self.infos.append((event, kwargs))
 
 
 @respx.mock
@@ -136,6 +152,41 @@ def test_format_event_message_shows_no_markets_as_global():
     assert "Global" in text
 
 
+def test_format_event_message_normalizes_lowercase_market_code():
+    # extract.py's prompt asks for ISO-3166-1 alpha-2 but nothing in the
+    # Pydantic schema enforces case -- a lowercase code from the LLM must
+    # still resolve to the right flag and country name, not silently fall
+    # back to the raw-code path.
+    event = {
+        "brand": "Acme", "model": "X", "stage": "teaser", "markets": ["cn"],
+        "highlights": [], "powertrain": None, "price": None, "sales_start": None,
+    }
+    text = format_event_message(event, source_count=1, primary_url="https://x.com/a")
+    assert "🇨🇳 China" in text
+
+
+def test_format_event_message_handles_malformed_market_code_without_crashing():
+    # markets is LLM free text (see the escaping test above), not a validated
+    # vocabulary -- a code that isn't exactly 2 letters must degrade
+    # gracefully (no flag, escaped raw label) instead of raising.
+    event = {
+        "brand": "Acme", "model": "X", "stage": "teaser", "markets": ["", "5A", "USA"],
+        "highlights": [], "powertrain": None, "price": None, "sales_start": None,
+    }
+    text = format_event_message(event, source_count=1, primary_url="https://x.com/a")
+    assert "5A" in text
+    assert "USA" in text
+
+
+def test_format_event_message_joins_known_and_unknown_markets_together():
+    event = {
+        "brand": "Acme", "model": "X", "stage": "teaser", "markets": ["CN", "XX"],
+        "highlights": [], "powertrain": None, "price": None, "sales_start": None,
+    }
+    text = format_event_message(event, source_count=1, primary_url="https://x.com/a")
+    assert "🇨🇳 China, 🇽🇽 XX" in text
+
+
 def test_format_event_message_shows_usd_conversion_when_rate_available():
     event = {
         "brand": "BYD", "model": "Seal 06", "stage": "pricing", "markets": [],
@@ -147,6 +198,23 @@ def test_format_event_message_shows_usd_conversion_when_rate_available():
         event, source_count=1, primary_url="https://x.com/a", usd_rates={"CNY": 7.32}
     )
     assert "CNY 109,800" in text
+    assert "≈ US$ 15,000" in text
+    # Full composed substring, so an ordering bug between the USD-conversion
+    # append and the status append (e.g. status landing before the amount)
+    # would fail here even though the two pieces individually look right.
+    assert "CNY 109,800 (≈ US$ 15,000) · oficial" in text
+
+
+def test_format_event_message_normalizes_lowercase_currency_code_for_usd_conversion():
+    event = {
+        "brand": "BYD", "model": "Seal 06", "stage": "pricing", "markets": [],
+        "highlights": [], "powertrain": None,
+        "price": {"amount": 109800, "currency": "cny", "status": None},
+        "sales_start": None,
+    }
+    text = format_event_message(
+        event, source_count=1, primary_url="https://x.com/a", usd_rates={"CNY": 7.32}
+    )
     assert "≈ US$ 15,000" in text
 
 
@@ -178,7 +246,11 @@ def test_format_event_message_omits_redundant_usd_conversion_when_price_already_
 
 @respx.mock
 async def test_fetch_usd_rates_returns_rates_on_success():
-    respx.get("https://api.frankfurter.app/latest", params={"from": "USD", "to": "CNY,EUR"}).mock(
+    # Mock URL is derived from the module constant rather than hardcoded, so
+    # if FRANKFURTER_API ever moves again (as it already has once -- see the
+    # comment on the constant) this test breaks loudly instead of passing
+    # against a stub the real code no longer calls.
+    respx.get(telegram.FRANKFURTER_API, params={"from": "USD", "to": "CNY,EUR"}).mock(
         return_value=httpx.Response(200, json={"amount": 1.0, "base": "USD", "rates": {"CNY": 7.32, "EUR": 0.92}})
     )
     rates = await fetch_usd_rates({"CNY", "EUR"})
@@ -186,18 +258,67 @@ async def test_fetch_usd_rates_returns_rates_on_success():
 
 
 @respx.mock
+async def test_fetch_usd_rates_follows_redirects(monkeypatch):
+    # Regression test for the real bug this shipped with: the old
+    # frankfurter.app host now 301-redirects, and httpx doesn't follow
+    # redirects by default, so an unmocked-for-redirects client would
+    # raise_for_status() on the 3xx and silently degrade to {}. This pins
+    # follow_redirects=True actually working, independent of which host the
+    # constant currently points at.
+    respx.get("https://old-host.example/latest").mock(
+        return_value=httpx.Response(301, headers={"location": "https://new-host.example/latest"})
+    )
+    respx.get("https://new-host.example/latest").mock(
+        return_value=httpx.Response(200, json={"rates": {"CNY": 7.32}})
+    )
+    monkeypatch.setattr(telegram, "FRANKFURTER_API", "https://old-host.example/latest")
+    rates = await fetch_usd_rates({"CNY"})
+    assert rates == {"CNY": 7.32}
+
+
+@respx.mock
 async def test_fetch_usd_rates_returns_empty_dict_on_http_error():
-    respx.get("https://api.frankfurter.app/latest").mock(return_value=httpx.Response(500))
+    respx.get(telegram.FRANKFURTER_API).mock(return_value=httpx.Response(500))
     rates = await fetch_usd_rates({"CNY"})
     assert rates == {}
 
 
+@respx.mock
+async def test_fetch_usd_rates_returns_empty_dict_on_invalid_json_body():
+    respx.get(telegram.FRANKFURTER_API).mock(return_value=httpx.Response(200, content=b"not json"))
+    rates = await fetch_usd_rates({"CNY"})
+    assert rates == {}
+
+
+@respx.mock
+async def test_fetch_usd_rates_logs_warning_on_failure():
+    respx.get(telegram.FRANKFURTER_API).mock(return_value=httpx.Response(500))
+    logger = _ListLogger()
+    rates = await fetch_usd_rates({"CNY"}, logger)
+    assert rates == {}
+    assert len(logger.warnings) == 1
+    event, kwargs = logger.warnings[0]
+    assert event == "publish.usd_rates_failed"
+    assert kwargs["currencies"] == ["CNY"]
+
+
+@respx.mock
 async def test_fetch_usd_rates_skips_network_call_when_only_usd_requested():
-    # No respx route registered at all -- a call to a route respx doesn't
-    # know about raises, so this proves fetch_usd_rates short-circuits
-    # before making any HTTP request when nothing needs converting.
+    # @respx.mock with no routes registered means an unexpected HTTP call
+    # raises instead of silently hitting the real network -- this proves
+    # fetch_usd_rates short-circuits before making any request when nothing
+    # needs converting.
     rates = await fetch_usd_rates({"USD"})
     assert rates == {}
+
+
+@respx.mock
+async def test_fetch_usd_rates_normalizes_lowercase_currency_codes():
+    respx.get(telegram.FRANKFURTER_API, params={"from": "USD", "to": "CNY"}).mock(
+        return_value=httpx.Response(200, json={"rates": {"CNY": 7.32}})
+    )
+    rates = await fetch_usd_rates({"cny", " Cny "})
+    assert rates == {"CNY": 7.32}
 
 
 async def test_get_pending_events_excludes_published_and_low_confidence(db_pool):
@@ -292,6 +413,86 @@ async def test_publish_pending_events_marks_published_only_on_success(db_pool):
     stats = await publish_pending_events(db_pool, "token123", "chat1", logger=None)
 
     assert stats == {"pending": 1, "sent": 1}
+
+
+@respx.mock
+async def test_publish_pending_events_includes_usd_conversion_in_sent_message(db_pool):
+    # This is the integration seam the PR actually added: publish_pending_events
+    # gathering currencies and fetching rates *before* the send loop. A test
+    # that only calls format_event_message directly (as all the earlier tests
+    # in this file do) can't catch a regression here -- e.g. forgetting to
+    # thread usd_rates through, or filtering the currency set wrong.
+    telegram_route = respx.post("https://api.telegram.org/bottoken123/sendMessage").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    fx_route = respx.get(telegram.FRANKFURTER_API, params={"from": "USD", "to": "CNY"}).mock(
+        return_value=httpx.Response(200, json={"rates": {"CNY": 7.32}})
+    )
+    async with db_pool.connection() as conn:
+        await conn.execute(
+            "INSERT INTO launch_events (dedupe_key, brand, model, model_slug, stage, "
+            "highlights, price, confidence, published) VALUES "
+            "('k1', 'BYD', 'Seal 06', 'seal-06', 'pricing', ARRAY['h'], %s, 0.9, FALSE)",
+            (json.dumps({"amount": 109800, "currency": "CNY", "status": "official"}),),
+        )
+
+    stats = await publish_pending_events(db_pool, "token123", "chat1", logger=None)
+
+    assert stats == {"pending": 1, "sent": 1}
+    assert fx_route.call_count == 1
+    sent_text = json.loads(telegram_route.calls.last.request.content)["text"]
+    assert "≈ US$ 15,000" in sent_text
+
+
+@respx.mock
+async def test_publish_pending_events_fetches_usd_rates_once_for_shared_currency(db_pool):
+    fx_route = respx.get(telegram.FRANKFURTER_API, params={"from": "USD", "to": "CNY"}).mock(
+        return_value=httpx.Response(200, json={"rates": {"CNY": 7.32}})
+    )
+    respx.post("https://api.telegram.org/bottoken123/sendMessage").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    async with db_pool.connection() as conn:
+        for key in ("k1", "k2"):
+            await conn.execute(
+                "INSERT INTO launch_events (dedupe_key, brand, model, model_slug, stage, "
+                "highlights, price, confidence, published) VALUES "
+                f"('{key}', 'BYD', 'Seal 06', 'seal-06-{key}', 'pricing', ARRAY['h'], %s, 0.9, FALSE)",
+                (json.dumps({"amount": 100000, "currency": "CNY", "status": None}),),
+            )
+
+    stats = await publish_pending_events(db_pool, "token123", "chat1", logger=None)
+
+    assert stats == {"pending": 2, "sent": 2}
+    # One fetch for the batch, not one per event that shares the currency.
+    assert fx_route.call_count == 1
+
+
+@respx.mock
+async def test_publish_pending_events_still_sends_when_usd_rate_fetch_fails(db_pool):
+    # Pins the design intent stated in fetch_usd_rates's own docstring: an FX
+    # outage must not block the Telegram send it has nothing to do with.
+    respx.get(telegram.FRANKFURTER_API).mock(return_value=httpx.Response(500))
+    respx.post("https://api.telegram.org/bottoken123/sendMessage").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    async with db_pool.connection() as conn:
+        result = await conn.execute(
+            "INSERT INTO launch_events (dedupe_key, brand, model, model_slug, stage, "
+            "highlights, price, confidence, published) VALUES "
+            "('k1', 'BYD', 'Seal 06', 'seal-06', 'pricing', ARRAY['h'], %s, 0.9, FALSE) RETURNING id",
+            (json.dumps({"amount": 109800, "currency": "CNY", "status": "official"}),),
+        )
+        event_id = (await result.fetchone())[0]
+
+    logger = _ListLogger()
+    stats = await publish_pending_events(db_pool, "token123", "chat1", logger=logger)
+
+    assert stats == {"pending": 1, "sent": 1}
+    assert any(event == "publish.usd_rates_failed" for event, _ in logger.warnings)
+    async with db_pool.connection() as conn:
+        result = await conn.execute("SELECT published FROM launch_events WHERE id = %s", (event_id,))
+        assert (await result.fetchone())[0] is True
     async with db_pool.connection() as conn:
         result = await conn.execute("SELECT published FROM launch_events WHERE id = %s", (event_id,))
         assert (await result.fetchone())[0] is True
