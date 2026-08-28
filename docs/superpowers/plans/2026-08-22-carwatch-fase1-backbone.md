@@ -3347,7 +3347,7 @@ git commit -m "feat(carwatch): add Telegram smoke notification for classify resu
 
 **Interfaces:**
 - Consumes: every module produced in Tasks 3, 9–15.
-- Produces: the `carwatch` console script (`app: typer.Typer`) declared in `pyproject.toml` (Task 1). Commands: `db migrate`, `probe`, `ingest --once`, `classify --limit N`, `publish --dry-run`, `stats`, and the composite `weekly-run` (per DESIGN.md §1 — replaces SPEC.md's daemon `carwatch run`; `extract`/`curate`/`discover`/`review` are added to this file in the Fase 2 and Fase 3 plans, and folded into `weekly-run` there).
+- Produces: the `carwatch` console script (`app: typer.Typer`) declared in `pyproject.toml` (Task 1). Commands: `db migrate`, `probe`, `seed-sources`, `ingest --once`, `classify --limit N`, `publish --dry-run`, `stats`, and the composite `weekly-run` (per DESIGN.md §1 — replaces SPEC.md's daemon `carwatch run`; `extract`/`curate`/`discover`/`review` are added to this file in the Fase 2 and Fase 3 plans, and folded into `weekly-run` there). `seed-sources` is new relative to SPEC.md §17's CLI table — it's what actually calls Task 14's `seed_fixed_sources`/`build_google_news_sources` (SPEC.md §7's Tier 2-4 "fontes fixas"), which otherwise have no caller anywhere in this plan.
 - `classify` internally runs `prefilter.run_prefilter` before `llm.classify.run_classify` — SPEC.md §17's CLI table has no separate `prefilter` subcommand, so this plan folds it into `classify` (prefilter is near-instant lexical work; there is no operational reason to trigger it separately).
 - `weekly-run` exits non-zero if the Telegram send failed, so systemd never masks a broken run (matches the failure-signaling convention in `agents/weekly-cost-benefit/`).
 
@@ -3367,7 +3367,7 @@ runner = CliRunner()
 def test_help_lists_all_fase1_commands():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    for command in ("db", "probe", "ingest", "classify", "publish", "stats", "weekly-run"):
+    for command in ("db", "probe", "seed-sources", "ingest", "classify", "publish", "stats", "weekly-run"):
         assert command in result.output
 
 
@@ -3463,6 +3463,25 @@ def probe(
         logger = _logger()
         brands_config = load_brands_config(brands)
         stats = await run_probe(get_pool(), brands_config, out, gaps, logger)
+        await close_pool()
+        return stats
+
+    typer.echo(asyncio.run(_run()))
+
+
+@app.command(name="seed-sources")
+def seed_sources():
+    """One-time/on-demand registration of Tier 2-4 fixed sources (SPEC.md §7's
+    "Fontes fixas") — not part of `weekly-run`, same as `probe`: SPEC.md §3's
+    architecture diagram lists source discovery as something that "roda sob
+    demanda", not on the ingest/curate cadence."""
+
+    async def _run():
+        logger = _logger()
+        brands_config = load_brands_config(CONFIG_DIR / "brands.yaml")
+        fixed_sources = load_fixed_sources(CONFIG_DIR / "settings.yaml")
+        google_news_sources = build_google_news_sources(brands_config, extra_locales={})
+        stats = await seed_fixed_sources(get_pool(), fixed_sources + google_news_sources, logger)
         await close_pool()
         return stats
 
@@ -3884,9 +3903,10 @@ cd agents/carwatch
 docker compose up -d db
 docker compose run --rm app db migrate
 docker compose run --rm app probe --brands config/brands.yaml
+docker compose run --rm app seed-sources
 ```
 
-Check `sources.csv` and `gaps.csv`: SPEC.md §7 expects a 55–65% hit rate on `probe` alone; combined with the Tier 2–4 fixed sources (Task 14), total coverage of the 20 seed brands should be well above that. Confirm at least one feed source ended up `status='probation'` in the `sources` table.
+Check `sources.csv` and `gaps.csv`: SPEC.md §7 expects a 55–65% hit rate on `probe` alone; combined with the Tier 2–4 fixed sources registered by `seed-sources` (Task 14), total coverage of the 20 seed brands should be well above that. Confirm at least one feed source ended up `status='probation'` in the `sources` table from each of `probe` and `seed-sources`.
 
 - [ ] **Step 6: Confirm every SPEC.md §19 Fase 1 bullet has a home**
 
