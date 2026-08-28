@@ -1,0 +1,55 @@
+schedule:
+  on_calendar: "Sun 18:00"
+  randomized_delay_sec: 120
+  approval_ttl_hours: 48
+
+policy:
+  target_root_percent: 75
+  min_root_available_gib: 100
+  amber_percent: 75
+  red_percent: 85
+  critical_percent: 92
+  amber_available_gib: 100
+  red_available_gib: 40
+  critical_available_gib: 20
+  destination_min_free_gib: 50
+  destination_min_free_percent: 20
+  auto_apply_safe: false
+  auto_apply_max_gib: 20
+
+filesystems:
+  - mount: "/"
+    role: "root"
+  - mount: "/mnt/models"
+    role: "model-store"
+
+caches:
+  pip: "$HOME/.cache/pip"
+  uv: "$HOME/.cache/uv"
+
+docker:
+  compose_files:
+    - "../../infra/docker/docker-compose.yml"
+  protected_tag_patterns: ["rollback-*", "backup-*"]
+  protect_newer_than_days: 7
+  allow_volume_prune: false
+
+models:
+  roots:
+    - "$HOME/AI/ComfyUI/models"
+  reference_roots:
+    - "../../infra"
+    - "../../agents"
+  migration_root: "/mnt/models/comfyui"
+  consumer_container: "comfyui"
+  consumer_mount: "/comfyui/models"
+  large_file_gib: 5
+  require_sha256: true
+
+journal:
+  vacuum_size: "200M"
+
+notifications:
+  desktop: true
+  telegram: false
+  include_paths: false
