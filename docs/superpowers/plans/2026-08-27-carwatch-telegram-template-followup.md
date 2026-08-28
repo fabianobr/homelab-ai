@@ -1,5 +1,11 @@
 # CarWatch — revisão do template do Telegram (follow-up)
 
+> **Atualização (2026-08-28):** as duas pendências abaixo já foram resolvidas.
+> [PR #15](https://github.com/fabianobr/homelab-ai/pull/15) foi mergeado em `main`
+> (`aa36713`) e a permissão de `agents/carwatch/data/` foi corrigida (`chown` pra
+> `fabiano:fabiano`). Deploy real do CarWatch está no ar via systemd timer desde
+> 2026-08-28. Texto abaixo preservado como registro histórico da revisão.
+
 ## O que foi feito (2026-08-26/27)
 
 - Revisado `agents/carwatch/src/carwatch/publishers/telegram.py::format_event_message`.
