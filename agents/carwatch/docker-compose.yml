@@ -28,6 +28,18 @@ services:
         required: false
     environment:
       DATABASE_URL: postgresql://carwatch:carwatch@db:5432/carwatch
+      HOME: /app/data
+    # Run as the host user (uid/gid 1000, the only interactive account on the
+    # homelab host) instead of root. The image is built and its deps installed
+    # as root, but site-packages and the `carwatch` entrypoint are
+    # world-readable/executable, so a non-root uid runs it fine -- and it stops
+    # `./data` (bind mount below) and everything written to it (`feed.atom`)
+    # from being created root-owned every `docker compose run`, which then
+    # needs an interactive `sudo chown` no automated weekly-run can do.
+    # `HOME=/app/data` above keeps any library that writes under $HOME (uid
+    # 1000 has no /etc/passwd entry, so $HOME would otherwise be `/`) on the
+    # one writable, persistent path.
+    user: "1000:1000"
     # `docker compose run --rm app ...` (used by both `publish` and the
     # weekly-run cron via run.sh) destroys the container's filesystem the
     # moment the command exits. Without this mount, `feed.atom` was written
