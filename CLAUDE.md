@@ -50,6 +50,12 @@ Convenções dos agentes:
   `weekly-sdlc-research`, `weekly-cost-benefit` e `youtube-etl` gravam
   `<agente>/reports/YYYY-MM-DD-*.md`; `carwatch` gera `data/feed.atom` e publica no
   Telegram; `weekly-disk-guardian` grava só em state XDG privado (`runs/<run_id>/`).
+- **O `carwatch` faz backup do banco a cada run.** `backup.sh` roda depois do
+  `weekly-run`, grava um dump `pg_dump -Fc` em `$HOME/.local/state/carwatch/backups`
+  (fora do repo — o dump tem dados e o repo é público) e envia para o remote rclone
+  `gdrive:carwatch-backups/`, mantendo 8 cópias de cada lado. Falha de backup avisa em
+  stderr mas **não** derruba o run. Ajustável por `CARWATCH_BACKUP_DIR`,
+  `CARWATCH_BACKUP_REMOTE` (vazio desliga o envio) e `CARWATCH_BACKUP_KEEP`.
 - **Segredos e relatórios operacionais nunca são versionados** — `.env` é gitignored.
   Só o `agents/carwatch/` tem `.env.example`; os demais não têm nenhum, porque tiram
   credencial do `$HOME/.hermes/.env`.

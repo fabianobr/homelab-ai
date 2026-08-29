@@ -32,6 +32,48 @@ cd ~/homelab-ai/agents/carwatch
 ./run.sh
 ```
 
+## Backup do banco
+
+`run.sh` chama `backup.sh` no fim de cada execução. O dump vai para fora do
+repositório — o repo é público e o dump tem dados.
+
+```bash
+cd ~/homelab-ai/agents/carwatch
+./backup.sh          # avulso; o run semanal já faz isso sozinho
+```
+
+| Variável | Default | O que faz |
+|---|---|---|
+| `CARWATCH_BACKUP_DIR` | `$HOME/.local/state/carwatch/backups` | destino local |
+| `CARWATCH_BACKUP_REMOTE` | `gdrive:carwatch-backups/` | remote rclone; vazio desliga o envio |
+| `CARWATCH_BACKUP_KEEP` | `8` | cópias mantidas de cada lado |
+
+Falha de backup escreve em stderr e **não** derruba o run semanal: um run que deu
+certo não pode ser reportado como falha porque a rede caiu.
+
+O envio remoto usa [rclone](https://rclone.org/) com um remote já autenticado
+(`rclone config`, token em `~/.config/rclone/rclone.conf`, fora do repo). Sem rclone
+instalado, o script mantém só a cópia local e avisa.
+
+### Restaurar
+
+```bash
+docker cp <arquivo>.dump carwatch-db-1:/tmp/restore.dump
+docker compose exec -T db pg_restore -U carwatch -d carwatch --clean /tmp/restore.dump
+```
+
+Para só conferir que um dump está íntegro, sem restaurar:
+
+```bash
+docker cp <arquivo>.dump carwatch-db-1:/tmp/verify.dump
+docker compose exec -T db pg_restore --list /tmp/verify.dump | grep "TABLE DATA"
+```
+
+Espere 10 tabelas. **Não** use `pg_restore --list /dev/stdin < arquivo`: o formato
+custom precisa de arquivo seekable, e o erro que aparece
+(`did not find magic string in file header`) parece dump corrompido quando o problema
+é só o método de leitura.
+
 ## Testes
 
 Precisam de Postgres real (não são mockados — apenas HTTP é mockado via
@@ -42,8 +84,12 @@ antes:
 cd ~/homelab-ai/agents/carwatch
 docker compose up -d db
 docker compose exec db psql -U carwatch -d carwatch -c "CREATE DATABASE carwatch_test;"  # uma vez
-python3 -m pytest -q
+uv run python -m pytest -q
 ```
+
+`uv run` monta o ambiente a partir do `uv.lock` (a primeira vez demora alguns
+minutos). `python3 -m pytest` direto falha com `ModuleNotFoundError: No module named
+'carwatch'`, porque o pacote não está instalado no Python do sistema.
 
 Cobertura mínima exigida (SPEC.md §20): 90% em `fetcher.py`, `dedupe.py`
 (Fase 2), `prefilter.py`.
