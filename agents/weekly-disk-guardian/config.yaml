@@ -1,5 +1,5 @@
 schedule:
-  on_calendar: "Sun 18:00"
+  on_calendar: "Mon 10:00"
   randomized_delay_sec: 120
   approval_ttl_hours: 48
 
