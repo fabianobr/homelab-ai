@@ -35,6 +35,26 @@ O DSH `0.1.0-rc.7` requer iniciar seu perfil Web por `node --expose-internals`; 
 
 Para registrar Ollama na UI, use `http://ollama:11434/v1`. Isso é uma conexão interna da rede Compose; Ollama não ganha hostname público.
 
+### Migrar configuração já existente
+
+Se o DSH já era usado no host antes da migração, o estado em `~/.dsh` contém
+`settings.yaml` (providers) e `.credentials.yaml` (chaves). Copie os dois arquivos
+uma vez para o volume Docker sem imprimi-los nem versioná-los:
+
+```bash
+docker exec -i deepseek-harness sh -lc \
+  'umask 077; cat > /dsh-home/settings.yaml; chmod 600 /dsh-home/settings.yaml' \
+  < ~/.dsh/settings.yaml
+docker exec -i deepseek-harness sh -lc \
+  'umask 077; cat > /dsh-home/.credentials.yaml; chmod 600 /dsh-home/.credentials.yaml' \
+  < ~/.dsh/.credentials.yaml
+docker restart deepseek-harness deepseek-harness-relay
+```
+
+Os arquivos ficam no volume `deepseek-harness-state`, pertencentes ao usuário sem
+privilégios do container e em modo `0600`. Não os copie para o repositório, para
+um bind mount do projeto, nem para logs de diagnóstico.
+
 ## Cloudflare (manual, depois do deploy local)
 
 1. Em **Zero Trust → Access controls → Applications**, crie a aplicação *Self-hosted* para o valor de `DSH_PUBLIC_HOSTNAME` e uma política `Allow` só para a identidade autorizada, com MFA e sessão curta.
