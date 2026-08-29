@@ -31,6 +31,10 @@ test("isStale: exatamente na borda (7d, cadência ok)", () => {
   assert.equal(isStale(daysAgo(7), CFG, NOW), false);
 });
 
+test("isStale: config malformada (sem grace_hours) -> stale, não silêncio", () => {
+  assert.equal(isStale(daysAgo(2), { interval_hours: 168 }, NOW), true);
+});
+
 test("decideAlert: stale + ok -> alerta e vira alerted", () => {
   assert.deepEqual(decideAlert(true, "ok"), { alert: true, newState: "alerted" });
 });

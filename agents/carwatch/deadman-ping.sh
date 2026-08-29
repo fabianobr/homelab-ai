@@ -25,8 +25,11 @@ if [ -z "$TOKEN" ]; then
     exit 1
 fi
 
+# `|| true`: sem token de `-f`, um erro de conexão/timeout faz o curl sair !=0 e o
+# `set -e` mataria o script AQUI, na atribuição, pulando o diagnóstico abaixo.
 code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 --retry 2 --retry-delay 2 \
-    -X POST -H "Authorization: Bearer $TOKEN" "$URL")"
+    -X POST -H "Authorization: Bearer $TOKEN" "$URL" || true)"
+code="${code:-000}"
 
 if [ "$code" = "204" ]; then
     echo "deadman-ping.sh: ping ok"

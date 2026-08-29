@@ -26,12 +26,15 @@ def test_run_sh_backs_up_after_the_weekly_run():
     assert content.index("weekly-run") < content.index("./backup.sh")
 
 
-def test_run_sh_sources_env_for_the_deadman_ping():
-    """O ping do dead man's switch roda no host, não no container -- o docker
-    compose lê o .env sozinho, mas este shell precisa do source explícito."""
+def test_run_sh_reads_deadman_vars_from_env():
+    """O ping do dead man's switch roda no host, não no container. run.sh extrai
+    só CARWATCH_DEADMAN_* do .env em vez de sourcear o arquivo inteiro sob
+    `set -e` (um valor com espaço derrubaria o run antes do weekly-run)."""
     content = (REPO_ROOT / "run.sh").read_text()
 
-    assert ". ./.env" in content
+    assert "CARWATCH_DEADMAN_URL" in content
+    assert "CARWATCH_DEADMAN_TOKEN" in content
+    assert ".env" in content
 
 
 def test_run_sh_pings_the_deadman_switch_after_a_successful_run():

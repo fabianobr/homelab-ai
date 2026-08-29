@@ -20,6 +20,11 @@ export function isStale(lastPingIso, { interval_hours, grace_hours }, now = new 
   const t = Date.parse(lastPingIso);
   if (Number.isNaN(t)) return true;
   const deadlineMs = (interval_hours + grace_hours) * HOUR_MS;
+  // Entrada malformada em AGENTS (ex.: falta grace_hours ao adicionar um agente
+  // novo) daria NaN e `> NaN` seria sempre false -- o agente ficaria sem
+  // monitoramento nenhum, em silêncio. Um dead man's switch erra para o lado de
+  // alertar.
+  if (!Number.isFinite(deadlineMs)) return true;
   return now.getTime() - t > deadlineMs;
 }
 
