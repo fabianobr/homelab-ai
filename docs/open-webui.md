@@ -52,16 +52,16 @@ Nao publique essa porta no Cloudflare, no roteador, na LAN ou na Tailscale.
 
 ## Publicação
 
-O container publica apenas em loopback para Cloudflare:
+O container publica apenas em loopback:
 
 ```text
 127.0.0.1:3000
 ```
 
-O acesso remoto público deve passar pelo Cloudflare Access:
+O Open WebUI permanece local neste host, sem hostname público:
 
 ```text
-https://ai.example.com
+http://localhost:3000
 ```
 
 ## Uso

@@ -40,14 +40,15 @@ C4Container
         ContainerDb(open_webui_data, "Open WebUI data", "Docker volume", "Configs, usuarios, historico e cache.")
         ContainerDb(local_models, "Modelos locais", "GGUF / safetensors", "Modelos para Ollama e ComfyUI.")
         Container(n8n, "n8n", "Docker", "Automacoes opcionais. :5678")
+        Container(dsh, "DeepSeek Harness", "Docker", "Agente de codigo isolado. :3081 via relay interno")
         Container(ltx, "LTX Video", "Docker/Manual", "Geracao de video. Opcional.")
     }
 
     Rel(user, cf_access, "Acessa", "HTTPS")
     Rel(cf_access, cf_tunnel, "Autoriza", "Cloudflare Access")
-    Rel(cf_tunnel, open_webui, "ai.example.com", "HTTP :3000")
     Rel(cf_tunnel, comfyui, "media.example.com", "HTTP :8188")
     Rel(cf_tunnel, n8n, "flow.example.com", "HTTP :5678")
+    Rel(cf_tunnel, dsh, "dsh.example.com", "HTTP :3081")
 
     Rel(open_webui, ollama, "Lista modelos e envia prompts", "HTTP :11434 + /v1")
     Rel(open_webui, open_webui_data, "Le e grava", "SQLite/files")
@@ -63,9 +64,10 @@ C4Container
 
 | Servico | Porta local | Exposicao | Uso |
 |---|---:|---|---|
-| Open WebUI | 3000 | `https://ai.example.com` via Cloudflare Access | Interface principal |
+| Open WebUI | 3000 | Localhost somente | Interface principal |
 | ComfyUI | 8188 | `https://media.example.com` via Cloudflare Access | Geracao de imagem |
 | n8n | 5678 | `https://flow.example.com` via Cloudflare Access | Automacoes |
+| DeepSeek Harness | 3081 | `https://dsh.example.com` via Cloudflare Access | Agente de codigo isolado |
 | Ollama | 11434 | Interno (rede Compose) | Backend unico do Open WebUI; expoe /v1 OpenAI-compatible |
 | LTX Video | variavel | Interno/opcional | Video |
 
@@ -74,9 +76,9 @@ C4Container
 Servicos publicados por dominio via Cloudflare Access:
 
 ```text
-https://ai.example.com  -> http://localhost:3000
 https://media.example.com -> http://localhost:8188
 https://flow.example.com  -> http://localhost:5678
+https://dsh.example.com   -> http://localhost:3081
 ```
 
-Ollama, n8n, Docker e SSH nao devem ser publicados diretamente. Ollama e backend interno do Open WebUI, acessivel apenas pela rede do Compose.
+Open WebUI, Ollama, Docker e SSH nao devem ser publicados diretamente. O DeepSeek Harness e o n8n passam somente pelo Access; Ollama e backend interno do Open WebUI, acessivel apenas pela rede do Compose.

@@ -9,6 +9,7 @@ Nunca:
 - Expor `n8n` diretamente na internet sem autenticação forte
 - Abrir portas no roteador sem necessidade
 - Expor Docker socket
+- Expor DeepSeek Harness sem Cloudflare Access
 - Instalar MCP desconhecido sem revisar permissões
 - Rodar scripts baixados sem ler
 
@@ -86,17 +87,17 @@ Geoblocking opcional
 Público externo permitido apenas para:
 
 ```text
-Open WebUI via Cloudflare Access
 ComfyUI via Cloudflare Access
 n8n via Cloudflare Access
+DeepSeek Harness via Cloudflare Access
 ```
 
 Domínios autorizados:
 
 ```text
-https://ai.example.com
 https://media.example.com
 https://flow.example.com
+https://dsh.example.com
 ```
 
 Identidade permitida no Access:
@@ -116,5 +117,7 @@ Backends internos que nao devem ter hostname publico:
 ```text
 Ollama 11434
 ```
+
+O DeepSeek Harness publica apenas `127.0.0.1:3081` para o Tunnel. Ele não recebe socket Docker, rede do host, GPU, diretório pessoal ou checkout do repositório; seus workspaces ficam em mount dedicado. Cloudflare Access é uma barreira necessária, mas não torna workloads, plugins ou prompts não confiáveis seguros.
 
 Ollama fica em `0.0.0.0:11434` apenas para permitir acesso do container Docker via `host.docker.internal`. A unidade `homelab-ai-ollama-firewall.service` deve estar ativa para bloquear essa porta fora de loopback e interfaces Docker.

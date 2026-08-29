@@ -32,6 +32,7 @@ o que funciona, o que não funciona, com números. Desktop Ubuntu com GPU NVIDIA
 - **Usar o pipeline:** [`products/sdlc-hibrido/README.md`](products/sdlc-hibrido/README.md)
 - **Ver um app gerado:** [`products/marketplace/README.md`](products/marketplace/README.md)
 - **Experimentar o DeepSeek Harness:** [`docs/deepseek-harness.md`](docs/deepseek-harness.md)
+- **Operar o DeepSeek Harness remoto:** [`infra/docker/deepseek-harness/README.md`](infra/docker/deepseek-harness/README.md)
 
 ## Media Meme Pipeline
 
@@ -66,7 +67,7 @@ para os gates de segurança e release.
 
 ## Stack principal
 
-- Ollama · Open WebUI · ComfyUI · LTX Video · n8n · LiteLLM
+- Ollama · Open WebUI · ComfyUI · LTX Video · n8n · LiteLLM · DeepSeek Harness
 - Cloudflare Tunnel + Access (acesso remoto seguro, sem abrir portas)
 - GPU NVIDIA RTX 5060 Ti 16GB VRAM
 
