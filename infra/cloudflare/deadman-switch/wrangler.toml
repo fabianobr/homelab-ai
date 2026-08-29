@@ -1,0 +1,23 @@
+# Dead man's switch dos agentes do homelab-ai.
+#
+# NÃO versionar segredo aqui. Secrets vão por `wrangler secret put`:
+#   PING_TOKEN_CARWATCH, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+# account_id vai por env CLOUDFLARE_ACCOUNT_ID no deploy (convenção de sanitização do repo).
+
+name = "carwatch-deadman"
+main = "src/index.mjs"
+compatibility_date = "2026-08-01"
+workers_dev = true
+preview_urls = false
+
+# Prazo por agente, em horas: interval_hours (cadência esperada) + grace_hours (folga).
+# carwatch roda semanal (168h) + 1 dia de folga = alerta após 192h (8 dias) sem ping.
+[vars]
+AGENTS = '{"carwatch":{"interval_hours":168,"grace_hours":24}}'
+
+[[kv_namespaces]]
+binding = "DEADMAN"
+id = "c3595f87757e4818b305774731c71571"
+
+[triggers]
+crons = ["0 12 * * *"]

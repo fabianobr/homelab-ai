@@ -24,3 +24,23 @@ def test_run_sh_backs_up_after_the_weekly_run():
     assert "./backup.sh" in content
     assert "if ! ./backup.sh" in content
     assert content.index("weekly-run") < content.index("./backup.sh")
+
+
+def test_run_sh_reads_deadman_vars_from_env():
+    """O ping do dead man's switch roda no host, não no container. run.sh extrai
+    só CARWATCH_DEADMAN_* do .env em vez de sourcear o arquivo inteiro sob
+    `set -e` (um valor com espaço derrubaria o run antes do weekly-run)."""
+    content = (REPO_ROOT / "run.sh").read_text()
+
+    assert "CARWATCH_DEADMAN_URL" in content
+    assert "CARWATCH_DEADMAN_TOKEN" in content
+    assert ".env" in content
+
+
+def test_run_sh_pings_the_deadman_switch_after_a_successful_run():
+    """O ping só pode sair depois de o weekly-run passar pelo `set -e`, e de
+    forma não-fatal: um Worker fora do ar não pode reprovar um run que deu certo."""
+    content = (REPO_ROOT / "run.sh").read_text()
+
+    assert "if ! ./deadman-ping.sh" in content
+    assert content.index("weekly-run") < content.index("./deadman-ping.sh")

@@ -48,6 +48,15 @@ https://flow.example.com   → n8n
 
 Ollama é um backend interno e nunca deve ter hostname público.
 
+## Dead man's switch dos agentes
+
+`infra/cloudflare/deadman-switch/` é um Cloudflare Worker que detecta quando um agente
+`systemd` do repo para de rodar — timer que não dispara mais, `linger` perdido, host
+desligado. O `run.sh` do agente faz um `POST /ping/<agente>` autenticado só depois de um
+run bem-sucedido; o cron diário do Worker alerta no Telegram se o ping não chega no
+prazo (carwatch: 8 dias). Deploy, secrets e comprovação no
+[`README.md`](cloudflare/deadman-switch/README.md) da pasta.
+
 ## Regra de ouro de portas
 
 Nunca expor diretamente na internet:
