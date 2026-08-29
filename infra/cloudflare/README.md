@@ -77,7 +77,6 @@ Política recomendada:
 Não publique:
 
 - Ollama
-- LM Studio
 - n8n
 - Docker
 - SSH

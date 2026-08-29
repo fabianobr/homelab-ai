@@ -38,7 +38,7 @@ C4Container
         Container(comfyui, "ComfyUI", "Docker/GPU", "Geracao de imagem. :8188")
         Container(ollama, "Ollama", "Docker/GPU", "Backend unico de modelos. :11434 + /v1")
         ContainerDb(open_webui_data, "Open WebUI data", "Docker volume", "Configs, usuarios, historico e cache.")
-        ContainerDb(local_models, "Modelos locais", "GGUF / safetensors", "Modelos para Ollama, LM Studio e ComfyUI.")
+        ContainerDb(local_models, "Modelos locais", "GGUF / safetensors", "Modelos para Ollama e ComfyUI.")
         Container(n8n, "n8n", "Docker", "Automacoes opcionais. :5678")
         Container(ltx, "LTX Video", "Docker/Manual", "Geracao de video. Opcional.")
     }

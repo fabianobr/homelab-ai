@@ -64,4 +64,4 @@ Abrir `http://localhost:8188`, carregar um workflow LTX Video.
 - Steps: 30
 - VRAM estimada: ~12-14GB
 
-> Fechar LM Studio antes de rodar vídeo com preset médio para liberar VRAM.
+> Pare modelos locais que não estejam em uso antes de rodar vídeo com preset médio para liberar VRAM.

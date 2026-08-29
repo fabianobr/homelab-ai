@@ -2,20 +2,18 @@
 
 ## Papel
 
-Assistente de código local integrado ao VS Code, usando modelos do LM Studio e Ollama.
+Assistente de código local integrado ao VS Code, usando modelos do Ollama.
 
 ## Configuração
 
 Arquivo: `~/.continue/config.yaml`
 
 Modelos disponíveis:
-- **LM Studio Qwen 14B** — chat principal (via `http://localhost:1234/v1`)
-- **LM Studio Qwen 8B** — tarefas rápidas
-- **LM Studio Autodetect** — usa qualquer modelo carregado no LM Studio
-- **Ollama Qwen3 14B** — alternativa quando LM Studio não estiver rodando
+- **Ollama Qwen3 14B** — chat principal
+- **Ollama Qwen3 8B** — tarefas rápidas
 - **Ollama Qwen3-Coder 30B** — modelos de código
 
-Tab autocomplete: Qwen 14B via LM Studio (debounce 600ms).
+Tab autocomplete: modelo de código via Ollama (debounce 600ms).
 
 ## Uso padrão
 
