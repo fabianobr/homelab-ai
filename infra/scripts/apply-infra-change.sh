@@ -55,6 +55,9 @@ fi
 
 # --- 1. snapshot the known-good image ---------------------------------------
 KNOWN_GOOD="known-good-$(date +%s)"
+# .Config.Image is the compose-assigned name (repo:tag) for a `build:` service;
+# if it ever comes back as a bare sha the restore retag below is a no-op (guarded
+# by || true) and rollback would need a manual `docker tag`.
 current_image="$(docker inspect "$CONTAINER" --format '{{.Config.Image}}' 2>/dev/null || true)"
 if [[ -z "$current_image" ]]; then
   echo "container '$CONTAINER' is not running; cannot snapshot a known-good image." >&2
