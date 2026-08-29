@@ -64,12 +64,18 @@ docker exec -i deepseek-harness sh -lc \
 docker exec -i deepseek-harness sh -lc \
   'umask 077; cat > /dsh-home/.credentials.yaml; chmod 600 /dsh-home/.credentials.yaml' \
   < ~/.dsh/.credentials.yaml
+docker exec deepseek-harness sh -lc \
+  "sed -i 's#http://127.0.0.1:11434/v1#http://ollama:11434/v1#g' /dsh-home/settings.yaml"
 docker restart deepseek-harness deepseek-harness-relay
 ```
 
 Os arquivos ficam no volume `deepseek-harness-state`, pertencentes ao usuário sem
 privilégios do container e em modo `0600`. Não os copie para o repositório, para
 um bind mount do projeto, nem para logs de diagnóstico.
+
+A conversão do endpoint é necessária somente no Docker: no host legado,
+`127.0.0.1:11434` aponta para Ollama; dentro do container, aponta para o próprio
+DSH. O nome `ollama` resolve o container irmão na rede Compose.
 
 ## Cloudflare (manual, depois do deploy local)
 
