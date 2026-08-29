@@ -36,14 +36,23 @@ catch-up se a máquina estiver desligada no horário. Cada agente traz seu `syst
 
 Convenções dos agentes:
 
-- **Telegram:** os agentes compartilham o bot **Hermes** (alerta interno de execução de job).
-  O **CarWatch é a exceção** — usa bot dedicado, com credenciais próprias em `agents/carwatch/.env`.
-  Não misturar os dois. Helper compartilhado: `agents/lib/telegram_notify.py`.
+- **Telegram:** hoje **todos** os que notificam usam o bot **Hermes** (alerta interno de
+  execução de job), com credenciais lidas de `$HOME/.hermes/.env` — fora do repo.
+  Helper compartilhado: `agents/lib/telegram_notify.py`.
+  O `weekly-disk-guardian` é o único que não manda nada: `telegram: false` no
+  `config.yaml`, notifica por `notify-send` no desktop.
+  O `DESIGN.md` do CarWatch prevê um **bot dedicado**, mas isso ainda não existe em
+  produção — o `agents/carwatch/TODO.md` mantém a troca como pendência aberta. Ao mexer
+  nisso, o `TODO.md` é a fonte do que está no ar; o `DESIGN.md` é a intenção.
 - **Os semanais escrevem no repo:** `weekly-sdlc-research` faz append em
   `research/sdlc-agentico/backlog.md`; `weekly-cost-benefit` em `research/sdlc-agentico/cost-benefit.md`.
-  Relatórios por execução vão para `<agente>/reports/YYYY-MM-DD-*.md`.
-- **Segredos e relatórios operacionais nunca são versionados** — `.env` é gitignored;
-  cada agente tem `.env.example`.
+- **Onde cada agente deixa a saída** varia — não presuma `reports/`:
+  `weekly-sdlc-research`, `weekly-cost-benefit` e `youtube-etl` gravam
+  `<agente>/reports/YYYY-MM-DD-*.md`; `carwatch` gera `data/feed.atom` e publica no
+  Telegram; `weekly-disk-guardian` grava só em state XDG privado (`runs/<run_id>/`).
+- **Segredos e relatórios operacionais nunca são versionados** — `.env` é gitignored.
+  Só o `agents/carwatch/` tem `.env.example`; os demais não têm nenhum, porque tiram
+  credencial do `$HOME/.hermes/.env`.
 - **O `weekly-disk-guardian` nunca apaga nada sozinho.** O timer chama só
   `diagnose --notify` e para em `Proposal`; `apply` exige manifesto revisado e aprovado.
 
@@ -52,8 +61,11 @@ Convenções dos agentes:
 - **Este arquivo faz parte da mudança.** Criou ou alterou subprojeto, agente, serviço,
   porta, profile do Compose ou convenção operacional? Atualize o `CLAUDE.md` **no mesmo
   commit** — mapa de trilhas, tabela de rotinas, árvore de diretórios, tabela de
-  profiles/portas. Confira contra a realidade, não contra a memória: `docker-compose.yml`
-  para profiles e portas, `systemctl --user list-timers` para o estado dos agentes.
+  profiles/portas. Confira contra a realidade, não contra a memória — o doc de design de
+  um agente diz a intenção, não o que está no ar: `docker compose config --services` para
+  profiles, `docker ps` para portas, `systemctl --user list-timers` para o estado dos
+  agentes. Se a mudança tocar serviços ou portas, `infra/SERVICES.md` e `README.md`
+  descrevem a mesma coisa e precisam ficar de acordo.
   Este é o primeiro arquivo que qualquer agente lê; quando ele mente, o erro se propaga
   para todo o trabalho seguinte.
 - **Commits em português (PT-BR)** — padrão do histórico; manter consistência.
@@ -81,24 +93,42 @@ O hook usa [gitleaks](https://github.com/gitleaks/gitleaks) e roda também no CI
 
 ## Subir a stack — profiles importam
 
-O Compose usa profiles. **Sem `--profile`, só `ollama` e `open-webui` sobem** — o resto
-não é falha, é profile desligado.
+**Todos os seis serviços estão atrás de profile. Sem `--profile`, nada sobe** — não é
+falha, é profile desligado. Confirme com
+`docker compose --env-file homelab.env -f infra/docker/docker-compose.yml config --services`:
+sem profile a saída é vazia.
 
 | Serviço | Profile | Porta (loopback) |
 |---|---|---|
-| `ollama` | default + `media-pipeline` | 11434 |
-| `open-webui` | default | 3000 |
+| `open-webui` | `interactive` | 3000 |
+| `ollama` | `media-pipeline` | 11434 |
 | `comfyui` | `media-pipeline` | 8188 |
 | `n8n` | `optional` | 5678 |
 | `litellm` | `optional` | 4000 |
 | `searxng` | `optional` | 8080 |
 
+O env-file é `homelab.env` na raiz (gitignored) — **não** `.env`. Ele define
+`HOMELAB_ROOT`, `COMFYUI_SOURCE_DIR` e `SEARXNG_SECRET`, que o compose lê como
+`${VAR:?}`; sem ele o comando falha duro.
+
 ```bash
-docker compose --env-file .env -f infra/docker/docker-compose.yml --profile optional up -d
+# a stack inteira, como roda hoje neste host:
+docker compose --env-file homelab.env -f infra/docker/docker-compose.yml \
+  --profile interactive --profile media-pipeline --profile optional up -d
 ```
 
-`searxng` e `n8n` são dependências dos agentes semanais — se um agente semanal "não acha
-o buscador" ou "não acha o webhook", conferir o profile antes de investigar o agente.
+**`--profile interactive` sozinho não funciona:** `open-webui` tem
+`depends_on: ollama`, e `ollama` está em `media-pipeline` — o compose recusa o projeto
+com *"depends on undefined service"*. Os dois profiles andam juntos.
+
+`--profile optional` sobe `n8n`, `litellm` e `searxng` **sem `ollama`**. Como os agentes
+semanais precisam dos dois, esse profile sozinho não basta para rodá-los. Se um agente
+semanal "não acha o buscador" ou "não acha o webhook", conferir os profiles no ar antes
+de investigar o agente.
+
+O **CarWatch não faz parte desta stack**: tem compose próprio em
+`agents/carwatch/docker-compose.yml`, onde só o `db` fica de pé e o `app` roda sob
+demanda via `docker compose run --rm`.
 
 ## Portas nunca expostas diretamente na internet
 
@@ -107,6 +137,7 @@ o buscador" ou "não acha o webhook", conferir o profile antes de investigar o a
 - SearXNG `8080`
 - n8n `5678`
 - LiteLLM `4000`
+- Postgres do CarWatch `5433` (compose próprio do agente)
 - Docker socket
 
 Todas ficam em `127.0.0.1` no Compose. Usar Cloudflare Access para os hostnames publicados.
@@ -130,7 +161,7 @@ homelab-ai/
 │   └── ROADMAP.md           ← fases concluídas e próximas
 ├── research/
 │   └── sdlc-agentico/       ← trilha 2: pesquisa de SDLC agêntico
-│       ├── backlog.md       ← ~35 ferramentas avaliadas + pesquisas semanais datadas
+│       ├── backlog.md       ← 27 ferramentas na tabela principal + itens datados pendentes
 │       ├── cost-benefit.md  ← saída do agente weekly-cost-benefit
 │       ├── proposals/       ← propostas A–F com viabilidade
 │       ├── sdlc-phases/     ← 9 fases: prompt e ferramentas por fase
