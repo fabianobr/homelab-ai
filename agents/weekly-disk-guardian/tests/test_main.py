@@ -785,7 +785,7 @@ def test_timer_is_persistent_and_service_executes_diagnose_only():
     timer_text = timer.read_text()
     service_text = service.read_text()
 
-    assert "OnCalendar=Sun 18:00" in timer_text
+    assert "OnCalendar=Mon 10:00" in timer_text
     assert "Persistent=true" in timer_text
     assert "RandomizedDelaySec=2min" in timer_text
     assert " diagnose" in service_text

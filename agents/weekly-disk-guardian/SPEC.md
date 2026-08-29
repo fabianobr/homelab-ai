@@ -76,7 +76,7 @@ oferece alternativas e executa apenas um manifesto aprovado.
 
 ## 5. Experiência semanal: Scout → Proposal → Approval → Apply → Proof
 
-### 5.1 Scout — domingo, 18:00
+### 5.1 Scout — segunda-feira, 10:00
 
 O timer executa `weekly-disk-guardian diagnose`. A coleta é somente leitura,
 usa lock exclusivo e cria um `run_id` no formato
@@ -394,7 +394,7 @@ solicita sudo apenas no momento necessário.
 
 ```yaml
 schedule:
-  on_calendar: "Sun 18:00"
+  on_calendar: "Mon 10:00"
   randomized_delay_sec: 120
   approval_ttl_hours: 48
 
@@ -452,7 +452,7 @@ O timer é um serviço do usuário e executa apenas diagnóstico:
 
 ```ini
 [Timer]
-OnCalendar=Sun 18:00
+OnCalendar=Mon 10:00
 Persistent=true
 RandomizedDelaySec=2min
 ```

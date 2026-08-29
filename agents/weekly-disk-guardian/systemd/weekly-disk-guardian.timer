@@ -1,8 +1,8 @@
 [Unit]
-Description=Run Weekly Disk Guardian diagnosis every Sunday
+Description=Run Weekly Disk Guardian diagnosis every Monday
 
 [Timer]
-OnCalendar=Sun 18:00
+OnCalendar=Mon 10:00
 Persistent=true
 RandomizedDelaySec=2min
 Unit=weekly-disk-guardian.service

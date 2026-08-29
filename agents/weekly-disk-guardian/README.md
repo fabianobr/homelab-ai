@@ -76,7 +76,7 @@ limiar vermelho. A projeção nunca autoriza ação.
 ## Instalar o timer semanal
 
 É um timer do usuário; não exige sudo. A unidade fornecida pressupõe o clone em
-`~/homelab-ai` e agenda domingo às 18h, com atraso aleatório de até dois minutos.
+`~/homelab-ai` e agenda segunda-feira às 10h, com atraso aleatório de até dois minutos.
 
 ```bash
 mkdir -p ~/.config/systemd/user
