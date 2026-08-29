@@ -87,6 +87,9 @@ services:
       - "127.0.0.1:8188:8188"
     volumes:
       - ${COMFYUI_SOURCE_DIR:?set COMFYUI_SOURCE_DIR in .env}:/comfyui
+      # /mnt/models: destino real de vários symlinks dentro de models/ (vae, diffusion_models,
+      # text_encoders, loras). Sem esse mount os symlinks ficam quebrados dentro do container.
+      - /mnt/models:/mnt/models
     healthcheck:
       test:
         [
