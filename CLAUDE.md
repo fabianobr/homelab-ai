@@ -7,6 +7,22 @@ o que não funciona, com números. Inclui a infraestrutura que roda os modelos (
 a pesquisa de SDLC agêntico, os produtos gerados por essa pesquisa e as rotinas autônomas que rodam
 sozinhas em produção neste host.
 
+## Infra Environment Constraints
+
+No início de cada sessão, rodar `scripts/state.sh` antes de me perguntar qualquer coisa
+— ele imprime um retrato de uma tela: git (branch/status/últimos 5 commits), PRs abertos,
+`docker ps` com health, timers systemd do usuário e uso de disco.
+
+Ler antes de qualquer trabalho de ops nesta máquina:
+
+- **Sem TTY: `sudo` falha.** Se um passo precisa de root, pare e entregue o comando exato
+  para o usuário rodar — não fique tentando de novo.
+- **Arquivos dentro de containers são de root.** Editar via `docker exec`, não pelo host.
+- **Automação de browser não alcança serviços em `127.0.0.1`** (ComfyUI `:8188`, etc.).
+  Usar inspeção via CLI/filesystem/API.
+- **Unidades systemd de usuário podem esbarrar no classificador de permissão.** Propor o
+  comando para o usuário em vez de repetir tentativas em loop.
+
 ## Mapa das 4 trilhas
 
 | Trilha | Pasta | O que é |
