@@ -22,7 +22,7 @@ DSH_CLOUDFLARE_ENABLED=false
 DSH_WORKSPACE_DIR=/caminho/local/isolado/dsh-workspaces
 ```
 
-Use um diretório pertencente ao usuário local que executa Docker. No host atual, `infra/runtime/dsh-workspaces` é ignorado pelo Git e foi preparado para esse fim. Não grave chaves de API nesse arquivo: cadastre-as na UI, acessada pelo Access.
+Use um diretório pertencente ao usuário local que executa Docker. No host atual, `infra/runtime/dsh-workspaces` é ignorado pelo Git e foi preparado para esse fim. Não grave chaves de API nesse arquivo.
 
 Suba apenas o profile dedicado:
 
@@ -34,6 +34,22 @@ docker compose --env-file homelab.env -f infra/docker/docker-compose.yml \
 O DSH `0.1.0-rc.7` requer iniciar seu perfil Web por `node --expose-internals`; isso está explícito no `command` do Compose porque `NODE_OPTIONS` bloqueia essa flag no Node. Não altere para `--host 0.0.0.0` e não remova `--trusted-host`.
 
 Para registrar Ollama na UI, use `http://ollama:11434/v1`. Isso é uma conexão interna da rede Compose; Ollama não ganha hostname público.
+
+### Administração de providers
+
+Configure ou edite providers, modelos e chaves pela UI local no host:
+
+```text
+http://localhost:3081
+```
+
+O upstream restringe deliberadamente o plano de configurações (`Models`,
+credenciais e plugins) a uma origem loopback. Por isso, em
+`https://dsh.example.com` a aba **Models** pode informar que as configurações
+não estão disponíveis neste navegador. Isso é esperado: o hostname público,
+mesmo protegido por Cloudflare Access, serve para usar o Harness e não para
+administrar credenciais. Não remova essa proteção por proxy, patch ou
+exposição de API.
 
 ### Migrar configuração já existente
 
