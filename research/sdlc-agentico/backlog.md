@@ -271,6 +271,40 @@ Detalhes adicionais em [feedback.md](../feedback.md).
 
 ## Novos itens pendentes de avaliacao
 
+### Pesquisa de 2026-08-28
+
+### Nimbalyst
+- **Tipo:** orchestrator
+- **Relevancia SDLC:** 4/5
+- **Viabilidade HW:** 5/5
+- **Descricao:** Nimbalyst is an open-source agent orchestrator that supports local-first workflows and integrates with LLMs for AI coding tasks.
+- **Fonte:** https://www.augmentcode.com/tools/open-source-agent-orchestrators
+
+### Meta 30B Agentic Model
+- **Tipo:** model
+- **Relevancia SDLC:** 5/5
+- **Viabilidade HW:** 5/5
+- **Descricao:** Meta's 30B agentic model is optimized for local deployment on consumer GPUs, enabling powerful coding and automation capabilities.
+- **Fonte:** https://pinggy.io/blog/best_open_source_self_hosted_llms_for_coding/
+
+
+### Pesquisa de 2026-08-07
+
+### OpenJarvis
+- **Tipo:** coding_agent
+- **Relevancia SDLC:** 4/5
+- **Viabilidade HW:** 3/5
+- **Descricao:** An open-source framework for building personal AI agents that run on your own hardware, with Ollama integration.
+- **Fonte:** https://ollama.com/blog/openjarvis
+
+### Warp
+- **Tipo:** orchestrator
+- **Relevancia SDLC:** 5/5
+- **Viabilidade HW:** 3/5
+- **Descricao:** An open platform for building software with agents, supports cloud and local development.
+- **Fonte:** https://www.warp.dev/
+
+
 ### Pesquisa de 2026-07-20
 
 ### Kimi K2.6
