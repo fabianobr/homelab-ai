@@ -56,6 +56,13 @@ Convenções dos agentes:
   `gdrive:carwatch-backups/`, mantendo 8 cópias de cada lado. Falha de backup avisa em
   stderr mas **não** derruba o run. Ajustável por `CARWATCH_BACKUP_DIR`,
   `CARWATCH_BACKUP_REMOTE` (vazio desliga o envio) e `CARWATCH_BACKUP_KEEP`.
+- **O `carwatch` pinga um dead man's switch externo no fim de um run bem-sucedido.**
+  `deadman-ping.sh` (chamado pelo `run.sh` depois do backup, não-fatal) faz um `POST`
+  autenticado para o Worker Cloudflare `carwatch-deadman`
+  (`infra/cloudflare/deadman-switch/`), que alerta no Telegram se o ping não chega em
+  8 dias — cobre timer parado, `linger` perdido, host desligado, que um heartbeat
+  interno não pega. `CARWATCH_DEADMAN_URL` vazio desliga o ping. **Não é systemd** — o
+  Worker tem cron próprio na Cloudflare.
 - **Segredos e relatórios operacionais nunca são versionados** — `.env` é gitignored.
   Só o `agents/carwatch/` tem `.env.example`; os demais não têm nenhum, porque tiram
   credencial do `$HOME/.hermes/.env`.
@@ -159,7 +166,7 @@ homelab-ai/
 ├── infra/                   ← trilha 1: homelab que roda os modelos
 │   ├── docker/              ← docker-compose.yml, comfyui/, n8n/, searxng/, litellm-config.yaml
 │   ├── scripts/             ← healthcheck, apply-system-config, update, check-public-ready
-│   ├── cloudflare/          ← config do Tunnel e Access
+│   ├── cloudflare/          ← config do Tunnel e Access + deadman-switch/ (Worker)
 │   ├── media-pipeline/      ← contrato público (contract.yaml) do repo media-meme-pipeline
 │   ├── ARCHITECTURE.md      ← C4 L1/L2 do homelab
 │   ├── SERVICES.md          ← tabela de serviços e portas

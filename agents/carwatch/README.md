@@ -74,6 +74,21 @@ custom precisa de arquivo seekable, e o erro que aparece
 (`did not find magic string in file header`) parece dump corrompido quando o problema
 é só o método de leitura.
 
+## Dead man's switch
+
+`run.sh` chama `deadman-ping.sh` depois do backup (não-fatal). É um `POST` autenticado
+para o Worker Cloudflare `carwatch-deadman` (`infra/cloudflare/deadman-switch/`), que
+alerta no Telegram se o ping não chega em 8 dias — pega timer parado, `linger` perdido
+num upgrade, host desligado, que um heartbeat interno não detecta porque morre junto.
+
+| Variável | O que faz |
+|---|---|
+| `CARWATCH_DEADMAN_URL` | endpoint `/ping/carwatch` do Worker; **vazio desliga o ping** |
+| `CARWATCH_DEADMAN_TOKEN` | Bearer token (secret `PING_TOKEN_CARWATCH` no Worker) |
+
+Ping que falha escreve em stderr e **não** derruba o run — mesma proteção do backup.
+O `run.sh` carrega o `.env` no topo porque o ping roda no host, não no container.
+
 ## Testes
 
 Precisam de Postgres real (não são mockados — apenas HTTP é mockado via

@@ -16,12 +16,13 @@ autônoma 2026-08-29 09:00). Contexto e histórico ficam em `DESIGN.md` e no
       derruba o run. Restauração conferida com `pg_restore --list`: 10 tabelas,
       incluindo as três insubstituíveis.
 
-- [ ] **Heartbeat.** Nada avisa se o timer parar de disparar — `linger`
-      perdido num upgrade, timer desabilitado, `docker` fora do ar no horário.
-      O silêncio é indistinguível de "semana tranquila". Sugestão: checagem
-      "última run bem-sucedida < 8 dias" (via `daily_stats.computed_at` ou o
-      exit do serviço) que manda um alerta no Telegram quando estoura; ou
-      transformar o digest de curadoria semanal em sinal de vida obrigatório.
+- [x] **Heartbeat → dead man's switch externo.** Resolvido em 2026-08-29 com um
+      Worker Cloudflare (`infra/cloudflare/deadman-switch/`), não com heartbeat
+      interno — um segundo timer de usuário morre junto quando o `linger` cai.
+      `run.sh` chama `deadman-ping.sh` no fim de um run bem-sucedido; o cron do
+      Worker alerta no Telegram se o ping não chega em 8 dias. Cobre timer
+      parado, `linger` perdido e host desligado. Comprovado forçando a ausência
+      de ping. Desenho: `docs/superpowers/specs/2026-08-29-deadman-switch-design.md`.
 
 ## P1 — produção "de verdade"
 

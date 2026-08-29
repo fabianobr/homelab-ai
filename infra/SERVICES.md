@@ -10,6 +10,7 @@
 | Cloudflare Tunnel | Sim | systemd | - | Exposição segura |
 | LTX Video | Opcional | Docker | variável | Vídeo |
 | n8n | Opcional | Docker Compose profile `optional` | 5678 | Automações |
+| carwatch-deadman | Sim | Cloudflare Worker (`wrangler deploy`) | - | Dead man's switch dos agentes; cron diário + `POST /ping/<agente>`. Código em `infra/cloudflare/deadman-switch/` |
 
 ## Ordem de instalação
 

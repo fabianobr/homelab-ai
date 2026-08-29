@@ -1,4 +1,4 @@
-# CarWatch — Backup do banco e Heartbeat — Implementation Plan
+# CarWatch — Backup do banco e Dead man's switch — Implementation Plan
 
 > **For agentic workers:** este plano foi escrito para ser executado por um modelo barato
 > (Claude Haiku ou qwen3-max). Cada passo traz caminho de arquivo, conteúdo exato e
@@ -8,6 +8,10 @@
 
 **Goal:** fechar as duas pendências P0 de `agents/carwatch/TODO.md` — o banco não tem
 backup, e nada avisa se o timer parar de disparar.
+
+> A pendência de heartbeat foi fechada por um **dead man's switch externo** (Worker
+> Cloudflare), não pelo heartbeat interno que este plano previa. Tasks 4, 5 e 7
+> reescritas; ver `docs/superpowers/specs/2026-08-29-deadman-switch-design.md`.
 
 **Contexto:** o CarWatch entrou em produção em 2026-08-28 e o primeiro run autônomo
 rodou em 2026-08-29 09:00:54 com `Result=success`. As duas lacunas abaixo são o que
@@ -26,12 +30,13 @@ asyncpg e o publisher de Telegram já existem no projeto.
   `$HOME` pode entrar em arquivo versionado. Rode `pre-commit run --all-files` antes de
   qualquer commit — gitleaks roda também no CI.
 - **Commits em português**, conventional commits (`feat`, `fix`, `docs`, `chore`).
-- **`CLAUDE.md` faz parte da mudança.** Este trabalho cria um timer novo e uma porta de
-  saída nova; a tabela de rotinas do `CLAUDE.md` precisa refletir isso no mesmo commit.
+- **`CLAUDE.md` faz parte da mudança.** Este trabalho abre uma porta de saída nova (o
+  ping) e um subprojeto novo (`infra/cloudflare/deadman-switch/`); o `CLAUDE.md` precisa
+  refletir isso no mesmo commit. **Não** há timer systemd novo.
 - **Teste junto.** O projeto tem 5.311 linhas de teste para 3.477 de código. Siga o
   padrão dos vizinhos (`tests/test_daily_stats.py`, `tests/test_run_sh.py`).
 - **Não quebre o run semanal.** Nenhuma das duas features pode fazer o `weekly-run`
-  falhar. Backup que falha avisa e segue; heartbeat roda em unit separada.
+  falhar. Backup que falha avisa e segue; ping que falha avisa e segue.
 
 ---
 
@@ -45,25 +50,28 @@ asyncpg e o publisher de Telegram já existem no projeto.
    seletiva de tabela, e já vem comprimido.
 3. **Dump depois do `weekly-run`, não antes** — para capturar os dados da semana.
 4. **Retenção: 8 arquivos** (~2 meses de execuções semanais).
-5. **O heartbeat é uma unit systemd separada, diária.** Não pode viver dentro do
-   `weekly-run`: um processo não detecta a própria ausência.
+5. **A detecção de silêncio é um dead man's switch EXTERNO, não um heartbeat interno.**
+   Decidido em 2026-08-29 (fecha o Task 7). Um segundo timer de usuário checando o
+   primeiro morre junto quando o `linger` cai — mesmo domínio de falha. O switch é um
+   Cloudflare Worker (`infra/cloudflare/deadman-switch/`): o `run.sh` pinga só após um
+   run bem-sucedido; o cron do Worker alerta no Telegram se o ping não chega em 8 dias.
+   Ver Tasks 4 e 5 (reescritas) e `docs/superpowers/specs/2026-08-29-deadman-switch-design.md`.
 6. **`OnFailure=` não é usado.** Ele dispara quando um run falha; o caso a detectar é o
    timer que **nunca disparou**, que não gera evento nenhum.
 
 ---
 
-## O que este plano NÃO resolve (leia antes de achar que está coberto)
+## Cobertura da detecção de silêncio (dead man's switch)
 
-O heartcheck é um timer de usuário verificando outro timer de usuário. Eles compartilham
-o mesmo domínio de falha: **se o `linger` do usuário for perdido num upgrade, os dois
-param juntos e ninguém avisa** — que é justamente um dos cenários que o `TODO.md` cita.
+O switch externo (Worker Cloudflare) cobre: `carwatch.timer` desabilitado sozinho,
+Docker fora no horário, run falhando em silêncio, **e também** máquina desligada por
+dias, `linger` perdido num upgrade, conta do usuário sem sessão — porque quem checa
+está fora da máquina.
 
-O heartbeat cobre: banco fora do ar, run falhando em silêncio, `carwatch.timer`
-desabilitado sozinho, Docker fora no horário, pipeline rodando mas sem produzir stats.
-
-O heartbeat **não** cobre: máquina desligada por dias, `linger` perdido, conta do usuário
-sem sessão. Só um serviço externo (dead man's switch) cobre silêncio total do host.
-Ver Task 7.
+O que ele **não** distingue: "rodou mas não produziu stats". O ping só sai quando o
+`weekly-run` retorna 0, então a lacuna é estreita; fechá-la (condicionar o ping a uma
+checagem de `daily_stats`) fica anotado como YAGNI. O que ele depende: a própria
+Cloudflare no ar e a conta ativa — modo de falha aceito de qualquer dead man's switch.
 
 ---
 
@@ -194,92 +202,52 @@ das duas. Acrescente ao teste uma asserção de que `backup.sh` é chamado.
 
 ---
 
-### Task 4: Subcomando `heartbeat` no CLI
+### Task 4: Dead man's switch — Worker Cloudflare  ✅ FEITO (2026-08-29)
 
-**Files:**
-- Criar: `agents/carwatch/src/carwatch/heartbeat.py`
-- Modificar: `agents/carwatch/src/carwatch/cli.py`
-- Teste: `agents/carwatch/tests/test_heartbeat.py`
+Substitui o "subcomando `heartbeat` no CLI" que este plano previa. Um heartbeat interno
+não detecta a própria ausência quando o `linger` cai; um Worker externo sim.
 
-**Interfaces disponíveis** (já existem, use-as, não reescreva):
-- `carwatch.db.get_open_pool()` / `carwatch.db.close_pool(pool)`
-- `carwatch.settings.get_settings()` → tem `telegram_bot_token` e `telegram_chat_id`
-- `carwatch.publishers.telegram.send_telegram_message(bot_token, chat_id, text) -> bool`
-- `carwatch.logging_setup.configure_logging(level)`
-- Tabela `daily_stats`, coluna `computed_at TIMESTAMPTZ DEFAULT now()`
-  (`migrations/005_curation.sql`)
+**Implementado em:**
+- `infra/cloudflare/deadman-switch/` — Worker (`src/index.mjs`, `src/logic.mjs`),
+  `wrangler.toml`, testes `node:test`, `README.md`.
+- Desenho completo: `docs/superpowers/specs/2026-08-29-deadman-switch-design.md`.
 
-**Em `heartbeat.py`,** uma função assíncrona
-`check_heartbeat(pool, max_age_days: int = 8) -> dict` que:
+**Como funciona:**
+- `POST /ping/carwatch` com `Authorization: Bearer <PING_TOKEN_CARWATCH>` grava
+  `last-ping:carwatch` no KV.
+- Cron `0 12 * * *` compara com agora; se `> 192h` (168h cadência + 24h folga = 8 dias)
+  sem ping, manda `🔴` no Telegram (bot Hermes) e re-alerta 1×/dia até voltar.
+- Ping de volta → `🟢` e limpa o estado.
+- Endpoint público sem token → `401` e **não** reseta o cronômetro (um scanner não pode
+  mascarar uma queda real).
 
-1. Roda `SELECT max(computed_at) AS last FROM daily_stats`.
-2. Calcula a idade em dias do valor retornado.
-3. Retorna `{"last": <datetime|None>, "age_days": <float|None>, "stale": <bool>}`.
-   `stale` é `True` quando `last` é `NULL` (nunca rodou) **ou** quando a idade passa de
-   `max_age_days`.
+**Secrets (via `wrangler secret put`, nunca no repo):** `PING_TOKEN_CARWATCH`,
+`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`. `account_id` via env `CLOUDFLARE_ACCOUNT_ID`.
 
-O limiar padrão é 8 dias — cadência semanal mais um dia de folga, para não alarmar por
-um run que atrasou algumas horas.
-
-**Em `cli.py`,** um comando Typer novo, seguindo o padrão de `@app.command(name="...")`
-que o arquivo já usa:
-
-```python
-@app.command(name="heartbeat")
-def heartbeat(max_age_days: int = 8):
-```
-
-Comportamento: abre o pool, chama `check_heartbeat`, fecha o pool. Se `stale` for
-verdadeiro, manda uma mensagem de Telegram dizendo há quantos dias não há execução
-bem-sucedida (ou que nunca houve) e loga em nível `error`. Se não for, apenas loga em
-nível `info`.
-
-**Sai sempre com código 0**, inclusive quando detecta silêncio. O alerta é a mensagem de
-Telegram; fazer a unit falhar só acrescenta ruído no journal sem informar mais ninguém.
-
-**Verificação:**
-```bash
-cd ~/homelab-ai/agents/carwatch
-docker compose run --rm app heartbeat
-```
-Critério de aceite: sai com código 0 e loga uma linha de heartbeat. Como o run de
-2026-08-29 gravou `daily_stats`, o esperado é **não** disparar alerta.
-
-**Teste** (`tests/test_heartbeat.py`), seguindo `tests/test_daily_stats.py`:
-- `stale` é `True` quando a query devolve `NULL`.
-- `stale` é `True` para um `computed_at` de 10 dias atrás.
-- `stale` é `False` para um `computed_at` de 2 dias atrás.
-- `age_days` é `None` quando não há linha nenhuma.
+**Comprovado em 2026-08-29:** forçado `last-ping` de 14 dias atrás → `/__check` disparou
+`🔴` no Telegram e virou `alert-state=alerted`; `deadman-ping.sh` real (com o `.env` de
+produção) retornou 204 e trouxe o `🟢`.
 
 ---
 
-### Task 5: Units systemd do heartbeat
+### Task 5: Integração no `run.sh`  ✅ FEITO (2026-08-29)
 
-**Files:**
-- Criar: `agents/carwatch/systemd/carwatch-heartbeat.service`
-- Criar: `agents/carwatch/systemd/carwatch-heartbeat.timer`
+Substitui as "units systemd do heartbeat" — não há timer novo, o ping vive no `run.sh`
+que já roda.
 
-Copie o estilo de `agents/carwatch/systemd/carwatch.service` e `carwatch.timer` — leia os
-dois antes de escrever, e mantenha as mesmas convenções de `WorkingDirectory`, usuário e
-ambiente que eles já usam.
-
-Diferenças em relação ao par existente:
-- O `.service` roda `docker compose run --rm app heartbeat`, não `run.sh`.
-- O `.timer` usa `OnCalendar=daily` e `Persistent=true`.
-- Acrescente `RandomizedDelaySec=15m` para não competir com o run semanal.
-
-**Instalação e verificação:**
-```bash
-systemctl --user daemon-reload
-systemctl --user enable --now carwatch-heartbeat.timer
-systemctl --user list-timers carwatch-heartbeat.timer
-systemctl --user start carwatch-heartbeat.service
-systemctl --user status carwatch-heartbeat.service --no-pager
-```
-Critério de aceite: o timer aparece em `list-timers` com próximo disparo em até 24h, e o
-start manual do service termina em `Result=success`.
+**Feito em `agents/carwatch/`:**
+- `deadman-ping.sh` — `curl -X POST` com Bearer e `--max-time 10 --retry 2`;
+  `CARWATCH_DEADMAN_URL` vazio desliga o ping (mesmo padrão de `CARWATCH_BACKUP_REMOTE`).
+- `run.sh` — carrega o `.env` no topo (`set -a; . ./.env; set +a` — o ping roda no host,
+  fora do container) e chama `if ! ./deadman-ping.sh` **depois** do `weekly-run` e do
+  `backup.sh`. Ping que falha escreve em stderr e não derruba o run — mesma proteção
+  não-fatal do backup.
+- `.env.example` — `CARWATCH_DEADMAN_URL` e `CARWATCH_DEADMAN_TOKEN`.
+- Testes: `tests/test_deadman_ping_sh.py` (estilo `test_backup_sh.py`) e novas asserções
+  em `tests/test_run_sh.py`. Suíte completa: 283 passed.
 
 ---
+
 
 ### Task 6: Documentação, no mesmo commit
 
@@ -288,37 +256,28 @@ start manual do service termina em `Result=success`.
 - Modificar: `agents/carwatch/README.md`
 - Modificar: `agents/carwatch/TODO.md`
 
-1. **`CLAUDE.md`** — a convenção do repo exige atualizar este arquivo junto. Acrescente
-   `carwatch-heartbeat` à tabela de rotinas autônomas (diário) e registre que o CarWatch
-   passou a gerar dumps fora do repo. **Confira contra a realidade** com
-   `systemctl --user list-timers`, não contra este plano.
-2. **`README.md` do CarWatch** — documente `backup.sh`, a variável
-   `CARWATCH_BACKUP_DIR`, a retenção de 8 arquivos, o comando de restauração
-   (`pg_restore`) e o subcomando `heartbeat`.
-3. **`TODO.md`** — marque os dois P0. Se o Task 2 não tiver sido respondido, **não**
-   marque o backup como concluído: registre que está feito localmente e pendente de
-   destino replicado.
+1. **`CLAUDE.md`** — a convenção do repo exige atualizar este arquivo junto. **Não**
+   acrescente linha na tabela de rotinas systemd (o switch não é systemd). Acrescente
+   `infra/cloudflare/deadman-switch/` à árvore de diretórios e uma nota, na seção do
+   CarWatch, de que o `run.sh` pinga o switch no fim. Registre também os dumps fora do
+   repo. **Confira contra a realidade** (`systemctl --user list-timers`,
+   `wrangler deployments list`), não contra este plano.
+2. **`README.md` do CarWatch** — documente `backup.sh`, `CARWATCH_BACKUP_DIR`, a
+   retenção de 8 arquivos, o `pg_restore`, e o `deadman-ping.sh` + as variáveis
+   `CARWATCH_DEADMAN_URL` / `CARWATCH_DEADMAN_TOKEN`.
+3. **`infra/SERVICES.md` e `infra/README.md`** — registrar o Worker `carwatch-deadman`.
+4. **`TODO.md`** — marque os dois P0, apontando o de heartbeat para o switch.
 
 ---
 
-### Task 7: [REQUER HUMANO] Decidir sobre dead man's switch externo
+### Task 7: Dead man's switch externo  ✅ RESOLVIDO (2026-08-29)
 
-Leia de novo a seção "O que este plano NÃO resolve". O heartbeat do Task 4 não detecta
-host desligado nem `linger` perdido, porque ele mesmo depende dos dois.
+A decisão de privacidade foi tomada: o switch externo entra. A Cloudflare já é confiada
+(túnel `cloudflared`), o ping não carrega dado do host além do IP de origem — que a
+Cloudflare já vê pelo túnel — e o fluxo é sempre de saída, sem abrir nada inbound.
 
-A cobertura completa exige algo **fora desta máquina** que espere um sinal e reclame
-quando ele não chega — um ping de sucesso para um serviço externo no fim do `run.sh`.
-
-Isso é uma decisão de arquitetura com implicações de privacidade: significa que um
-terceiro passa a saber quando este host está de pé. Dado o cuidado que o repo tem com
-exposição, **não implemente por conta própria.** Pergunte, e registre a resposta no
-`TODO.md`.
-
-**Alternativa que não acrescenta terceiro:** o Drive já recebe um `.dump` por semana.
-A idade do arquivo mais recente em `gdrive:carwatch-backups/` é, por si só, um sinal de
-vida — e é observável de qualquer lugar, inclusive de outra máquina. Não fecha o ciclo
-sozinho (alguém ou algo precisa olhar), mas transforma "o host está vivo?" numa pergunta
-respondível de fora sem contratar serviço nenhum.
+Implementado nas Tasks 4 e 5 (reescritas acima). Desenho e trade-offs completos em
+`docs/superpowers/specs/2026-08-29-deadman-switch-design.md`.
 
 ---
 
@@ -337,18 +296,22 @@ Critérios de aceite, todos obrigatórios:
 - `pytest -q` passa inteiro, sem teste novo pulado.
 - gitleaks passa.
 - `git status` não mostra nenhum arquivo `.dump`, `.env` ou relatório operacional.
-- `systemctl --user list-timers` mostra `carwatch.timer` **e**
-  `carwatch-heartbeat.timer`.
-- Nenhum caminho começando com `/home/` em arquivo versionado:
-  `git grep -n "/home/" -- . ':!*.lock'` não retorna nada novo.
+- `systemctl --user list-timers` mostra `carwatch.timer` (o switch **não** adiciona
+  timer — é um Worker Cloudflare com cron próprio).
+- `infra/cloudflare/deadman-switch/` tem `npm test` verde e a URL do Worker responde
+  `200` em `/health`.
+- Nenhum caminho começando com `/home/` nem o `account_id` da Cloudflare em arquivo
+  versionado: `git grep -n "/home/" -- . ':!*.lock'` não retorna nada novo, e
+  `git grep -ni "$CLOUDFLARE_ACCOUNT_ID"` (com a env setada) não retorna nada.
 
 ## Commit sugerido
 
-Dois commits, um por pendência, cada um com sua documentação junto:
+Commits separados por peça, cada um com sua documentação junto:
 
 ```
 feat(carwatch): dump semanal do banco com retenção de 8 cópias
-feat(carwatch): heartbeat diário avisa quando o run semanal silencia
+feat(deadman-switch): Worker Cloudflare que alerta quando um agente para de pingar
+feat(carwatch): pinga o dead man's switch no fim de um run bem-sucedido
 ```
 
 Não abra PR sem antes verificar `git status`: em 2026-08-29 havia trabalho de outra
