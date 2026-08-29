@@ -23,7 +23,7 @@ docker compose --profile optional up -d n8n
 bash infra/scripts/healthcheck.sh
 ```
 
-Resultado esperado: Open WebUI, Ollama, ComfyUI, Docker Compose, Cloudflare e GPU com `[OK]`.
+Resultado esperado: Open WebUI, Ollama, ComfyUI, Docker Compose, as rotas Cloudflare ativas e GPU com `[OK]`.
 
 ## Aplicar configuração de sistema
 
@@ -41,12 +41,12 @@ instala o ingress do Cloudflare Tunnel e reinicia os serviços afetados.
 O acesso remoto público passa pelo Cloudflare Access:
 
 ```text
-https://ai.example.com     → Open WebUI
 https://media.example.com  → ComfyUI
 https://flow.example.com   → n8n
+https://dsh.example.com    → DeepSeek Harness
 ```
 
-Ollama é um backend interno e nunca deve ter hostname público.
+Open WebUI permanece local em `http://localhost:3000`. Ollama é um backend interno e nunca deve ter hostname público. O DeepSeek Harness usa `127.0.0.1:3081` como origin do Tunnel e exige uma aplicação Cloudflare Access própria; ver [`docker/deepseek-harness/README.md`](docker/deepseek-harness/README.md).
 
 ## Regra de ouro de portas
 

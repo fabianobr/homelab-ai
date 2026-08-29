@@ -1,5 +1,9 @@
 # DeepSeek Harness no homelab-ai
 
+> Para a instância persistente deste host, o caminho canônico é o profile Docker `harness`.
+> A antiga unidade de usuário `dsh-web.service` foi desativada; o guia de instalação global abaixo
+> permanece somente como referência para experimentos locais descartáveis.
+
 Guia para experimentar o [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
 como agente autônomo e multi-provider na criação de um projeto novo. O Ollama local é uma das
 opções de modelo, não uma restrição nem o provider obrigatório.
@@ -52,8 +56,10 @@ projeto a um smoke test.
 - Com uma única GPU, somente chamadas a modelos locais precisam ser serializadas. Providers cloud
   não disputam VRAM com o Ollama.
 
-Não publique a porta `3080` nem o Ollama. Para o primeiro experimento, mantenha ambos acessíveis
-somente por loopback.
+Não publique a porta interna `3080` nem o Ollama. Para o primeiro experimento, mantenha ambos acessíveis
+somente por loopback. Para o uso remoto aprovado deste homelab, a porta interna continua isolada e
+o profile Docker publica somente `127.0.0.1:3081` para o Cloudflare Tunnel; consulte
+[`infra/docker/deepseek-harness/README.md`](../infra/docker/deepseek-harness/README.md).
 
 ## Estado local já verificado
 

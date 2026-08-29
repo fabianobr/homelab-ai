@@ -4,13 +4,14 @@ credentials-file: /etc/cloudflared/CLOUDFLARE_TUNNEL_ID.json
 protocol: http2
 
 ingress:
-  - hostname: ai.example.com
-    service: http://localhost:3000
-
   - hostname: media.example.com
     service: http://localhost:8188
 
   - hostname: flow.example.com
     service: http://localhost:5678
+
+  # DeepSeek Harness: proteger no Cloudflare Access antes de instalar esta rota.
+  - hostname: dsh.example.com
+    service: http://localhost:3081
 
   - service: http_status:404
