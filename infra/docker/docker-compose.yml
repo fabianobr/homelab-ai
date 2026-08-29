@@ -248,7 +248,92 @@ services:
         reservations:
           memory: 256m
 
+  # DSH escuta somente em 127.0.0.1 dentro do seu namespace. O relay abaixo
+  # compartilha a rede do serviço e publica apenas um alvo loopback no host
+  # para o Cloudflare Tunnel; não use network_mode: host nem --host 0.0.0.0.
+  deepseek-harness:
+    build:
+      context: ./deepseek-harness
+      args:
+        DSH_VERSION: "0.1.0-rc.7"
+    image: homelab-ai/deepseek-harness:0.1.0-rc.7
+    container_name: deepseek-harness
+    profiles:
+      - harness
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3081:8080"
+    volumes:
+      - deepseek-harness-state:/dsh-home
+      - deepseek-harness-npm-cache:/dsh-home/.npm
+      - ${DSH_WORKSPACE_DIR:-/srv/homelab-ai/dsh-workspaces}:/workspace
+    environment:
+      - DSH_PERMISSION_MODE=workspace-write
+      - DSH_TELEMETRY_DISABLED=1
+    command:
+      [
+        "node",
+        # Necessário pelo serviço HMR incluído no profile web do DSH 0.1.0-rc.7.
+        "--expose-internals",
+        "/usr/local/lib/node_modules/@deepseek-ai/dsh/lib/bin.js",
+        "web",
+        "--no-open",
+        "--port",
+        "3080",
+        "--trusted-host",
+        "${DSH_PUBLIC_HOSTNAME:-dsh.example.com}",
+      ]
+    read_only: true
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3080').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4g
+        reservations:
+          memory: 512m
+
+  deepseek-harness-relay:
+    image: homelab-ai/deepseek-harness:0.1.0-rc.7
+    pull_policy: never
+    container_name: deepseek-harness-relay
+    profiles:
+      - harness
+    restart: unless-stopped
+    depends_on:
+      - deepseek-harness
+    network_mode: service:deepseek-harness
+    command: ["node", "/usr/local/lib/deepseek-harness/relay.mjs"]
+    read_only: true
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
 volumes:
+  deepseek-harness-state:
+    name: deepseek-harness-state
+  deepseek-harness-npm-cache:
+    name: deepseek-harness-npm-cache
   open-webui:
     name: open-webui
     external: true

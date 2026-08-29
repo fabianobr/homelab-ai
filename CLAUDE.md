@@ -93,7 +93,7 @@ O hook usa [gitleaks](https://github.com/gitleaks/gitleaks) e roda também no CI
 
 ## Subir a stack — profiles importam
 
-**Todos os seis serviços estão atrás de profile. Sem `--profile`, nada sobe** — não é
+**Todos os oito serviços estão atrás de profile. Sem `--profile`, nada sobe** — não é
 falha, é profile desligado. Confirme com
 `docker compose --env-file homelab.env -f infra/docker/docker-compose.yml config --services`:
 sem profile a saída é vazia.
@@ -106,6 +106,7 @@ sem profile a saída é vazia.
 | `n8n` | `optional` | 5678 |
 | `litellm` | `optional` | 4000 |
 | `searxng` | `optional` | 8080 |
+| `deepseek-harness` + relay | `harness` | 3081 |
 
 O env-file é `homelab.env` na raiz (gitignored) — **não** `.env`. Ele define
 `HOMELAB_ROOT`, `COMFYUI_SOURCE_DIR` e `SEARXNG_SECRET`, que o compose lê como
@@ -136,6 +137,7 @@ demanda via `docker compose run --rm`.
 - SearXNG `8080`
 - n8n `5678`
 - LiteLLM `4000`
+- DeepSeek Harness `3081`
 - Postgres do CarWatch `5433` (compose próprio do agente)
 - Docker socket
 

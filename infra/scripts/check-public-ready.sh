@@ -64,7 +64,7 @@ fi
 
 if docker compose --env-file .env.media-pipeline.example \
   -f infra/docker/docker-compose.yml \
-  --profile optional --profile interactive --profile media-pipeline config >/tmp/homelab-ai-compose-config.yml; then
+  --profile optional --profile interactive --profile media-pipeline --profile harness config >/tmp/homelab-ai-compose-config.yml; then
   echo "[OK] docker compose config renders"
 else
   echo "[FAIL] docker compose config failed"
@@ -78,7 +78,7 @@ else
   echo "[OK] mutable container image tags are absent from the media-pipeline profile"
 fi
 
-for port in 11434 3000 8188 5678; do
+for port in 11434 3000 8188 5678 3081; do
   if rg -n -U "host_ip: 127\\.0\\.0\\.1\\n\\s+target: [0-9]+\\n\\s+published: \"${port}\"" /tmp/homelab-ai-compose-config.yml >/dev/null; then
     echo "[OK] published port ${port} is bound to 127.0.0.1"
   else

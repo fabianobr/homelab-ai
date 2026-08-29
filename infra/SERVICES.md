@@ -10,6 +10,7 @@
 | Cloudflare Tunnel | Sim | systemd | - | Exposição segura |
 | LTX Video | Opcional | Docker | variável | Vídeo |
 | n8n | Opcional | Docker Compose profile `optional` | 5678 | Automações |
+| DeepSeek Harness | Opcional | Docker Compose profile `harness` | 3081 | Agente de código, via Access |
 
 ## Ordem de instalação
 
@@ -33,9 +34,9 @@
 Serviços publicados via Cloudflare Access:
 
 ```text
-https://ai.example.com  -> http://localhost:3000  (Open WebUI)
 https://media.example.com -> http://localhost:8188  (ComfyUI)
 https://flow.example.com  -> http://localhost:5678  (n8n)
+https://dsh.example.com   -> http://localhost:3081 (DeepSeek Harness)
 ```
 
 E-mail permitido no Access:
@@ -44,12 +45,14 @@ E-mail permitido no Access:
 user@example.com
 ```
 
-Ollama é acessado pelo Open WebUI via rede interna do Docker Compose:
+Open WebUI permanece local em `http://localhost:3000`. Ollama é acessado pelo Open WebUI via rede interna do Docker Compose:
 
 ```text
 http://ollama:11434        (chat/completions)
 http://ollama:11434/v1     (endpoint OpenAI-compatible)
 ```
+
+O DeepSeek Harness acessa o Ollama pela mesma rede Compose e só publica `127.0.0.1:3081` para o Tunnel. O estado e os workspaces são isolados; ver [`docker/deepseek-harness/README.md`](docker/deepseek-harness/README.md).
 
 ## Paths de modelos (bind mounts)
 
