@@ -31,6 +31,7 @@ o que funciona, o que não funciona, com números. Desktop Ubuntu com GPU NVIDIA
 - **Entender a pesquisa:** [`research/sdlc-agentico/README.md`](research/sdlc-agentico/README.md)
 - **Usar o pipeline:** [`products/sdlc-hibrido/README.md`](products/sdlc-hibrido/README.md)
 - **Ver um app gerado:** [`products/marketplace/README.md`](products/marketplace/README.md)
+- **Experimentar o DeepSeek Harness:** [`docs/deepseek-harness.md`](docs/deepseek-harness.md)
 
 ## Media Meme Pipeline
 
