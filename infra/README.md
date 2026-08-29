@@ -23,7 +23,7 @@ docker compose --profile optional up -d n8n
 bash infra/scripts/healthcheck.sh
 ```
 
-Resultado esperado: Open WebUI, LM Studio, ComfyUI, Docker Compose, Cloudflare e GPU com `[OK]`.
+Resultado esperado: Open WebUI, Ollama, ComfyUI, Docker Compose, Cloudflare e GPU com `[OK]`.
 
 ## Aplicar configuração de sistema
 
@@ -46,13 +46,12 @@ https://media.example.com  → ComfyUI
 https://flow.example.com   → n8n
 ```
 
-Ollama e LM Studio são backends internos — nunca devem ter hostnames públicos.
+Ollama é um backend interno e nunca deve ter hostname público.
 
 ## Regra de ouro de portas
 
 Nunca expor diretamente na internet:
 - Ollama `11434`
-- LM Studio `1234`
 - n8n `5678`
 - LiteLLM `4000`
 - Docker socket

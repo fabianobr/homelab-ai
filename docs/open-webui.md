@@ -26,10 +26,7 @@ docker run -d --name open-webui --restart unless-stopped \
   -e "WEBUI_NAME=Home Lab AI" \
   -e ENABLE_SIGNUP=false \
   -e WEBUI_AUTH_TRUSTED_EMAIL_HEADER=Cf-Access-Authenticated-User-Email \
-  -e ENABLE_OPENAI_API=True \
   -e OLLAMA_BASE_URL=http://host.docker.internal:11434 \
-  -e OPENAI_API_BASE_URL=http://host.docker.internal:1234/v1 \
-  -e OPENAI_API_KEY=lm-studio \
   --add-host host.docker.internal:host-gateway \
   ghcr.io/open-webui/open-webui:main
 ```
@@ -52,20 +49,6 @@ sudo systemctl restart snap.ollama.listener.service
 ```
 
 Nao publique essa porta no Cloudflare, no roteador, na LAN ou na Tailscale.
-
-## Conectar com LM Studio
-
-Provider OpenAI-compatible:
-
-```text
-http://host.docker.internal:1234/v1
-```
-
-API key:
-
-```text
-lm-studio
-```
 
 ## Publicação
 
@@ -94,16 +77,10 @@ https://ai.example.com
 
 Open WebUI esta rodando em container Docker com volume persistente `open-webui`.
 
-O container acessa o LM Studio em:
-
-```text
-http://host.docker.internal:1234/v1
-```
-
 O container acessa o Ollama em:
 
 ```text
 http://host.docker.internal:11434
 ```
 
-Antes do primeiro chat, carregue no LM Studio um modelo de conversa. No momento da validacao inicial, o endpoint `/v1/models` listava apenas um modelo de embedding.
+Antes do primeiro chat, confirme que o Ollama tem um modelo de conversa disponível com `ollama list`.

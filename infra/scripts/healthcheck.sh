@@ -59,7 +59,6 @@ echo
 echo "URLs:"
 check_url "Open WebUI" "http://localhost:3000"
 check_url "Ollama models" "http://localhost:11434/api/tags"
-check_url "LM Studio models" "http://localhost:1234/v1/models" "SKIP optional"
 check_url "ComfyUI" "http://localhost:8188"
 check_url "n8n" "http://localhost:5678" "SKIP optional"
 

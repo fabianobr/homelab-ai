@@ -148,7 +148,7 @@ Gerado pelo agente semanal em `agents/weekly-cost-benefit/`.
 | ChatGPT Plus / Codex | paid | 0 | 20 | 4/5 | 4/5 | nunca | paid |
 | ChatGPT Pro | paid | 0 | 200 | 5/5 | 5/5 | nunca | paid |
 | Google AI Pro (Gemini / Antigravity) | paid | 0 | 20 | 4/5 | 4/5 | nunca | paid |
-| Local AI Development Setup (Ollama + LM Studio) | local | 430 | 15 | 4/5 | 4/5 | nunca | local |
+| Local AI Development Setup (Ollama) | local | 430 | 15 | 4/5 | 4/5 | nunca | local |
 | Local LLM Rig (RTX 4090 24GB) | local | 1500 | 25 | 5/5 | 5/5 | nunca | local |
 | Mac Studio M4 Max 64GB | local | 2500 | 8 | 5/5 | 5/5 | 1250m | local |
 
@@ -242,7 +242,7 @@ Gerado pelo agente semanal em `agents/weekly-cost-benefit/`.
 - **Justificativa:** Balanced cost and performance, suitable for most coding tasks with good integration and reliability.
 - **Fonte:** https://www.cosmicjs.com/blog/claude-code-vs-github-copilot-vs-cursor-which-ai-coding-agent-should-you-use-2026
 
-### Local AI Development Setup (Ollama + LM Studio)
+### Local AI Development Setup (Ollama)
 - **Tipo:** local
 - **CAPEX:** US$ 430
 - **OPEX:** US$ 15/mes
@@ -281,7 +281,7 @@ Gerado pelo agente semanal em `agents/weekly-cost-benefit/`.
 | Google Antigravity 2.0 (Free Tier) | paid | 0 | 0 | 4/5 | 5/5 | 0m | paid |
 | Google Antigravity 2.0 (Ultra Tier) | paid | 0 | 100 | 4/5 | 5/5 | nunca | paid |
 | Claude Code (Pro Plan) | paid | 0 | 20 | 4/5 | 5/5 | nunca | paid |
-| Local LLM Setup (Ollama + LM Studio) | local | 0 | 0 | 5/5 | 5/5 | 0m | local |
+| Local LLM Setup (Ollama) | local | 0 | 0 | 5/5 | 5/5 | 0m | local |
 
 ### Local AI Development Setup (AMD Ryzen 7, RTX 4070)
 - **Tipo:** local
@@ -323,7 +323,7 @@ Gerado pelo agente semanal em `agents/weekly-cost-benefit/`.
 - **Justificativa:** Low monthly cost with enterprise-grade quality; ideal for individual developers.
 - **Fonte:** https://www.getaiperks.com/en/blogs/34-claude-code-pricing-vs-alternatives
 
-### Local LLM Setup (Ollama + LM Studio)
+### Local LLM Setup (Ollama)
 - **Tipo:** local
 - **CAPEX:** US$ 0
 - **OPEX:** US$ 0/mes

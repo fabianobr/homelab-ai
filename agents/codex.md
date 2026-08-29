@@ -17,7 +17,7 @@ Atuar como SRE, DevOps e engenheiro de software para manter o laboratório de IA
 ## Nunca faça
 
 - Abrir portas diretamente no roteador
-- Expor LM Studio, ComfyUI ou n8n diretamente na internet
+- Expor Ollama, ComfyUI ou n8n diretamente na internet
 - Expor Docker socket
 - Instalar serviços sem atualizar a documentação
 - Substituir Docker Compose por Kubernetes
@@ -37,7 +37,7 @@ Atuar como SRE, DevOps e engenheiro de software para manter o laboratório de IA
 
 A interface principal é o Open WebUI.
 
-O LM Studio é backend de modelos.
+O Ollama é backend de modelos.
 
 Cloudflare Tunnel + Access é o unico acesso remoto suportado.
 

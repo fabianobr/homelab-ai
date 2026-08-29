@@ -33,7 +33,7 @@ Formato sugerido:
 
 ```text
 feat: adiciona open webui
-fix: corrige healthcheck do lm studio
+fix: corrige healthcheck do ollama
 docs: atualiza segurança cloudflare
 chore: atualiza docker compose
 ```

@@ -2,13 +2,9 @@
 
 ## Fase 1 — Base funcional
 
-- [x] Instalar LM Studio
 - [x] Instalar Ollama
 - [x] Conectar Open WebUI ao Ollama
-- [ ] Corrigir FUSE/driver NVIDIA para LM Studio AppImage
 - [x] Instalar Open WebUI
-- [x] Conectar Open WebUI ao LM Studio
-- [x] Carregar modelo de chat no LM Studio
 - [x] Testar chat local
 
 ## Fase 2 — Acesso remoto

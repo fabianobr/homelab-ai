@@ -5,7 +5,6 @@
 Nunca:
 
 - Expor `Ollama` diretamente na internet
-- Expor `LM Studio` diretamente na internet
 - Expor `ComfyUI` sem Cloudflare Access
 - Expor `n8n` diretamente na internet sem autenticação forte
 - Abrir portas no roteador sem necessidade
@@ -116,7 +115,6 @@ Backends internos que nao devem ter hostname publico:
 
 ```text
 Ollama 11434
-LM Studio 1234
 ```
 
 Ollama fica em `0.0.0.0:11434` apenas para permitir acesso do container Docker via `host.docker.internal`. A unidade `homelab-ai-ollama-firewall.service` deve estar ativa para bloquear essa porta fora de loopback e interfaces Docker.

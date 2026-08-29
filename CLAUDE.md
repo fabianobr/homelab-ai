@@ -139,7 +139,6 @@ demanda via `docker compose run --rm`.
 ## Portas nunca expostas diretamente na internet
 
 - Ollama `11434`
-- LM Studio `1234`
 - SearXNG `8080`
 - n8n `5678`
 - LiteLLM `4000`
@@ -184,6 +183,6 @@ homelab-ai/
 │   ├── media-pipeline/      ← ponteiro: código vive em fabianobr/media-meme-pipeline
 │   ├── lib/                 ← helpers compartilhados (telegram_notify.py)
 │   └── claude-code.md, codex.md, continue-dev.md  ← configs por ferramenta
-└── docs/                    ← docs de serviços (comfyui, n8n, lm-studio, ltx-video, etc.)
+└── docs/                    ← docs de serviços (comfyui, n8n, ltx-video, etc.)
     └── superpowers/plans/   ← planos de implementação versionados (n8n PoC, fases do CarWatch)
 ```
