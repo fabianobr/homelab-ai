@@ -6,13 +6,15 @@ autônoma 2026-08-29 09:00). Contexto e histórico ficam em `DESIGN.md` e no
 
 ## P0 — antes de confiar no piloto automático
 
-- [ ] **Backup do banco.** `carwatch-db-1` (volume `carwatch_db_data`) vive só
-      neste host, sem backup. Perder a máquina = perder histórico de custo
-      (`llm_usage`), curadoria (`sources`, `source_metrics`) e eventos.
-      `raw_items`/`launch_events` o pipeline reconstrói com o tempo; o resto não.
-      Sugestão: `pg_dump` semanal (etapa em `run.sh` depois do `weekly-run`, ou
-      cron próprio) pra um caminho que já entra no backup do host. Guardar as
-      últimas N cópias.
+- [x] **Backup do banco.** Resolvido em 2026-08-29. `carwatch-db-1` (volume
+      `carwatch_db_data`) vivia só neste host: perder a máquina apagaria o histórico
+      de custo (`llm_usage`) e a curadoria (`sources`, `source_metrics`), que o
+      pipeline não reconstrói.
+      Agora `backup.sh` roda no fim do `run.sh`, grava um `pg_dump -Fc` em
+      `$HOME/.local/state/carwatch/backups` e envia para `gdrive:carwatch-backups/`
+      via rclone, mantendo 8 cópias de cada lado. Falha de backup avisa mas não
+      derruba o run. Restauração conferida com `pg_restore --list`: 10 tabelas,
+      incluindo as três insubstituíveis.
 
 - [ ] **Heartbeat.** Nada avisa se o timer parar de disparar — `linger`
       perdido num upgrade, timer desabilitado, `docker` fora do ar no horário.
