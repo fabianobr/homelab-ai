@@ -10,6 +10,48 @@ Gerado pelo agente semanal em `agents/weekly-cost-benefit/`.
 
 ## Setups avaliados
 
+### Analise de 2026-08-28
+
+| Setup | Tipo | CAPEX (US$) | OPEX (US$/mes) | Vel. | Qual. | Breakeven | Veredito |
+|---|---|---|---|---|---|---|---|
+| Hybrid AI Agent with Local and Cloud Models | hybrid | 430 | 35 | 4/5 | 4/5 | nunca | hybrid |
+| Local LLM for Coding (Qwen3-Coder 30B) | local | 430 | 15 | 4/5 | 5/5 | nunca | local |
+| DeepSeek Harness (Open-Source Coding Agent) | local | 430 | 15 | 4/5 | 4/5 | nunca | local |
+
+### Hybrid AI Agent with Local and Cloud Models
+- **Tipo:** hybrid
+- **CAPEX:** US$ 430
+- **OPEX:** US$ 35/mes
+- **IDs de preço:** `rtx-5060-ti-16gb, claude-pro`
+- **Velocidade:** 4/5 | **Qualidade:** 4/5
+- **Breakeven local vs pago:** nunca
+- **Veredito:** hybrid
+- **Justificativa:** Hybrid setup balances cost and performance, leveraging local hardware for inference and Claude Pro for advanced tasks, offering better value than pure local or paid solutions.
+- **Fonte:** https://hackernoon.com/building-a-hybrid-ai-agent-with-local-and-cloud-models
+
+### Local LLM for Coding (Qwen3-Coder 30B)
+- **Tipo:** local
+- **CAPEX:** US$ 430
+- **OPEX:** US$ 15/mes
+- **IDs de preço:** `rtx-5060-ti-16gb`
+- **Velocidade:** 4/5 | **Qualidade:** 5/5
+- **Breakeven local vs pago:** nunca
+- **Veredito:** local
+- **Justificativa:** Local setup provides high-quality coding assistance with minimal ongoing costs, making it more cost-effective than paid alternatives for consistent use.
+- **Fonte:** https://www.orcarouter.ai/blog/best-local-llm-for-coding
+
+### DeepSeek Harness (Open-Source Coding Agent)
+- **Tipo:** local
+- **CAPEX:** US$ 430
+- **OPEX:** US$ 15/mes
+- **IDs de preço:** `rtx-5060-ti-16gb`
+- **Velocidade:** 4/5 | **Qualidade:** 4/5
+- **Breakeven local vs pago:** nunca
+- **Veredito:** local
+- **Justificativa:** Open-source coding agent with long-term memory capabilities is cost-effective for local deployment, offering strong value for development tasks.
+- **Fonte:** https://www.marktechpost.com/2026/08/17/deepseek-ai-releases-deepseek-harness-in-developer-preview/
+
+
 ### Analise de 2026-08-01
 
 | Setup | Tipo | CAPEX (US$) | OPEX (US$/mes) | Vel. | Qual. | Breakeven | Veredito |
