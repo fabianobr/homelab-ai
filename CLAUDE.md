@@ -179,6 +179,7 @@ homelab-ai/
 ├── INVENTORY.yaml           ← hardware e serviços inventariados (caminhos sanitizados)
 ├── SECURITY.md              ← política de segurança do repo
 ├── STANDARDS.md             ← padrões de código e convenções
+├── scripts/                 ← utilitários de sessão (state.sh: retrato do host)
 ├── infra/                   ← trilha 1: homelab que roda os modelos
 │   ├── docker/              ← docker-compose.yml, comfyui/, n8n/, searxng/, litellm-config.yaml
 │   ├── scripts/             ← healthcheck, apply-system-config, update, check-public-ready

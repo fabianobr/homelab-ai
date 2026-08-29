@@ -28,4 +28,4 @@ sep "systemd user timers"
 systemctl --user list-timers --all --no-pager 2>/dev/null || echo "(sem systemd user)"
 
 sep "disk usage"
-df -h / /home 2>/dev/null | sort -u
+df -h /
