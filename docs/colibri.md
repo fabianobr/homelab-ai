@@ -247,9 +247,13 @@ mesma.
 
 ### O que fica
 
-- Motor compilado em `~/AI/colibri` (~1 MB de binários) — barato de manter.
-- Container do modelo em `~/AI/models/colibri/qwen36_i4_gs64` — **23 GB**, com o disco em 85%.
-  É o candidato óbvio a apagar se o `weekly-disk-guardian` apertar.
+- Motor compilado em `~/AI/colibri` (23 MB, binários de ~1 MB) — barato de manter, e é o que
+  permite refazer o degrau 2 sem recompilar nada.
+- **O container do modelo foi apagado** em 2026-08-30, depois de medido: eram 23 GB com o
+  disco em 85%, e os números que ele produziu estão todos registrados acima. O disco voltou a
+  126 GB livres (82%).
+- Para reproduzir, basta rebaixar o container e repetir os comandos do degrau 2 — o download
+  levou ~5 min a 79 MB/s.
 
 ## Referências
 
