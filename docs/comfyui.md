@@ -73,10 +73,15 @@ qualquer coisa:
 
 A lista do que foi migrado fica em `/mnt/models/comfyui/.moved-from-nvme-2026-08-30.txt`.
 
-Resultado da migração de 2026-08-30 (8 modelos, 67 GB): NVMe passou de 126 GB livres (82%)
-para **245 GB (65%)**; o HDD foi de 98 GB para 31 GB livres (**91% — vale acompanhar**).
-Verificado depois pela API do ComfyUI (`/object_info/CheckpointLoaderSimple`): os modelos
-movidos continuam aparecendo na lista, o symlink resolve dentro do container.
+Resultado da migração de 2026-08-30: **8 modelos, 67 GiB** saíram do NVMe e o HDD foi de
+98 GB para 31 GB livres (**91% — vale acompanhar**). Verificado depois pela API do ComfyUI
+(`/object_info/CheckpointLoaderSimple`): os modelos movidos continuam aparecendo na lista, o
+symlink resolve dentro do container.
+
+O NVMe foi de 126 para 245 GB livres **na mesma janela**, mas só ~67 GB vieram daqui — o
+resto foi um `docker builder prune` (59 GB) feito no mesmo dia. E esses 245 GB **não são o
+estado atual**: logo depois foram ocupados por um modelo de 167 GB (ver `colibri.md`).
+Confira com `df -h /` em vez de citar este número.
 
 **Por que isso importa além do ComfyUI:** o NVMe é recurso disputado. Modelos de LLM que
 fazem streaming de disco (ver `colibri.md`) são inviáveis no HDD — 33 leituras aleatórias
@@ -105,10 +110,10 @@ Modelos detectados:
 ```text
 models/checkpoints/ltx-2-19b-distilled.safetensors
 models/checkpoints/ltx-2.3-22b-dev-fp8.safetensors
-models/clip/gemma_3_12B_it_fp4_mixed.safetensors
+models/clip/  (vazio hoje — o arquivo antes listado aqui não existe mais)
 ```
 
-Essa listagem esta desatualizada: em 2026-08-30 `models/diffusion_models` tinha ~61 GB e
+Essa listagem esta desatualizada: em 2026-08-30 `models/diffusion_models` tinha 32 GB locais (108 GB resolvendo os symlinks) e
 `models/vae` tinha VAEs (varios como symlink para o HDD). Confira com
 `du -sh ~/AI/ComfyUI/models/*` antes de confiar nesta secao.
 
