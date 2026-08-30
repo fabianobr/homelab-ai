@@ -321,6 +321,57 @@ make -C c iobench && ./c/iobench <shard> 12 200 4 1
 
 O HDD continua fora de questão: 33 leituras aleatórias/s contra 350 do NVMe.
 
+
+### O tier CUDA, medido (2026-08-30)
+
+CUDA 13.3 instalado do repo `ubuntu2604`; o driver 595.84 e todos os containers ficaram
+intactos, como previsto. Build: `make -f Makefile.deepseek-v4 deepseek-v4 CUDA=1 DEEPGEMM=1
+CUDA_HOME=/usr/local/cuda-13.3 NVCC_CCBIN=g++-14`. O engine reconhece a placa:
+`[DSV4 CUDA] device 0: NVIDIA GeForce RTX 5060 Ti 16.6 GB sm_120`.
+
+| Configuração | Decode | TTFT | Hit rate |
+|---|---|---|---|
+| CPU, 1ª execução (fria) | 0,91 tok/s | 26,1 s | 55,9% |
+| CPU, 2ª execução | 1,01 tok/s | 27,3 s | 60,2% |
+| **CPU quente (controle)** | **0,98 tok/s** | 27,8 s | 61,2% |
+| GPU, só densos | 1,14 tok/s | 27,0 s | 60,4% |
+| **GPU + `COLI_CUDA_MOE_BATCH` + `COLI_CUDA_ATTN_BATCH`** | **1,37 tok/s** | 24,0 s | 61,6% |
+
+**Ganho limpo da GPU: +40% em decode, −14% em TTFT.** A comparação é controlada: o
+controle de CPU foi rodado *depois* das execuções com GPU, com o hot-set já aquecido, e os
+hit rates batem (61,2% vs 61,6%). Sem esse controle, o ganho pareceria maior do que é — o
+hit rate sobe sozinho entre execuções e infla qualquer comparação frio-contra-quente.
+
+Não são os 5–10× de prefill e 2,5× de decode que o projeto documenta, e o motivo é
+mensurável: durante a execução com GPU o disco entregou **2,13 GB/s**, contra os 4,38 GB/s
+que o `iobench` mede como teto. A máquina deixou de ser limitada por CPU e passou a ser
+limitada por I/O. A GPU não conserta leitura de disco — e o próprio projeto diz isso, ao
+explicar que experts streamados ficam de propósito no caminho de CPU, porque copiá-los para a
+GPU a cada uso trocaria o gargalo de disco por um de PCIe.
+
+`DSV4_CUDA_EXPERT_MIRRORS` não teve efeito observável: o tier permaneceu `dense-matvec` em
+todas as execuções, com 5,46 GiB subidos (131 MiB × 43 camadas) e ~10 GB de VRAM ociosos.
+Quem rendeu foram os flags de batching.
+
+### Armadilha de build: alternar `CUDA=1` exige `clean`
+
+O primeiro build com `CUDA=1 DEEPGEMM=1` produziu um binário que **linkava CUDA e não usava a
+GPU**, sem erro nenhum — mesmo tempo do CPU, nenhum banner, nenhum aviso de fallback.
+
+Causa: o `Makefile` não versiona as flags no nome dos objetos. Como havia `.o` de um build
+CPU anterior mais novos que o fonte, o `make` recompilou só o `.cu` do backend e reaproveitou
+as 27 unidades C — que portanto nunca receberam `-DCOLI_V4_GPU_TIER`. A chamada
+`coli_v4_gpu_engine_open()` está sob `#ifdef`, então foi compilada para fora, e junto com ela
+o próprio código que avisaria do fallback.
+
+Diagnóstico rápido, antes de acreditar num resultado de GPU:
+
+```bash
+nm c/COLI_V4_UNIT_RUNTIME.o | grep gpu_engine_open   # precisa aparecer "U coli_v4_gpu_engine_open"
+```
+
+Sempre `make -f Makefile.deepseek-v4 deepseek-v4-clean` ao trocar `CUDA=1`.
+
 ### Veredito corrigido
 
 **Para o que o Colibrì realmente promete, ele entrega nesta máquina.**
@@ -333,10 +384,9 @@ capacidade?" — o que depende do uso, não da engenharia:
 - **Serve** para trabalho assíncrono: uma pergunta difícil deixada rodando, análise em lote,
   geração noturna. É o mesmo padrão dos agentes semanais deste repo.
 
-O que segue em aberto é o tier CUDA, que o projeto documenta como 5–10× em prefill e ~2,5× em
-decode, com um caminho DeepGEMM escrito para `sm_120a` — exatamente a GPU deste host. Se
-confirmar, o TTFT cai de 26 s para ~3–5 s e o decode vai a ~2,5 tok/s, o que muda a natureza
-do uso.
+Com o tier CUDA ligado (medido acima), o decode vai a **1,37 tok/s** — 40% melhor, mas ainda
+no mesmo regime de uso. Uma resposta de 500 tokens passa de ~8 para ~6 minutos: continua
+sendo trabalho assíncrono, não conversa.
 
 ## Referências
 
