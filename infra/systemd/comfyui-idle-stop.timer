@@ -1,0 +1,10 @@
+[Unit]
+Description=Checa a cada 20 min se o ComfyUI está ocioso para desligá-lo
+
+[Timer]
+OnStartupSec=20min
+OnUnitActiveSec=20min
+RandomizedDelaySec=1min
+
+[Install]
+WantedBy=timers.target

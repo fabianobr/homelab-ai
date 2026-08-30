@@ -1,0 +1,7 @@
+[Unit]
+Description=Para o ComfyUI quando ocioso (sob demanda, libera RAM/VRAM)
+
+[Service]
+Type=oneshot
+ExecStart=%h/homelab-ai/infra/scripts/comfyui-idle-stop.sh
+NoNewPrivileges=true
