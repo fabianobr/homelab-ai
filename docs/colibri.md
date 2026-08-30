@@ -255,6 +255,89 @@ mesma.
 - Para reproduzir, basta rebaixar o container e repetir os comandos do degrau 2 — o download
   levou ~5 min a 79 MB/s.
 
+## EMENDA 2026-08-30: o DeepSeek V4 roda, e inverte o veredito
+
+O veredito acima ("roda e não serve aqui") foi escrito medindo o **Qwen3.6-35B-A3B**, e vale
+para o que ele testou: Colibrì como alternativa a um modelo que o Ollama já roda. Mas ele
+disparou o próprio gatilho de reabertura que este doc definiu — *"um modelo que o Ollama não
+consiga carregar e que caiba no disco"* — e o **DeepSeek V4 Flash** satisfaz os dois.
+
+Liberando 119 GB (`docker builder prune` + migração de modelos frios do ComfyUI para o HDD,
+ver `comfyui.md`), o NVMe foi de 126 para 245 GB livres e os 166,9 GB couberam.
+
+### O que foi medido
+
+Modelo: `deepseek-ai/DeepSeek-V4-Flash-0731`, 284B total / **13B ativos**, 43 camadas,
+256 experts roteados, top-6 + 1 compartilhado. Download verificado contra a API da Hugging
+Face: **74/74 arquivos com tamanho exato, 166,9 GB** — o doc do projeto avisa que shards
+truncados passam despercebidos, então essa checagem é obrigatória.
+
+Mesmo prompt das medições anteriores, 48 tokens, CPU-only, desktop e containers de pé:
+
+| | 1ª execução | 2ª execução |
+|---|---|---|
+| **Decode** | **0,91 tok/s** | **1,01 tok/s** |
+| TTFT | 26,1 s | 27,3 s |
+| Hit rate de experts | 55,9% | 60,2% |
+| Bytes lidos do disco | 83,7 GB | 75,5 GB |
+| Pins por camada | 12 | 13 |
+
+**Um modelo de 284B rodou na mesma velocidade que o Qwen3.6 de 35B** (0,85 tok/s). Não é
+paradoxo: o DeepSeek ativa 13B por token contra os 3B do Qwen, mas usa I/O direto alinhado e
+tem experts maiores (12,6 MB), que o NVMe serve com muito mais eficiência do que os blocos
+de 1,5 MB do Qwen.
+
+### O aprendizado de hot-set é real
+
+Entre a 1ª e a 2ª execução, sem mudar nada, o engine leu `.coli_usage` (telemetria de
+roteamento que ele mesmo gravou), subiu os pins de 12 para 13 por camada, e ficou **11% mais
+rápido lendo 8 GB a menos**. É o "weight JIT" do README funcionando — otimização observada,
+não prometida.
+
+### Duas previsões do planner que a execução desmentiu
+
+O `coli doctor` reprovou a máquina antes de rodar:
+
+```
+[fail] memory.ram   RAM budget cannot hold one expert slot per sparse layer
+RAM 19.6 GB budget · 19.7 GB dense · 0.0 GB warm experts · cap 0/layer
+hit 10% projected expert residency
+```
+
+Na prática os densos ocuparam **6,27 GiB**, não 19,7 GB, sobrando 9,6–10,2 GB para cache; e o
+hit rate real foi **56–60%**, não 10%. O planner erra para o lado conservador. **Um `[fail]`
+no doctor não é impedimento — vale tentar rodar assim mesmo.**
+
+### Banda de disco: use o `iobench` do projeto, não um teste caseiro
+
+Meu benchmark improvisado (single-thread, blocos de 1,5 MB) media 1.093 leituras/s. O
+`iobench` do próprio projeto, com O_DIRECT e 4 threads em blocos de 12 MB, mede
+**4,38 GB/s (~350 experts/s)** — 4× melhor. É esse o número que importa, porque é assim que o
+engine lê.
+
+```bash
+make -C c iobench && ./c/iobench <shard> 12 200 4 1
+```
+
+O HDD continua fora de questão: 33 leituras aleatórias/s contra 350 do NVMe.
+
+### Veredito corrigido
+
+**Para o que o Colibrì realmente promete, ele entrega nesta máquina.**
+
+Não existe comparação com o Ollama aqui, porque não há alternativa: nenhuma configuração
+local sua roda um 284B. A pergunta deixa de ser "é mais rápido?" e passa a ser "1 tok/s vale a
+capacidade?" — o que depende do uso, não da engenharia:
+
+- **Não serve** para uso interativo. Uma resposta de 500 tokens leva ~8 minutos.
+- **Serve** para trabalho assíncrono: uma pergunta difícil deixada rodando, análise em lote,
+  geração noturna. É o mesmo padrão dos agentes semanais deste repo.
+
+O que segue em aberto é o tier CUDA, que o projeto documenta como 5–10× em prefill e ~2,5× em
+decode, com um caminho DeepGEMM escrito para `sm_120a` — exatamente a GPU deste host. Se
+confirmar, o TTFT cai de 26 s para ~3–5 s e o decode vai a ~2,5 tok/s, o que muda a natureza
+do uso.
+
 ## Referências
 
 - Repositório: https://github.com/JustVugg/colibri
