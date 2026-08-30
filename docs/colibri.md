@@ -72,62 +72,102 @@ Não há partição alternativa: o NVMe é uma partição só, já em 82%. Liber
 GLM-5.2 não é uma questão de arrumar a casa — é comprar disco. E o `weekly-disk-guardian`
 roda toda segunda justamente porque essa métrica já está apertada.
 
-## O gargalo real é RAM, e não é a stack Docker
+## RAM: a previsão que este doc errou duas vezes
 
-O `qwen36` **não faz streaming de disco** — exige o conjunto de experts inteiro residente em
-RAM (~24 GB). A documentação é explícita: `--ram` é ignorado por esse motor, o orçamento é
-decidido pelo container, não por flag.
+A documentação do projeto diz que o `qwen36` exige **residência total** dos experts (~24 GB) e
+que `--ram` é ignorado por esse engine. As duas primeiras versões deste doc concluíram daí que
+o modelo não caberia nos ~21 GB disponíveis, e chegaram a recomendar derrubar o profile
+`media-pipeline` e fechar o desktop.
 
-Contra **21 GiB disponíveis**, faltam ~3 GB. E aqui a primeira versão deste doc errou o
-diagnóstico: eu culpei a stack Docker, mas medindo `docker stats`, **os onze containers
-somam ~500 MB ociosos** — `ollama`, `n8n`, `litellm`, `searxng`, `open-webui`, `carwatch-db`,
-`deepseek-harness`, `moneyprinterturbo` e companhia praticamente não custam RAM parados.
+**As duas coisas estavam erradas**, e a medição está em "Medições neste host":
 
-Quem ocupa os 8,4 GiB é a **sessão de desktop**: Chrome, VS Code, sessões do Claude Code,
-GNOME. E o sinal mais importante é o **swap com 9,8 GiB já em uso** — a máquina *já* passou
-por pressão de memória antes de qualquer experimento.
+- O que a doc omite é que o cache tem um botão: `cap` (slots por camada), exposto como
+  `--cap` no launcher. O `coli plan` escolhe `cap=173` sozinho e cabe no orçamento.
+- O pico real mais alto foi **16,65 GB**, com 22 GB disponíveis. Nada precisou ser desligado.
+- Uma tentativa intermediária de calcular o custo por `cap` pela fórmula do adaptador de
+  segmento (`hidden × inter × 3`) deu 32 GB para residência total e também estava errada: ela
+  conta os pesos como 1 byte quando o container é int4.
 
-Consequência prática: para rodar o Qwen3.6 aqui não adianta derrubar containers, tem que
-**fechar o desktop** (ou rodar numa TTY). Com swap no meio, um motor de inferência que espera
-residência total vira thrashing — o pior caso possível.
+Vale registrar por que a suspeita inicial era razoável mesmo estando errada: os containers
+**não** são o problema — medidos com `docker stats`, somam ~500 MB ociosos. Quem ocupa RAM é
+a sessão de desktop, e o swap já estava com 9,8 GiB em uso antes de qualquer experimento.
 
-## CUDA: a instrução da primeira versão estava errada
+## Medições neste host
 
-A primeira versão deste doc mandava `sudo apt install nvidia-cuda-toolkit`. **Não serve
-para esta GPU.** A RTX 5060 Ti é Blackwell, `compute capability 12.0` → `sm_120`, e o
-toolkit do `apt` desta Ubuntu é **CUDA 12.4**, que não emite código para sm_120 (só a partir
-da 12.8). O Makefile do projeto até lista `sm_120` no alvo `CUDA_ARCH=portable`; o limite é o
-toolkit, não o Colibrì.
+Medido em 2026-08-30, mesmo prompt ("Explique em duas frases o que é uma mixture of
+experts."), 64 tokens de saída, com o desktop e os containers de pé.
 
-O caminho correto tem dois obstáculos a mais:
+### Qwen3.6-35B-A3B no Colibrì, CPU-only
 
-1. **Repo da NVIDIA, não o do Ubuntu** — precisa de CUDA ≥ 12.8. A Ubuntu 26.04 (resolute) é
-   nova demais para ter repo CUDA próprio; na prática significa usar o repo `ubuntu2404`/
-   `ubuntu2504` ou o runfile.
-2. **`gcc 15.2` é novo demais para o `nvcc`.** O host já tem **`gcc-13` instalado**, então a
-   saída é apontar o host compiler: `nvcc -ccbin gcc-13`.
+O `coli plan` escolhe sozinho `cap 173/layer`. Varrendo o `cap` (slots de cache por camada):
 
-Ou seja, o degrau da GPU não é um `apt install` — é uma instalação manual de toolkit, com
-risco de mexer no driver que hoje serve ComfyUI e Ollama. **Não vale a pena antes** de o
-degrau 2 provar que o modelo roda e que o ganho interessa.
+| `cap` | tok/s | acerto do cache | pico de RSS | TTFT |
+|---|---|---|---|---|
+| 16 (default do engine) | 0,38 | 55,5% | 11,05 GB | 36,0 s |
+| 64 | 0,73 | 79,9% | 11,85 GB | 34,0 s |
+| **173** (escolha do planner) | **0,85** | 83,4% | 16,65 GB | 32,4 s |
 
-## Velocidade: expectativa realista
+**A RAM nunca foi o problema.** Os pesos densos residentes custam 9,25 GB e dominam; o cache
+de experts é troco — quadruplicar `cap` de 16 para 64 custou 0,8 GB. O medo de "24 GB de
+residência total" que as duas primeiras versões deste doc carregaram era infundado: o pico
+mais alto medido foi 16,65 GB com 22 GB disponíveis, e nada precisou ser desligado.
 
-Números de referência do próprio projeto, para calibrar:
+### O comparador: a mesma classe de modelo no Ollama, que já está no ar
 
-- 6× RTX 5090 (residência total): 5,8–6,8 tok/s
-- desktop CPU com 128 GB: ~1,8 tok/s
-- RTX 5070 Ti única: 1,07 tok/s
-- dev box de 25 GB (a baseline do projeto): **0,05–0,1 tok/s**
+`qwen3-coder:30b` (Qwen3-Coder-**30B-A3B**, Q4_K_M, 18,6 GB): mesma família, mesma
+arquitetura MoE, os mesmos ~3B ativos por token, mesma quantização, mesma máquina, mesmo
+prompt.
 
-Para o Qwen3.6 o projeto mediu, com tier de experts em VRAM (`CUDA=1`),
-**1,44 → 10,05 tok/s (7,0×) em duas placas de 8 GB**, com saída bit-idêntica à do CPU. A
-placa daqui é uma de 16 GB — mesmo orçamento total de VRAM, num device só. Plausível, não
-medido.
+| | Colibrì · Qwen3.6-35B-A3B | Ollama · qwen3-coder:30b |
+|---|---|---|
+| Onde roda | CPU (12 cores) | GPU (14,8 GB de VRAM) |
+| **Decode** | **0,85 tok/s** | **45,97 tok/s** |
+| TTFT | 32,4 s | 23,3 s (incl. 22,8 s de load frio) |
 
-## Plano de montagem — onde estamos
+**54x de diferença.** Aplicando o ganho de 7,0x que o próprio projeto mediu para o tier de
+experts em VRAM neste modelo, o Colibrì chegaria a ~6 tok/s — ainda ~8x atrás do que esta
+máquina entrega hoje sem instalar nada.
 
-**Degrau 1 — o motor funciona nesta máquina?** ✅ **feito**
+Ressalva: não são o mesmo checkpoint (35B vs 30B) e o Colibrì rodou sem CUDA. Mas a pergunta
+não é "qual engine é melhor em igualdade de condições" — é "o que esta máquina entrega".
+
+### Por que a diferença é tão grande
+
+Não é implementação ruim; é o pressuposto de projeto. O Colibrì existe para rodar modelos que
+**não cabem** — troca velocidade por capacidade, streamando experts do disco. Num modelo que
+cabe inteiro em 16 GB de VRAM, essa troca é só custo: o Ollama carrega tudo na GPU uma vez, o
+Colibrì pagina experts a cada token.
+
+O ganho apareceria num modelo grande demais para a VRAM **e** para a RAM. Nesta máquina,
+nenhum modelo desses cabe no disco — e é aí que os dois limites se encontram.
+
+## CUDA: mapeado, e deliberadamente não exercido
+
+O binário medido acima é CPU-only (`make qwen36`, sem `CUDA=1`): `ldd` não linka lib CUDA
+nenhuma, a GPU ficou em 1% durante a geração, e o `doctor` avisa
+`[warn] accelerator.gpu — GPU detected but the engine is CPU-only`. O planner sabe o que
+faria com ela: `VRAM 14.4 GB hot tier · ~8114 experts`.
+
+O caminho foi levantado e é viável:
+
+- Existe repo NVIDIA nativo para Ubuntu 26.04 com **CUDA 13.3** — acima dos 12.8 que o
+  Makefile documenta como piso para sm_120 (RTX 50), e acima de 12.9, então o gencode de
+  `compute_121` também entra.
+- `cuda-toolkit-13-3` e seus filhos diretos **não declaram nenhum pacote de driver**
+  (verificado baixando os `.deb` e lendo o `Depends`, sem instalar).
+- Os containers não consomem toolkit do host: o host **não tem CUDA toolkit hoje** e mesmo
+  assim Ollama e ComfyUI funcionam, porque o `nvidia-container-toolkit` injeta só o driver
+  (595.84) e cada imagem traz o próprio runtime (o Ollama carrega `cuda_v12` e `cuda_v13`).
+- Faltaria `g++-14` para `NVCC_CCBIN`: o host tem `gcc-13` mas só `g++-15`, novo demais para
+  o nvcc.
+
+**Não foi instalado de propósito.** O motivo não é risco — é retorno: ~6 tok/s projetados
+contra os 46 tok/s que a máquina já entrega. Se um dia couber aqui um modelo que o Ollama
+não consiga carregar, este é o caminho, e ele está pronto.
+
+## Plano de montagem — executado
+
+**Degrau 1 — o motor funciona nesta máquina?** ✅
 
 ```bash
 git clone https://github.com/JustVugg/colibri.git ~/AI/colibri
@@ -135,22 +175,23 @@ cd ~/AI/colibri/c && ./setup.sh          # 10 s
 make -C . qwen36 ARCH=native             # 2,4 s
 ```
 
-**Degrau 2 — um modelo real responde?** 🔄 em andamento
+**Degrau 2 — um modelo real responde?** ✅ responde, e os números estão acima
 
 ```bash
 hf download Kreuzzelg/qwen36-35b-a3b-colibri-i4-gs64 \
-  --local-dir ~/AI/models/colibri/qwen36_i4_gs64        # 23 GB
-COLI_MODEL=~/AI/models/colibri/qwen36_i4_gs64 ~/AI/colibri/c/coli doctor
-COLI_MODEL=~/AI/models/colibri/qwen36_i4_gs64 ~/AI/colibri/c/coli plan   # onde cada peça cai
-COLI_MODEL=~/AI/models/colibri/qwen36_i4_gs64 ~/AI/colibri/c/coli chat
+  --local-dir ~/AI/models/colibri/qwen36_i4_gs64        # 23 GB, ~79 MB/s
+M=~/AI/models/colibri/qwen36_i4_gs64
+COLI_MODEL=$M ~/AI/colibri/c/coli doctor    # exige --model; não roda "a seco"
+COLI_MODEL=$M ~/AI/colibri/c/coli plan      # escolhe cap 173/layer sozinho
+# `coli run` não é wired para este engine: use chat/serve, ou o engine direto:
+SNAP=$M TOK=$M/tokenizer.json N_NEW=64 ~/AI/colibri/c/qwen36 <cap> 4 prompt.txt
 ```
 
-Ao rodar: **fechar Chrome/VS Code antes**, e conferir `free -h`. Se o `available` não passar
-de ~24 GB, o motor vai para swap e o número medido não significa nada.
+Não foi preciso fechar nada — o alerta de "feche o Chrome antes", que as versões anteriores
+deste doc traziam, estava errado.
 
-**Degrau 3 — a GPU paga o esforço?** ⏸️ suspenso por ora
-
-Só depois do degrau 2, e ciente de que exige toolkit CUDA ≥ 12.8 fora do `apt` (ver acima).
+**Degrau 3 — a GPU paga o esforço?** ⏹️ **não executado, por decisão** — ver a seção de CUDA
+acima: o caminho está mapeado e é seguro, mas o retorno projetado não justifica.
 
 ## Como encaixaria na stack daqui
 
@@ -179,19 +220,36 @@ backend compartilhado.
 
 ## Veredito
 
-**Dá para montar, mas o que cabe aqui é só o Qwen3.6 — e ele briga com o desktop pela RAM.**
+**Roda, e não serve para nada aqui.** Essa é a conclusão medida, não estimada.
 
-O que atrai no projeto é rodar um modelo de 744B em máquina normal; o mecanismo
-(multitiering + JIT de pesos) é real e bem documentado. Só que os 126 GB livres deste NVMe
-não chegam nem perto dos 372 GB do GLM-5.2, e o segundo menor modelo do catálogo
-(DeepSeek V4, 167 GB) também não cabe. Isso não é ajuste de configuração: é disco.
+O Qwen3.6-35B-A3B carrega e responde corretamente, em 0,85 tok/s, sem atrapalhar nada que
+esteja no ar. Só que o Ollama entrega **46 tok/s** na mesma classe de modelo, nesta mesma
+máquina, hoje. Nem o tier de VRAM fecharia essa distância: 7× sobre 0,85 dá ~6 tok/s, um
+oitavo do que já existe.
 
-Sobra o Qwen3.6-35B-A3B: 23 GB, container pronto, motor já compilado aqui. O custo escondido
-é a RAM — 24 GB residentes contra 21 GB disponíveis, com swap já pressionado. Roda com o
-desktop fechado; não roda como serviço de fundo convivendo com o resto.
+A razão é estrutural, e é justamente o que torna o projeto interessante em outro contexto: o
+Colibrì troca velocidade por **capacidade**. Ele ganha quando o modelo não cabe. Aqui,
+dois limites se fecham ao mesmo tempo:
 
-Vale como pesquisa — é literalmente uma técnica nova de hierarquia de memória para MoE — e
-não como substituto do Ollama para o dia a dia.
+- os modelos que justificariam a técnica (GLM-5.2 com 372 GB, DeepSeek V4 com 167 GB) **não
+  cabem nos 105 GB livres do NVMe**;
+- os modelos que cabem no disco também cabem na GPU — e aí o Ollama é ordens de grandeza
+  melhor.
+
+Vale como leitura de engenharia (a hierarquia disco/RAM/VRAM para MoE é real e bem
+documentada, e o `coli doctor`/`plan` é um dos planejadores de recursos mais honestos que já
+vi num projeto desse porte). Não vale como serviço nesta máquina, e não deve entrar no
+compose.
+
+**Se um dia isto for reavaliado**, o gatilho é claro: um modelo que o Ollama não consiga
+carregar *e* que caiba no disco. Enquanto os dois lados não mudarem, a resposta continua a
+mesma.
+
+### O que fica
+
+- Motor compilado em `~/AI/colibri` (~1 MB de binários) — barato de manter.
+- Container do modelo em `~/AI/models/colibri/qwen36_i4_gs64` — **23 GB**, com o disco em 85%.
+  É o candidato óbvio a apagar se o `weekly-disk-guardian` apertar.
 
 ## Referências
 
