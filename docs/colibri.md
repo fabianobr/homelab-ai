@@ -9,6 +9,23 @@ montar nesta máquina.
   números do README; várias mudaram)
 - Onde mora: `~/AI/colibri` (fora do repo, como o MoneyPrinterTurbo)
 
+## Conclusão, em três linhas
+
+**O Colibrì funciona aqui — para o que ele realmente promete.** Um **DeepSeek V4 Flash de
+284B** roda a **1,37 tok/s** com o tier CUDA ligado (0,98 sem), o que nenhuma outra
+configuração desta máquina alcança. Serve para trabalho assíncrono (~6 min por 500 tokens),
+não para conversa.
+
+Para modelos que **cabem** na GPU ele só perde: o Qwen3.6-35B-A3B deu 0,85 tok/s contra
+46 tok/s do `qwen3-coder:30b` no Ollama. A fronteira útil é o tamanho do modelo, não a
+qualidade do engine.
+
+> **Este documento é cronológico e contém conclusões que foram depois corrigidas por
+> medição.** A seção "Veredito" reflete o que se sabia após testar só o Qwen3.6; a
+> "EMENDA 2026-08-30" a inverte com os dados do DeepSeek V4. Mantive as duas para preservar
+> o raciocínio — se você só quer a resposta, ela está acima.
+
+
 ## O que é
 
 Motor de inferência em **C puro** que roda modelos MoE gigantes em hardware comum tratando
@@ -218,7 +235,10 @@ Uma limitação para uso como serviço: o servidor **gera uma resposta por vez**
 concorrentes entram em fila, não carregam cópias do modelo. Serve para uso pessoal, não como
 backend compartilhado.
 
-## Veredito
+## Veredito (parcial — corrigido pela emenda no fim do documento)
+
+> ⚠️ Escrito quando só o Qwen3.6 tinha sido medido. A conclusão abaixo vale para modelos que
+> cabem na GPU; a "EMENDA 2026-08-30" mostra o caso em que ela não se aplica.
 
 **Roda, e não serve para nada aqui.** Essa é a conclusão medida, não estimada.
 
