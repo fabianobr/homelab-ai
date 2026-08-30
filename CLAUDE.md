@@ -146,6 +146,13 @@ docker compose --env-file homelab.env -f infra/docker/docker-compose.yml \
   --profile interactive --profile media-pipeline --profile optional up -d
 ```
 
+**O `comfyui` é sob demanda — não deixe ligado por padrão.** Ocioso ele segura
+~20 GiB de RAM e a VRAM do modelo residente, e nenhum timer depende dele. Suba
+só quando for gerar (`docker start comfyui`); o timer de usuário
+`comfyui-idle-stop.timer` (ver `infra/systemd/`) o desliga sozinho após ~1h sem
+atividade. Se `docker compose up` da stack inteira o trouxe junto pelo profile
+`media-pipeline`, pare-o com `docker stop comfyui`.
+
 **`--profile interactive` sozinho não funciona:** `open-webui` tem
 `depends_on: ollama`, e `ollama` está em `media-pipeline` — o compose recusa o projeto
 com *"depends on undefined service"*. Os dois profiles andam juntos.
@@ -182,7 +189,8 @@ homelab-ai/
 ├── scripts/                 ← utilitários de sessão (state.sh: retrato do host)
 ├── infra/                   ← trilha 1: homelab que roda os modelos
 │   ├── docker/              ← docker-compose.yml, comfyui/, n8n/, searxng/, litellm-config.yaml
-│   ├── scripts/             ← healthcheck, apply-system-config, update, check-public-ready
+│   ├── scripts/             ← healthcheck, apply-system-config, update, check-public-ready, comfyui-idle-stop
+│   ├── systemd/             ← unidades de usuário de infra (comfyui-idle-stop.timer)
 │   ├── cloudflare/          ← config do Tunnel e Access + deadman-switch/ (Worker)
 │   ├── media-pipeline/      ← contrato público (contract.yaml) do repo media-meme-pipeline
 │   ├── ARCHITECTURE.md      ← C4 L1/L2 do homelab
