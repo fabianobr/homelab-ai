@@ -9,9 +9,12 @@ Desliga o container `comfyui` depois de ~1h ocioso. O ComfyUI é sob demanda:
 sobe com `docker start comfyui` quando você vai gerar, e este timer o derruba
 sozinho para não segurar ~20 GiB de RAM + VRAM à toa.
 
-Instalar (rodar como o usuário, sem `sudo`):
+Instalar (rodar como o usuário, sem `sudo`, **a partir da raiz do repo**). O
+`.service` assume que o repo está em `~/homelab-ai` (`ExecStart=%h/homelab-ai/...`);
+se estiver em outro lugar, ajuste o `ExecStart`.
 
 ```bash
+mkdir -p ~/.config/systemd/user
 ln -sf "$PWD/infra/systemd/comfyui-idle-stop.service" ~/.config/systemd/user/
 ln -sf "$PWD/infra/systemd/comfyui-idle-stop.timer"   ~/.config/systemd/user/
 systemctl --user daemon-reload
