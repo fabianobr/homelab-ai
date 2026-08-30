@@ -73,6 +73,11 @@ qualquer coisa:
 
 A lista do que foi migrado fica em `/mnt/models/comfyui/.moved-from-nvme-2026-08-30.txt`.
 
+Resultado da migração de 2026-08-30 (8 modelos, 67 GB): NVMe passou de 126 GB livres (82%)
+para **245 GB (65%)**; o HDD foi de 98 GB para 31 GB livres (**91% — vale acompanhar**).
+Verificado depois pela API do ComfyUI (`/object_info/CheckpointLoaderSimple`): os modelos
+movidos continuam aparecendo na lista, o symlink resolve dentro do container.
+
 **Por que isso importa além do ComfyUI:** o NVMe é recurso disputado. Modelos de LLM que
 fazem streaming de disco (ver `colibri.md`) são inviáveis no HDD — 33 leituras aleatórias
 por segundo contra 1.093 do NVMe. Quando precisar de espaço rápido, o caminho é mover
