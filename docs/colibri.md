@@ -39,15 +39,18 @@ banda do NVMe, não a GPU**. GPU é opcional em todos os modelos — acelera, nu
 Python é usado só no launcher (`coli`), no gateway HTTP e na conversão de pesos; o motor não
 tem dependência nenhuma.
 
-## O host, medido
+## O host, medido (no início da avaliação)
 
-| | Valor real |
+Retrato do host **antes** dos experimentos. Os números de disco mudaram desde então — ver
+"O que fica" no fim para o estado atual.
+
+| | Valor no início |
 |---|---|
 | CPU / SO | 12 cores · Ubuntu 26.04 LTS (resolute) · gcc 15.2 · Python 3.14.4 |
 | RAM | **29 GiB** totais · ~21 GiB *available* · **swap já com 9,8 GiB em uso** |
 | Disco | `/dev/nvme0n1p5` 719 GB, **82% cheio — 126 GB livres**, partição única |
 | GPU | RTX 5060 Ti **16 GB**, driver 595.84, **compute capability 12.0 (sm_120, Blackwell)** |
-| CUDA Toolkit | **não instalado**; `apt` só oferece **12.4** |
+| CUDA Toolkit | não instalado *na época desta medição*; `apt` só oferece 12.4. **Hoje: CUDA 13.3 instalado** do repo `ubuntu2604` — ver a emenda |
 | Porta 5000 (`coli serve`) | livre |
 
 Duas dessas linhas decidem tudo, e nenhuma é a GPU: **126 GB livres** e **21 GiB de RAM
@@ -158,7 +161,11 @@ Colibrì pagina experts a cada token.
 O ganho apareceria num modelo grande demais para a VRAM **e** para a RAM. Nesta máquina,
 nenhum modelo desses cabe no disco — e é aí que os dois limites se encontram.
 
-## CUDA: mapeado, e deliberadamente não exercido
+## CUDA: mapeado, e deliberadamente não exercido (SUPERADO — foi instalado e medido)
+
+> ⚠️ Escrito antes do DeepSeek V4. O CUDA 13.3 **foi** instalado e medido depois; ver
+> "O tier CUDA, medido" na emenda. A afirmação abaixo de que falta `g++-14` também está
+> errada: o host tem `g++-14` e `gcc-14`, e é com `NVCC_CCBIN=g++-14` que o build funciona.
 
 O binário medido acima é CPU-only (`make qwen36`, sem `CUDA=1`): `ldd` não linka lib CUDA
 nenhuma, a GPU ficou em 1% durante a geração, e o `doctor` avisa
@@ -175,10 +182,10 @@ O caminho foi levantado e é viável:
 - Os containers não consomem toolkit do host: o host **não tem CUDA toolkit hoje** e mesmo
   assim Ollama e ComfyUI funcionam, porque o `nvidia-container-toolkit` injeta só o driver
   (595.84) e cada imagem traz o próprio runtime (o Ollama carrega `cuda_v12` e `cuda_v13`).
-- Faltaria `g++-14` para `NVCC_CCBIN`: o host tem `gcc-13` mas só `g++-15`, novo demais para
-  o nvcc.
+- ~~Faltaria `g++-14` para `NVCC_CCBIN`~~ — **errado**: o host tem `g++-14`. É o que o build
+  da emenda usa.
 
-**Não foi instalado de propósito.** O motivo não é risco — é retorno: ~6 tok/s projetados
+**Não foi instalado *neste momento da avaliação*.** O motivo não era risco — era retorno: ~6 tok/s projetados
 contra os 46 tok/s que a máquina já entrega. Se um dia couber aqui um modelo que o Ollama
 não consiga carregar, este é o caminho, e ele está pronto.
 
@@ -252,7 +259,7 @@ Colibrì troca velocidade por **capacidade**. Ele ganha quando o modelo não cab
 dois limites se fecham ao mesmo tempo:
 
 - os modelos que justificariam a técnica (GLM-5.2 com 372 GB, DeepSeek V4 com 167 GB) **não
-  cabem nos 105 GB livres do NVMe**;
+  cabem nos 126 GB livres do NVMe**;
 - os modelos que cabem no disco também cabem na GPU — e aí o Ollama é ordens de grandeza
   melhor.
 
@@ -267,13 +274,18 @@ mesma.
 
 ### O que fica
 
-- Motor compilado em `~/AI/colibri` (23 MB, binários de ~1 MB) — barato de manter, e é o que
-  permite refazer o degrau 2 sem recompilar nada.
-- **O container do modelo foi apagado** em 2026-08-30, depois de medido: eram 23 GB com o
-  disco em 85%, e os números que ele produziu estão todos registrados acima. O disco voltou a
-  126 GB livres (82%).
-- Para reproduzir, basta rebaixar o container e repetir os comandos do degrau 2 — o download
-  levou ~5 min a 79 MB/s.
+Estado do host ao fim de 2026-08-30:
+
+- **Motor em `~/AI/colibri`: 237 MB.** Eram 23 MB até o build `DEEPGEMM=1` vendorizar
+  204 MB em `c/third_party/deepgemm`. Os binários em si continuam com ~1 MB.
+- **O container do Qwen3.6 foi apagado** depois de medido (eram 23 GB).
+- **O container do DeepSeek V4 permanece:** `~/AI/models/colibri/deepseek_v4`, **167 GB**. É
+  ele que ocupa o disco hoje — e é deliberado, porque entrega capacidade que nenhuma outra
+  configuração desta máquina alcança.
+- **NVMe hoje: 82 GB livres (88%).** Os "245 GB livres" citados na seção de migração eram o
+  estado *antes* deste download. Sempre confira com `df -h /` em vez de citar um número
+  deste doc.
+- Para reproduzir do zero: rebaixar o container e repetir o degrau 2.
 
 ## EMENDA 2026-08-30: o DeepSeek V4 roda, e inverte o veredito
 
