@@ -167,7 +167,8 @@ O **CarWatch não faz parte desta stack**: tem compose próprio em
 `agents/carwatch/docker-compose.yml`, onde só o `db` fica de pé e o `app` roda sob
 demanda via `docker compose run --rm`.
 
-O **Colibrì / DeepSeek V4 também não**, e é a única peça que roda **fora de container**: o
+O **Colibrì / DeepSeek V4 também não**, e é o único **serviço de inferência** fora de
+container (o `cloudflared` e os agentes de `agents/` também rodam no host, por systemd): o
 engine é compilado no host com CUDA/DeepGEMM para `sm_120`. Sobe sob demanda com
 `infra/scripts/colibri-serve.sh start` e serve o LiteLLM como `sdlc-review-local`. Segura
 ~16–21 GB de RAM, então **não convive com o ComfyUI ligado** — o script recusa subir com menos

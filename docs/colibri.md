@@ -227,6 +227,10 @@ Python:
 COLI_MODEL=<dir> COLI_API_KEY=<segredo> ./coli serve --host 127.0.0.1 --port 5000
 ```
 
+> ⚠️ `--host 127.0.0.1` serve para uso a partir do próprio host. **Para o LiteLLM alcançar,
+> o bind precisa ser em `172.17.0.1`** — ver "Servindo pelo LiteLLM" adiante, e use
+> `infra/scripts/colibri-serve.sh` em vez deste comando cru.
+
 - **LiteLLM** (`:4000`) pode registrá-lo como provider OpenAI-compatible e o **Open WebUI**
   passa a listá-lo junto dos modelos do Ollama.
 - O bind padrão já é localhost. Vale a regra do repo: **porta nenhuma exposta direto na
@@ -521,6 +525,25 @@ fora do Compose** — se um dia escalar, o caminho é uma imagem própria e um p
 4. **`timeout: 2400` no LiteLLM.** Medido aqui, um prompt de 4.575 tokens custa ~223 s só de
    prefill. O default do LiteLLM mataria a requisição no meio, e o sintoma seria um erro de
    timeout que parece falha do modelo.
+
+### Em modo serve, o batching de MoE na GPU não cabe
+
+Medido em 2026-08-30, com o serviço no ar:
+
+```
+[DSV4 CUDA] device 0: NVIDIA GeForce RTX 5060 Ti 16.6 GB sm_120
+v4_gpu tier=dense-matvec device=0
+[DSV4 CUDA] expert FC2 bank allocation: out of memory
+v4_gpu moe-batch=off (bank allocation failed; CPU union stays)
+```
+
+O tier de densos ocupa ~15,5 dos 16,3 GB de VRAM, e não sobra para o banco de experts que
+`COLI_CUDA_MOE_BATCH=1` pede. **Ele degrada em silêncio** — sem erro, sem exit não-zero, só
+uma linha no log — e a união de experts volta para a CPU.
+
+Consequência: o serviço **não roda na configuração que rendeu 1,37 tok/s** no benchmark
+avulso, onde a VRAM estava livre. O script deixou de pedir `COLI_CUDA_MOE_BATCH` por isso;
+`COLI_CUDA_ATTN_BATCH` continua, esse cabe.
 
 ### É sob demanda, e a razão é RAM
 
