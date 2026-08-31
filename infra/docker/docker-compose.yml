@@ -187,6 +187,10 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       # Valor real somente no .env ignorado pelo Git. A rota continua opcional.
       - GROQ_API_KEY=${GROQ_API_KEY:-}
+      # Colibrì/DeepSeek V4 roda no HOST (infra/scripts/colibri-serve.sh), não
+      # neste compose: o engine é compilado com CUDA/DeepGEMM para sm_120.
+      # Alcançado por host.docker.internal, já mapeado em extra_hosts abaixo.
+      - COLI_API_KEY=${COLI_API_KEY:-}
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     extra_hosts:
       - "host.docker.internal:host-gateway"

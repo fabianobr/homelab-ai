@@ -227,6 +227,10 @@ Python:
 COLI_MODEL=<dir> COLI_API_KEY=<segredo> ./coli serve --host 127.0.0.1 --port 5000
 ```
 
+> ⚠️ `--host 127.0.0.1` serve para uso a partir do próprio host. **Para o LiteLLM alcançar,
+> o bind precisa ser em `172.17.0.1`** — ver "Servindo pelo LiteLLM" adiante, e use
+> `infra/scripts/colibri-serve.sh` em vez deste comando cru.
+
 - **LiteLLM** (`:4000`) pode registrá-lo como provider OpenAI-compatible e o **Open WebUI**
   passa a listá-lo junto dos modelos do Ollama.
 - O bind padrão já é localhost. Vale a regra do repo: **porta nenhuma exposta direto na
@@ -404,6 +408,65 @@ nm c/COLI_V4_UNIT_RUNTIME.o | grep gpu_engine_open   # precisa aparecer "U coli_
 
 Sempre `make -f Makefile.deepseek-v4 deepseek-v4-clean` ao trocar `CUDA=1`.
 
+### Prompt grande: onde isto realmente quebra (2026-08-30)
+
+Todas as medições acima usaram um prompt de **18 tokens**. Carga de SDLC é o oposto — diffs e
+arquivos. Testado com um diff real deste repo, **4.575 tokens** pelo tokenizador (a
+estimativa de 4 chars/token subestima bastante: 13.554 chars deram 4.575 tokens, não ~3.400).
+
+São **dois problemas independentes**.
+
+#### 1. O launcher limita o contexto a 4.096, e falha com exit 0
+
+```
+V4 prompt must encode to between 1 and 4096 tokens
+```
+
+O modelo declara `max_position_embeddings: 1048576` (YaRN sobre 65.536 nativos), e a tabela de
+famílias do `coli` permite até 1M — mas o **default é 4.096**
+(`family_registry.py`, `FamilyLimits(4096, 1048576, ...)`). Prompt e saída precisam caber nisso.
+
+Contorno: **`--ctx 32768`**.
+
+Dois detalhes que tornam isso pior do que precisaria ser: o processo **sai com código 0**
+mesmo tendo falhado — nenhum script detecta pelo exit code — e só descobre o problema depois
+de carregar 6,27 GiB de pesos densos.
+
+#### 2. O prefill é o gargalo real, e ele não tem contorno
+
+Com `--ctx` corrigido roda, e o custo aparece:
+
+| | Prompt de 18 tokens | **Prompt de 4.575 tokens** |
+|---|---|---|
+| TTFT | 24,0 s | **223,2 s (3,7 min)** |
+| Hit rate de experts | 60,4% | **26,3%** |
+| Bytes lidos do disco | 75 GB | **341 GB** |
+| Requisições de expert | 14.200 | 34.611 |
+| Decode | 1,37 tok/s | 1,10 tok/s |
+
+Prefill roda a **~20 tokens/s**. O colapso do hit rate é estrutural, não configuração: cada
+token do prompt roteia seus próprios experts, a união explode, e o cache de ~10 GB deixa de
+cobrir. Com 26% de acerto quase toda leitura vai ao disco — 341 GB para uma requisição.
+
+Aumentar o cache não resolve: o teto de RAM desta máquina já está em uso (ver "Duas previsões
+do planner que a execução desmentiu"), e o conjunto de experts tocado por um prompt de 4,5 mil
+tokens é grande demais para qualquer cache que caiba em 29 GiB.
+
+#### Consequência para uso em SDLC
+
+**O caso interativo morre aqui.** Não é questão de tunar: ~4 minutos antes da primeira palavra
+num diff médio. Nenhuma IDE tolera, e nenhum `sdlc-review` síncrono tampouco.
+
+**O caso em lote sobrevive**, na escala de **~5 minutos por revisão**. Para um agente noturno
+no padrão dos semanais deste repo — junta os PRs do dia, revisa, escreve o relatório — é
+aceitável. Para qualquer coisa que alguém espere na frente da tela, não é.
+
+Se for adiante, o encaixe é no **LiteLLM** (`infra/docker/litellm-config.yaml`), como provider
+OpenAI-compatible apontando para `coli serve` — **não** atrás do Ollama, que não sabe servir
+outro engine. O container precisa de `extra_hosts: ["host.docker.internal:host-gateway"]`,
+porque não alcança o loopback do host. E o `coli serve` **atende uma requisição por vez**:
+serve um agente, não um gateway compartilhado.
+
 ### Veredito corrigido
 
 **Para o que o Colibrì realmente promete, ele entrega nesta máquina.**
@@ -412,13 +475,82 @@ Não existe comparação com o Ollama aqui, porque não há alternativa: nenhuma
 local sua roda um 284B. A pergunta deixa de ser "é mais rápido?" e passa a ser "1 tok/s vale a
 capacidade?" — o que depende do uso, não da engenharia:
 
-- **Não serve** para uso interativo. Uma resposta de 500 tokens leva ~8 minutos.
+- **Não serve** para uso interativo — e com prompt grande isso deixa de ser questão de
+  paciência: ver "Prompt grande" acima, onde 4,5 mil tokens de entrada custam 3,7 min só de
+  prefill.
 - **Serve** para trabalho assíncrono: uma pergunta difícil deixada rodando, análise em lote,
   geração noturna. É o mesmo padrão dos agentes semanais deste repo.
 
 Com o tier CUDA ligado (medido acima), o decode vai a **1,37 tok/s** — 40% melhor, mas ainda
 no mesmo regime de uso. Uma resposta de 500 tokens passa de ~8 para ~6 minutos: continua
 sendo trabalho assíncrono, não conversa.
+
+## Servindo pelo LiteLLM (como está montado hoje)
+
+O `coli serve` expõe uma API OpenAI-compatible e entra na stack como provider do **LiteLLM**
+(`:4000`) — **não atrás do Ollama**, que não sabe servir outro engine.
+
+```bash
+infra/scripts/colibri-serve.sh start    # sobe sob demanda
+infra/scripts/colibri-serve.sh status
+infra/scripts/colibri-serve.sh stop
+```
+
+Depois disso o modelo aparece como **`sdlc-review-local`** no LiteLLM, ao lado dos
+`sdlc-*` que já existem.
+
+### Por que fica no host e não no compose
+
+O engine é compilado no host com CUDA/DeepGEMM para `sm_120`. O `Dockerfile.slim` do projeto
+é CPU-only e marcado `COLI_DOCKER_GLM_ONLY=1`; containerizar exigiria refazer esse build
+dentro da imagem, com passthrough de GPU e bind-mount dos 167 GB. **É a única peça da stack
+fora do Compose** — se um dia escalar, o caminho é uma imagem própria e um profile novo.
+
+### Quatro detalhes que quebram silenciosamente se ignorados
+
+1. **Bind na bridge padrão (`docker0`), não na rede do container.** O LiteLLM está em
+   container e não alcança o `127.0.0.1` do host. O erro intuitivo — e que eu cometi — é
+   bindar no gateway da rede onde o LiteLLM vive (`docker_default`, `172.18.0.1`). O Docker
+   mapeia `host-gateway` **sempre** para o gateway da bridge padrão (`docker0`,
+   `172.17.0.1`), independente da rede do container. O sintoma do erro é
+   `Connection refused` — não `no route` —, ou seja, o pacote chega e não há ninguém
+   escutando. O script resolve esse endereço em runtime (`docker network inspect bridge`).
+2. **`--allowed-host` é obrigatório, e sem a porta.** O `coli serve` tem guarda
+   anti-DNS-rebinding que valida o header `Host`. Passar `host.docker.internal:5000` é
+   recusado; o valor correto é **`host.docker.internal`**.
+3. **`COLI_API_KEY` não é opcional.** Escutar na bridge torna o endpoint alcançável por
+   **todos** os containers (`n8n`, `searxng`, `open-webui`, `moneyprinterturbo`,
+   `deepseek-harness`), não só pelo LiteLLM. A chave mora no `homelab.env` (gitignored), fonte
+   única — o compose a repassa ao container do LiteLLM via `environment`.
+4. **`timeout: 2400` no LiteLLM.** Medido aqui, um prompt de 4.575 tokens custa ~223 s só de
+   prefill. O default do LiteLLM mataria a requisição no meio, e o sintoma seria um erro de
+   timeout que parece falha do modelo.
+
+### Em modo serve, o batching de MoE na GPU não cabe
+
+Medido em 2026-08-30, com o serviço no ar:
+
+```
+[DSV4 CUDA] device 0: NVIDIA GeForce RTX 5060 Ti 16.6 GB sm_120
+v4_gpu tier=dense-matvec device=0
+[DSV4 CUDA] expert FC2 bank allocation: out of memory
+v4_gpu moe-batch=off (bank allocation failed; CPU union stays)
+```
+
+O tier de densos ocupa ~15,5 dos 16,3 GB de VRAM, e não sobra para o banco de experts que
+`COLI_CUDA_MOE_BATCH=1` pede. **Ele degrada em silêncio** — sem erro, sem exit não-zero, só
+uma linha no log — e a união de experts volta para a CPU.
+
+Consequência: o serviço **não roda na configuração que rendeu 1,37 tok/s** no benchmark
+avulso, onde a VRAM estava livre. O script deixou de pedir `COLI_CUDA_MOE_BATCH` por isso;
+`COLI_CUDA_ATTN_BATCH` continua, esse cabe.
+
+### É sob demanda, e a razão é RAM
+
+O serviço segura ~16–21 GB enquanto vive — numa máquina de 29 GB não convive com o ComfyUI
+nem com trabalho pesado. O script **recusa subir** com menos de 20 GB disponíveis, em vez de
+derrubar a máquina; ajuste com `COLI_MIN_FREE_GB`. Com o serviço parado, a rota
+`sdlc-review-local` devolve erro de conexão — visível, que é o comportamento desejado.
 
 ## Referências
 
