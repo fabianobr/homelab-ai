@@ -526,24 +526,47 @@ fora do Compose** — se um dia escalar, o caminho é uma imagem própria e um p
    prefill. O default do LiteLLM mataria a requisição no meio, e o sintoma seria um erro de
    timeout que parece falha do modelo.
 
-### Em modo serve, o batching de MoE na GPU não cabe
+### O ComfyUI degrada o tier de GPU do Colibrì, em silêncio
 
-Medido em 2026-08-30, com o serviço no ar:
+Registrado primeiro como limite estrutural — "o banco de experts não cabe na VRAM" — e
+**corrigido em 2026-08-31**: a causa era contenção com o ComfyUI.
+
+Com o ComfyUI no ar, o `COLI_CUDA_MOE_BATCH=1` falha assim:
 
 ```
-[DSV4 CUDA] device 0: NVIDIA GeForce RTX 5060 Ti 16.6 GB sm_120
-v4_gpu tier=dense-matvec device=0
 [DSV4 CUDA] expert FC2 bank allocation: out of memory
 v4_gpu moe-batch=off (bank allocation failed; CPU union stays)
 ```
 
-O tier de densos ocupa ~15,5 dos 16,3 GB de VRAM, e não sobra para o banco de experts que
-`COLI_CUDA_MOE_BATCH=1` pede. **Ele degrada em silêncio** — sem erro, sem exit não-zero, só
-uma linha no log — e a união de experts volta para a CPU.
+Com a VRAM livre, **o erro não acontece**: o banco aloca normalmente, e a VRAM vai de
+6,7 GB (só o tier de densos, logo após o load) para **13,4 GB** na primeira requisição — a
+alocação é preguiçosa, por isso o número logo após subir engana.
 
-Consequência: o serviço **não roda na configuração que rendeu 1,37 tok/s** no benchmark
-avulso, onde a VRAM estava livre. O script deixou de pedir `COLI_CUDA_MOE_BATCH` por isso;
-`COLI_CUDA_ATTN_BATCH` continua, esse cabe.
+O que torna isso perigoso é a forma da falha: **sem erro, sem exit não-zero**, só uma linha
+no log. Quem rodasse os dois juntos teria um serviço mais lento sem nenhum sinal. É mais uma
+razão — além da RAM — para os dois não coexistirem.
+
+### Prompt grande pelo LiteLLM: 18 minutos
+
+Medido em 2026-08-31, prompt de **4.566 tokens** (um diff real deste repo) atravessando o
+gateway, 48 tokens de saída:
+
+| | Acesso direto ao engine (2026-08-30) | **Pelo LiteLLM (2026-08-31)** |
+|---|---|---|
+| Prompt | 4.575 tokens | 4.566 tokens |
+| Tempo total | **281 s (4,7 min)** | **1.092 s (18,2 min)** |
+| RAM disponível na hora | ~21 GiB | **7,1 GiB** |
+
+A resposta foi correta — o modelo revisou o diff e apontou problemas reais.
+
+**Não é um A/B limpo, e a diferença de RAM é a suspeita principal.** Em modo serve com
+`--ctx 32768` e o banco de experts em VRAM, sobrou muito menos RAM para o cache de experts
+(o planner mira 9,64 GiB e havia 7,1 GiB livres no total), o que aumenta as leituras de disco.
+Confirmar exigiria repetir o teste com a máquina vazia — ~18 min por rodada.
+
+O que fica como fato operacional: **uma revisão de diff médio pelo gateway custou 18 minutos**,
+não os ~5 que a extrapolação do teste direto sugeria. Para agente noturno ainda serve; para
+qualquer coisa com pessoa esperando, não.
 
 ### É sob demanda, e a razão é RAM
 
