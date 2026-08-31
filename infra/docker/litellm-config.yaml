@@ -39,6 +39,22 @@ model_list:
       api_base: http://ollama:11434
 
   # Opt-in somente: nenhum workflow existente seleciona este alias.
+  # DeepSeek V4 Flash (284B) servido pelo Colibrì NO HOST, não neste compose:
+  # o engine é compilado com CUDA/DeepGEMM para sm_120. Sobe sob demanda com
+  # `infra/scripts/colibri-serve.sh start`; com ele parado esta rota devolve
+  # erro de conexão, o que é o comportamento desejado.
+  #
+  # timeout alto de propósito: medido neste host, um prompt de 4.575 tokens
+  # custa ~223 s só de prefill. O default do LiteLLM mataria a requisição.
+  # Ver docs/colibri.md.
+  - model_name: sdlc-review-local
+    litellm_params:
+      model: openai/deepseek-v4
+      api_base: http://host.docker.internal:5000/v1
+      api_key: os.environ/COLI_API_KEY
+      timeout: 2400
+      stream_timeout: 2400
+
   - model_name: groq-fast-public
     litellm_params:
       model: groq/qwen/qwen3.6-27b

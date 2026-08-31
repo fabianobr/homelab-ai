@@ -63,3 +63,21 @@ Modelos ficam fora do Docker (muito volume de storage):
 |---|---|---|
 | Ollama | `/srv/homelab-ai/ollama` | `/root/.ollama` |
 | ComfyUI | `/srv/homelab-ai/comfyui` | `/comfyui` |
+
+## Colibrì / DeepSeek V4 — fora do Compose
+
+| Serviço | Onde roda | Porta | Como sobe |
+|---|---|---|---|
+| `coli serve` (DeepSeek V4 Flash, 284B) | **host**, não em container | 5000, na bridge do Docker | `infra/scripts/colibri-serve.sh start` |
+
+Única peça da stack que não está no `docker-compose.yml`: o engine é compilado no host com
+CUDA/DeepGEMM para `sm_120`. **Sob demanda** — segura ~16–21 GB de RAM. Consumido pelo
+LiteLLM como `sdlc-review-local`. Detalhes e armadilhas em `docs/colibri.md`.
+
+Não escuta em `127.0.0.1` (o LiteLLM está em container e não alcançaria), e sim em
+`172.17.0.1` — o gateway da bridge padrão, que é para onde `host.docker.internal` aponta em
+**qualquer** rede. Isso o torna alcançável por todos os containers, por isso `COLI_API_KEY` é
+obrigatória.
+
+Validado ponta a ponta em 2026-08-30: `POST /v1/chat/completions` no LiteLLM com
+`model: sdlc-review-local` respondeu em 47 s (48 tokens).

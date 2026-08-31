@@ -167,6 +167,12 @@ O **CarWatch não faz parte desta stack**: tem compose próprio em
 `agents/carwatch/docker-compose.yml`, onde só o `db` fica de pé e o `app` roda sob
 demanda via `docker compose run --rm`.
 
+O **Colibrì / DeepSeek V4 também não**, e é a única peça que roda **fora de container**: o
+engine é compilado no host com CUDA/DeepGEMM para `sm_120`. Sobe sob demanda com
+`infra/scripts/colibri-serve.sh start` e serve o LiteLLM como `sdlc-review-local`. Segura
+~16–21 GB de RAM, então **não convive com o ComfyUI ligado** — o script recusa subir com menos
+de 20 GB livres. Armadilhas e medições em `docs/colibri.md`.
+
 ## Portas nunca expostas diretamente na internet
 
 - Ollama `11434`
@@ -175,6 +181,8 @@ demanda via `docker compose run --rm`.
 - LiteLLM `4000`
 - DeepSeek Harness `3081`
 - Postgres do CarWatch `5433` (compose próprio do agente)
+- Colibrì / DeepSeek V4 `5000` (**no host, não em container** — escuta na bridge do
+  Docker, não em loopback, porque o LiteLLM precisa alcançá-lo; protegido por `COLI_API_KEY`)
 - Docker socket
 
 Todas ficam em `127.0.0.1` no Compose. Usar Cloudflare Access para os hostnames publicados.
@@ -191,7 +199,7 @@ homelab-ai/
 ├── scripts/                 ← utilitários de sessão (state.sh: retrato do host)
 ├── infra/                   ← trilha 1: homelab que roda os modelos
 │   ├── docker/              ← docker-compose.yml, comfyui/, n8n/, searxng/, litellm-config.yaml
-│   ├── scripts/             ← healthcheck, apply-system-config, update, check-public-ready, comfyui-idle-stop
+│   ├── scripts/             ← healthcheck, apply-system-config, update, check-public-ready, comfyui-idle-stop, colibri-serve
 │   ├── systemd/             ← unidades de usuário de infra (comfyui-idle-stop.timer)
 │   ├── cloudflare/          ← config do Tunnel e Access + deadman-switch/ (Worker)
 │   ├── media-pipeline/      ← contrato público (contract.yaml) do repo media-meme-pipeline
