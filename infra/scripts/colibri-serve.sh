@@ -50,7 +50,13 @@ running() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
 # O engine é processo FILHO do launcher e é quem segura a RAM. Casar por
 # caminho exato: `pkill -f deepseek_v4` mataria um editor ou grep que apenas
 # mencione o arquivo.
-engine_pids() { pgrep -x deepseek_v4 2>/dev/null || true; }
+# `state=Z` exclui zombies: depois de um stop o engine vira defunct até o init
+# recolher, e sem o filtro o `status` reportaria "órfão" para sempre.
+engine_pids() {
+  pgrep -x deepseek_v4 2>/dev/null | while read -r p; do
+    [ "$(ps -o stat= -p "$p" 2>/dev/null | cut -c1)" = "Z" ] || echo "$p"
+  done
+}
 
 case "${1:-}" in
 start)
