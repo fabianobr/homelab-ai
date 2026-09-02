@@ -100,7 +100,13 @@ start)
   # modelo (~40-60 s). Uma tentativa anterior ainda carregando deixa a porta
   # livre agora e a rouba depois — e o start novo morre no bind, ja com o
   # pidfile gravado.
-  prev="$(pgrep -f 'coli serve --host' | head -1 || true)"
+  #
+  # `-f` casado no CAMINHO ABSOLUTO, nao na substring solta "coli serve --host":
+  # essa substring aparece na linha de comando de qualquer grep, ps ou editor
+  # que a mencione (reproduzido nesta sessao com um `sh -c` decoy e com o
+  # proprio ugrep do harness) — um `-f` solto derrubaria um processo alheio em
+  # `stop`, ou bloquearia um `start` legitimo por falso positivo.
+  prev="$(pgrep -f "${ENGINE_DIR}/coli serve --host" | head -1 || true)"
   [ -z "$prev" ] || die "já há um 'coli serve' em execução (pid $prev), possivelmente
   ainda carregando o modelo. Rode: $0 stop"
 
@@ -126,9 +132,15 @@ start)
   # COLI_API_KEY vai pelo AMBIENTE, nunca como --api-key: /proc/<pid>/cmdline é
   # legível por qualquer processo local e o segredo apareceria em `ps`. O
   # launcher já usa a variável como default (coli: --api-key default=os.environ).
+  #
+  # `"$ENGINE_DIR/coli"` em vez de `./coli`: o argv do processo precisa
+  # carregar o caminho ABSOLUTO para que `pgrep -f "$ENGINE_DIR/coli serve"`
+  # (usado abaixo e em `stop`) ache o processo real. Com caminho relativo o
+  # match nunca acontece — verificado: um `./coli serve --host ...` real não
+  # é encontrado por um pgrep ancorado no caminho absoluto.
   COLI_MODEL="$MODEL" COLI_API_KEY="$COLI_API_KEY" \
   DSV4_CUDA=1 COLI_CUDA_ATTN_BATCH=1 \
-  nohup python3 ./coli serve \
+  nohup python3 "$ENGINE_DIR/coli" serve \
       --host "$GW" --port "$PORT" \
       --gpu 0 --ctx "${COLI_CTX:-32768}" \
       --model-id "$MODEL_ID" \
@@ -161,7 +173,7 @@ stop)
   # start falha no bind e o LiteLLM continua falando com um servidor inútil.
   # Tambem um launcher ainda carregando, que nao aparece na porta mas roubaria
   # o bind da proxima tentativa.
-  pkill -f 'coli serve --host' 2>/dev/null || true
+  pkill -f "${ENGINE_DIR}/coli serve --host" 2>/dev/null || true
   lp="$(port_pid)"
   if [ -n "$lp" ]; then
     kill -TERM "$lp" 2>/dev/null || true
