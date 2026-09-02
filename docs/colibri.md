@@ -559,20 +559,28 @@ gateway, 48 tokens de saída:
 
 A resposta foi correta — o modelo revisou o diff e apontou problemas reais.
 
-**Não é um A/B limpo, e a diferença de RAM é a suspeita principal.** Em modo serve com
-`--ctx 32768` e o banco de experts em VRAM, sobrou muito menos RAM para o cache de experts
-(o planner mira 9,64 GiB e havia 7,1 GiB livres no total), o que aumenta as leituras de disco.
-Confirmar exigiria repetir o teste com a máquina vazia — foi tentado (ver abaixo) e não
-fechou.
+**A hipótese de RAM foi levantada, testada e desconfirmada.** A suspeita inicial era que os
+7,1 GiB livres do teste original explicassem os 18,2 min — em modo serve com `--ctx 32768` e
+o banco de experts em VRAM, sobra menos RAM para o cache de experts (o planner mira 9,64 GiB).
 
-Tentativa de confirmar a hipótese de RAM em 2026-09-02, com 21 GiB livres (contra 7,1 GiB da
-medição acima): o mesmo prompt rodou **22 minutos sem concluir** antes de ser interrompido.
-Não é um número final, mas já passa dos 18,2 min e **enfraquece a hipótese de RAM** — o custo
-parece ser do modo serve, não da memória disponível.
+Duas tentativas de confirmação em 2026-09-02, ambas com o `colibri-serve.sh` já corrigido
+(ver "O wrapper custou mais que o experimento" abaixo):
 
-O que fica como fato operacional: **uma revisão de diff médio pelo gateway custou 18 minutos**,
-não os ~5 que a extrapolação do teste direto sugeria. Para agente noturno ainda serve; para
-qualquer coisa com pessoa esperando, não.
+| Rodada | RAM disponível | Resultado |
+|---|---|---|
+| Original (30/08) | 7,1 GiB | **1.092 s (18,2 min)** — válida |
+| 1ª tentativa | 21 GiB | interrompida aos 22 min sem concluir — descartada |
+| **2ª tentativa** | **15 GiB** | **1.122 s (18,7 min)** — válida |
+
+Com o dobro da RAM da medição original, o tempo ficou **igual** (30 s de diferença entre
+duas rodadas independentes é ruído, não sinal). **A hipótese de RAM está desconfirmada: o
+custo é estrutural do modo serve, não da memória disponível.** A causa raiz segue aberta —
+possivelmente o roteamento de experts de um prompt de 4,5 mil tokens é caro de forma que
+independe de quanto cache cabe em RAM — mas não é isso que decide o uso.
+
+O que fica como fato operacional, agora com duas medições concordantes: **uma revisão de
+diff médio pelo gateway custa ~18-19 minutos**, não os ~5 que a extrapolação do teste direto
+sugeria. Para agente noturno serve; para qualquer coisa com pessoa esperando, não.
 
 ### O wrapper custou mais que o experimento
 
