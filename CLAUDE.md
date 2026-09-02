@@ -97,6 +97,15 @@ Convenções dos agentes:
   descrevem a mesma coisa e precisam ficar de acordo.
   Este é o primeiro arquivo que qualquer agente lê; quando ele mente, o erro se propaga
   para todo o trabalho seguinte.
+- **O grafo do repo também desatualiza.** Existe um artefato
+  [Mapa do homelab-ai](https://claude.ai/code/artifact/4bf4e268-0752-4d8c-9e0a-c3593adc40d2)
+  — grafo second-brain das 4 trilhas: nós = pastas/serviços/deps, arestas = quem gera/usa/
+  escreve em quem. Este bullet é a única menção a ele no repo; fora daqui, só é lembrado
+  se alguém lembrar. Ao adicionar **infra, produto ou agente** (serviço no Compose,
+  profile/porta novo, subprojeto em `products/`, rotina em `agents/`, serviço de inferência
+  no host), **sugira atualizar o artefato** — é sugestão, não passo obrigatório do commit.
+  Como editar (arrays `N`/`E` no `<script>`, republicar na mesma URL) está registrado à
+  parte, na memória do projeto.
 - **Commits em português (PT-BR)** — padrão do histórico; manter consistência.
 - **Conventional commits:** `feat`, `fix`, `docs`, `chore`, `refactor`, `test`.
 - **Nunca commitar:** `.env`, chaves de API, tokens, IPs internos, segredos de qualquer tipo.
