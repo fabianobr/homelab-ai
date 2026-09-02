@@ -562,11 +562,49 @@ A resposta foi correta — o modelo revisou o diff e apontou problemas reais.
 **Não é um A/B limpo, e a diferença de RAM é a suspeita principal.** Em modo serve com
 `--ctx 32768` e o banco de experts em VRAM, sobrou muito menos RAM para o cache de experts
 (o planner mira 9,64 GiB e havia 7,1 GiB livres no total), o que aumenta as leituras de disco.
-Confirmar exigiria repetir o teste com a máquina vazia — ~18 min por rodada.
+Confirmar exigiria repetir o teste com a máquina vazia — foi tentado (ver abaixo) e não
+fechou.
+
+Tentativa de confirmar a hipótese de RAM em 2026-09-02, com 21 GiB livres (contra 7,1 GiB da
+medição acima): o mesmo prompt rodou **22 minutos sem concluir** antes de ser interrompido.
+Não é um número final, mas já passa dos 18,2 min e **enfraquece a hipótese de RAM** — o custo
+parece ser do modo serve, não da memória disponível.
 
 O que fica como fato operacional: **uma revisão de diff médio pelo gateway custou 18 minutos**,
 não os ~5 que a extrapolação do teste direto sugeria. Para agente noturno ainda serve; para
 qualquer coisa com pessoa esperando, não.
+
+### O wrapper custou mais que o experimento
+
+Seis defeitos apareceram no `colibri-serve.sh` durante o uso, e o padrão que os une é mais
+útil que a lista: **cada guarda nova introduziu um modo de falha silenciosa**.
+
+| Defeito | Como se manifestava |
+|---|---|
+| `stop` só agia com o launcher vivo | RAM presa, sem forma de recuperar pelo script |
+| Launcher órfão segurando a porta | `status` dizia "parado" com servidor escutando |
+| `start` não checava a porta | bind falha **depois** do fork; pidfile com PID morto |
+| `TIME_WAIT` sem `SO_REUSEADDR` | bind falha sem processo algum |
+| `ss "sport = :N"` não casa `TIME-WAIT` | a espera terminava sem esperar |
+| `$(pipeline)` com `set -euo pipefail` | **`start` saía com código 1 e ZERO saída** |
+
+O último é o mais traiçoeiro e o que mais custou: um `grep` sem resultado — o caso normal,
+"a porta está livre" — retorna 1, o `pipefail` propaga, o `set -e` mata o script antes de
+qualquer `echo`. Toda substituição de comando com `grep` precisa de `|| true`.
+
+Três lições que valem além deste script:
+
+1. **`nohup ... &` não é evidência de nada** num serviço que carrega modelo por ~60 s antes
+   de abrir a porta. A verificação honesta é `status` retornando 0 **e** a porta respondendo.
+2. **`pgrep -f`/`pkill -f` casam com a linha de comando de quem os invoca.** Custou um shell
+   morto por auto-`pkill` e um falso positivo que abortou uma medição. Use `pgrep -x` ou
+   caminho absoluto.
+3. **Cronometre pelo log do servidor, não pelo cliente.** Um `curl` interrompido produz
+   "5 segundos" enquanto o engine segue trabalhando — o que virou falso resultado três vezes.
+
+E a lição de método: ao ver a primeira falha, isole **"o serviço sobe?"** de **"meu script
+sobe o serviço?"**. O `coli serve` invocado direto sempre funcionou; só descobri isso na
+sexta tentativa.
 
 ### É sob demanda, e a razão é RAM
 
