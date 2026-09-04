@@ -1,0 +1,273 @@
+commit 5e5a9adaf6a2fe8374eaa8997f06ec827960967d
+Author: Fabiano Silva <fabiano@freitassilva.com>
+Date:   Wed Sep 2 07:37:41 2026 -0300
+
+    fix(colibri): pgrep -f casava com qualquer processo que mencionasse o padrão
+    
+    Achado na review do PR: `pgrep -f 'coli serve --host'` / `pkill -f` (em start
+    e stop) casam com QUALQUER processo cuja linha de comando contenha essa
+    substring — nao so o servidor real. E o mesmo bug que o commit anterior deste
+    PR documenta como "licao 2", mas nao foi aplicado a estas duas linhas.
+    
+    Provado com um decoy inofensivo (sh -c 'sleep 30 # comentando: coli serve
+    --host') e reproduzido de verdade: o proprio ugrep do harness desta sessao
+    casou com o padrao. Em `stop` isso mataria um processo alheio (editor, grep de
+    diagnostico, outra sessao); em `start` bloquearia um start legitimo por falso
+    positivo.
+    
+    Primeira tentativa de correcao (ancorar em ENGINE_DIR absoluto) quebrou a
+    deteccao do processo REAL: o script fazia `cd "$ENGINE_DIR" && python3 ./coli
+    serve`, entao o cmdline real usa caminho RELATIVO (./coli), nunca o absoluto.
+    Verificado com teste isolado antes de aceitar o fix.
+    
+    Correcao definitiva: invocar com `python3 "$ENGINE_DIR/coli" serve` (caminho
+    absoluto no proprio argv), o que torna o match ao mesmo tempo correto (acha o
+    processo real) e seguro (nao colide com o decoy). Verificado com ciclo
+    completo start/status/stop no servico real.
+    
+    Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+
+diff --git a/infra/scripts/colibri-serve.sh b/infra/scripts/colibri-serve.sh
+index 65681be..cf0fba9 100755
+--- a/infra/scripts/colibri-serve.sh
++++ b/infra/scripts/colibri-serve.sh
+@@ -100,7 +100,13 @@ start)
+   # modelo (~40-60 s). Uma tentativa anterior ainda carregando deixa a porta
+   # livre agora e a rouba depois — e o start novo morre no bind, ja com o
+   # pidfile gravado.
+-  prev="$(pgrep -f 'coli serve --host' | head -1 || true)"
++  #
++  # `-f` casado no CAMINHO ABSOLUTO, nao na substring solta "coli serve --host":
++  # essa substring aparece na linha de comando de qualquer grep, ps ou editor
++  # que a mencione (reproduzido nesta sessao com um `sh -c` decoy e com o
++  # proprio ugrep do harness) — um `-f` solto derrubaria um processo alheio em
++  # `stop`, ou bloquearia um `start` legitimo por falso positivo.
++  prev="$(pgrep -f "${ENGINE_DIR}/coli serve --host" | head -1 || true)"
+   [ -z "$prev" ] || die "já há um 'coli serve' em execução (pid $prev), possivelmente
+   ainda carregando o modelo. Rode: $0 stop"
+ 
+@@ -126,9 +132,15 @@ start)
+   # COLI_API_KEY vai pelo AMBIENTE, nunca como --api-key: /proc/<pid>/cmdline é
+   # legível por qualquer processo local e o segredo apareceria em `ps`. O
+   # launcher já usa a variável como default (coli: --api-key default=os.environ).
++  #
++  # `"$ENGINE_DIR/coli"` em vez de `./coli`: o argv do processo precisa
++  # carregar o caminho ABSOLUTO para que `pgrep -f "$ENGINE_DIR/coli serve"`
++  # (usado abaixo e em `stop`) ache o processo real. Com caminho relativo o
++  # match nunca acontece — verificado: um `./coli serve --host ...` real não
++  # é encontrado por um pgrep ancorado no caminho absoluto.
+   COLI_MODEL="$MODEL" COLI_API_KEY="$COLI_API_KEY" \
+   DSV4_CUDA=1 COLI_CUDA_ATTN_BATCH=1 \
+-  nohup python3 ./coli serve \
++  nohup python3 "$ENGINE_DIR/coli" serve \
+       --host "$GW" --port "$PORT" \
+       --gpu 0 --ctx "${COLI_CTX:-32768}" \
+       --model-id "$MODEL_ID" \
+@@ -161,7 +173,7 @@ stop)
+   # start falha no bind e o LiteLLM continua falando com um servidor inútil.
+   # Tambem um launcher ainda carregando, que nao aparece na porta mas roubaria
+   # o bind da proxima tentativa.
+-  pkill -f 'coli serve --host' 2>/dev/null || true
++  pkill -f "${ENGINE_DIR}/coli serve --host" 2>/dev/null || true
+   lp="$(port_pid)"
+   if [ -n "$lp" ]; then
+     kill -TERM "$lp" 2>/dev/null || true
+commit 66f978d0793cc2cdf58295c73b74420c33c25af9
+Author: Fabiano Silva <fabiano@freitassilva.com>
+Date:   Wed Sep 2 07:29:40 2026 -0300
+
+    fix(colibri): seis correções no colibri-serve e o registro do que elas ensinam
+    
+    Todos os defeitos apareceram em uso, nao em leitura, e o padrao que os une e
+    mais util que a lista: cada guarda nova introduziu um modo de falha silenciosa.
+    
+    - stop so agia com o launcher vivo; o engine (que segura os ~12 GB) ficava
+    - launcher orfao segurava a porta e o status dizia "parado"
+    - start nao checava a porta: bind falha DEPOIS do fork, pidfile com pid morto
+    - TIME_WAIT sem SO_REUSEADDR no servidor derrubava o start seguinte
+    - ss "sport = :N" nao casa TIME-WAIT: a espera terminava sem esperar
+    - $(pipeline com grep) sob set -euo pipefail: start saia com codigo 1 e ZERO
+      saida quando o grep nao achava nada, que e o caso normal
+    
+    O ultimo custou tres diagnosticos errados: eu lia "servidor nao subiu" como
+    conflito de porta e cacava processo fantasma, quando o start morria mudo na
+    propria checagem adicionada para evitar conflito de porta.
+    
+    Registra tambem a tentativa de confirmar a hipotese de RAM: com 21 GiB livres
+    (contra 7,1 GiB da medicao de 18,2 min) o mesmo prompt rodou 22 minutos sem
+    concluir antes de ser interrompido. Nao e numero final, mas enfraquece a
+    hipotese - o custo parece ser do modo serve, nao da memoria.
+    
+    E tres licoes que valem alem deste script: nohup & nao e evidencia num servico
+    que carrega por 60s antes de abrir a porta; pgrep -f casa com quem o invoca;
+    cronometre pelo log do servidor, nao pelo cliente.
+    
+    Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+
+diff --git a/docs/colibri.md b/docs/colibri.md
+index 9ada80a..6bb7120 100644
+--- a/docs/colibri.md
++++ b/docs/colibri.md
+@@ -562,12 +562,50 @@ A resposta foi correta — o modelo revisou o diff e apontou problemas reais.
+ **Não é um A/B limpo, e a diferença de RAM é a suspeita principal.** Em modo serve com
+ `--ctx 32768` e o banco de experts em VRAM, sobrou muito menos RAM para o cache de experts
+ (o planner mira 9,64 GiB e havia 7,1 GiB livres no total), o que aumenta as leituras de disco.
+-Confirmar exigiria repetir o teste com a máquina vazia — ~18 min por rodada.
++Confirmar exigiria repetir o teste com a máquina vazia — foi tentado (ver abaixo) e não
++fechou.
++
++Tentativa de confirmar a hipótese de RAM em 2026-09-02, com 21 GiB livres (contra 7,1 GiB da
++medição acima): o mesmo prompt rodou **22 minutos sem concluir** antes de ser interrompido.
++Não é um número final, mas já passa dos 18,2 min e **enfraquece a hipótese de RAM** — o custo
++parece ser do modo serve, não da memória disponível.
+ 
+ O que fica como fato operacional: **uma revisão de diff médio pelo gateway custou 18 minutos**,
+ não os ~5 que a extrapolação do teste direto sugeria. Para agente noturno ainda serve; para
+ qualquer coisa com pessoa esperando, não.
+ 
++### O wrapper custou mais que o experimento
++
++Seis defeitos apareceram no `colibri-serve.sh` durante o uso, e o padrão que os une é mais
++útil que a lista: **cada guarda nova introduziu um modo de falha silenciosa**.
++
++| Defeito | Como se manifestava |
++|---|---|
++| `stop` só agia com o launcher vivo | RAM presa, sem forma de recuperar pelo script |
++| Launcher órfão segurando a porta | `status` dizia "parado" com servidor escutando |
++| `start` não checava a porta | bind falha **depois** do fork; pidfile com PID morto |
++| `TIME_WAIT` sem `SO_REUSEADDR` | bind falha sem processo algum |
++| `ss "sport = :N"` não casa `TIME-WAIT` | a espera terminava sem esperar |
++| `$(pipeline)` com `set -euo pipefail` | **`start` saía com código 1 e ZERO saída** |
++
++O último é o mais traiçoeiro e o que mais custou: um `grep` sem resultado — o caso normal,
++"a porta está livre" — retorna 1, o `pipefail` propaga, o `set -e` mata o script antes de
++qualquer `echo`. Toda substituição de comando com `grep` precisa de `|| true`.
++
++Três lições que valem além deste script:
++
++1. **`nohup ... &` não é evidência de nada** num serviço que carrega modelo por ~60 s antes
++   de abrir a porta. A verificação honesta é `status` retornando 0 **e** a porta respondendo.
++2. **`pgrep -f`/`pkill -f` casam com a linha de comando de quem os invoca.** Custou um shell
++   morto por auto-`pkill` e um falso positivo que abortou uma medição. Use `pgrep -x` ou
++   caminho absoluto.
++3. **Cronometre pelo log do servidor, não pelo cliente.** Um `curl` interrompido produz
++   "5 segundos" enquanto o engine segue trabalhando — o que virou falso resultado três vezes.
++
++E a lição de método: ao ver a primeira falha, isole **"o serviço sobe?"** de **"meu script
++sobe o serviço?"**. O `coli serve` invocado direto sempre funcionou; só descobri isso na
++sexta tentativa.
++
+ ### É sob demanda, e a razão é RAM
+ 
+ O serviço segura ~16–21 GB enquanto vive — numa máquina de 29 GB não convive com o ComfyUI
+diff --git a/infra/scripts/colibri-serve.sh b/infra/scripts/colibri-serve.sh
+index 9e809ac..65681be 100755
+--- a/infra/scripts/colibri-serve.sh
++++ b/infra/scripts/colibri-serve.sh
+@@ -50,10 +50,32 @@ running() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
+ # O engine é processo FILHO do launcher e é quem segura a RAM. Casar por
+ # caminho exato: `pkill -f deepseek_v4` mataria um editor ou grep que apenas
+ # mencione o arquivo.
++# Quem esta segurando a porta, seja qual for o pidfile. Um launcher iniciado a
++# mao (ou de uma sessao anterior) nao aparece em `running`, mas impede o bind e
++# faz o LiteLLM falar com um servidor cujo engine ja morreu.
++port_pid() {
++  { ss -tlnp 2>/dev/null | awk -v p=":$PORT" '$4 ~ p"$"' |
++      grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2; } || true
++}
++
++# Qualquer socket na porta, nao so LISTEN. O openai_server.py NAO define
++# allow_reuse_address, entao um TIME_WAIT deixado por um stop recente faz o
++# bind falhar com "Address already in use" mesmo sem processo algum.
++# Coluna de endereço LOCAL, não o filtro `sport =` do ss: aquele não casa com
++# sockets em TIME-WAIT e a espera terminava na hora, sem esperar nada.
++port_busy() {
++  ss -tan 2>/dev/null | awk '{print $4}' | grep -qE "[:.]${PORT}\$"
++}
++
++# NOTA: toda substituicao de comando abaixo precisa de `|| true`. Com
++# `set -euo pipefail`, um grep sem resultado derruba o script SEM IMPRIMIR NADA
++# — foi o que fez o `start` sair com codigo 1 e zero saida.
++
+ # `state=Z` exclui zombies: depois de um stop o engine vira defunct até o init
+ # recolher, e sem o filtro o `status` reportaria "órfão" para sempre.
+ engine_pids() {
+-  pgrep -x deepseek_v4 2>/dev/null | while read -r p; do
++  { pgrep -x deepseek_v4 2>/dev/null || true; } | while read -r p; do
++    [ -n "$p" ] || continue
+     [ "$(ps -o stat= -p "$p" 2>/dev/null | cut -c1)" = "Z" ] || echo "$p"
+   done
+ }
+@@ -72,6 +94,28 @@ start)
+   [ -n "$GW" ] || die "não achei o gateway da rede '$NET'. A stack está de pé?
+   Confira com: docker network ls"
+ 
++  # Sem isto o bind falha com "Address already in use" DEPOIS do fork, o pidfile
++  # guarda um pid morto e o LiteLLM segue falando com o servidor velho.
++  # Checar a PORTA nao basta: o `coli serve` so binda DEPOIS de carregar o
++  # modelo (~40-60 s). Uma tentativa anterior ainda carregando deixa a porta
++  # livre agora e a rouba depois — e o start novo morre no bind, ja com o
++  # pidfile gravado.
++  prev="$(pgrep -f 'coli serve --host' | head -1 || true)"
++  [ -z "$prev" ] || die "já há um 'coli serve' em execução (pid $prev), possivelmente
++  ainda carregando o modelo. Rode: $0 stop"
++
++  other="$(port_pid)"
++  [ -z "$other" ] || die "a porta $PORT já está em uso (pid $other). Rode: $0 stop"
++
++  # Espera o TIME_WAIT drenar: sem SO_REUSEADDR no servidor, subir logo depois
++  # de um stop falha no bind — e falha DEPOIS do fork, deixando um pidfile
++  # apontando para um processo morto.
++  if port_busy; then
++    echo "colibri-serve: porta $PORT em TIME_WAIT, aguardando liberar..."
++    for _ in $(seq 1 90); do port_busy || break; sleep 1; done
++    port_busy && die "a porta $PORT continua ocupada após 90 s."
++  fi
++
+   free_gb=$(awk '/MemAvailable/{printf "%d", $2/1048576}' /proc/meminfo)   # GiB, truncado
+   [ "$free_gb" -ge "$MIN_FREE_GB" ] || die "só ${free_gb} GiB de RAM disponível (mínimo
+   ${MIN_FREE_GB}). Pare o ComfyUI (docker stop comfyui) ou feche o desktop.
+@@ -113,12 +157,27 @@ stop)
+     engine_pids | xargs -r kill -KILL 2>/dev/null || true
+     echo "colibri-serve: engine encerrado (RAM liberada)"
+   fi
++  # O launcher órfão segura a porta mesmo com o engine morto: sem isto o próximo
++  # start falha no bind e o LiteLLM continua falando com um servidor inútil.
++  # Tambem um launcher ainda carregando, que nao aparece na porta mas roubaria
++  # o bind da proxima tentativa.
++  pkill -f 'coli serve --host' 2>/dev/null || true
++  lp="$(port_pid)"
++  if [ -n "$lp" ]; then
++    kill -TERM "$lp" 2>/dev/null || true
++    sleep 1
++    kill -0 "$lp" 2>/dev/null && kill -KILL "$lp" 2>/dev/null || true
++    echo "colibri-serve: launcher na porta $PORT encerrado (pid $lp)"
++  fi
+   rm -f "$PIDFILE"
++  # Drena o TIME_WAIT antes de devolver o controle, senao um `start` logo em
++  # seguida falha no bind.
++  for _ in $(seq 1 90); do port_busy || break; sleep 1; done
+   echo "colibri-serve: parado"
+   ;;
+ status)
+   # Exit 0 = no ar, 1 = parado. Um wrapper ou healthcheck depende disso.
+-  eng="$(engine_pids)"
++  eng="$(engine_pids)"; lp="$(port_pid)"
+   if running; then
+     echo "colibri-serve: rodando (pid $(cat "$PIDFILE"))"
+     GW="$(resolve_gateway)"; echo "  endpoint: http://${GW:-?}:${PORT}/v1"
+@@ -129,10 +188,12 @@ status)
+       echo "  ATENÇÃO: launcher vivo mas engine ausente — rode stop e suba de novo."
+     fi
+     exit 0
+-  elif [ -n "$eng" ]; then
++  elif [ -n "$lp" ] || [ -n "$eng" ]; then
+     # Launcher morto e engine órfão: o caso que mais engana, porque `ps` do
+     # pidfile não mostra nada e a RAM continua ocupada.
+-    echo "colibri-serve: ÓRFÃO — launcher morto, engine ainda segurando RAM (pid $eng)"
++    echo "colibri-serve: ÓRFÃO — sem pidfile válido, mas há processo vivo"
++    [ -n "$lp" ]  && echo "  launcher segurando a porta $PORT: pid $lp"
++    [ -n "$eng" ] && echo "  engine segurando RAM: pid $eng"
+     echo "  rode: $0 stop"
+     exit 1
+   else

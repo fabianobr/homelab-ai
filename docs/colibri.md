@@ -582,6 +582,14 @@ O que fica como fato operacional, agora com duas medições concordantes: **uma 
 diff médio pelo gateway custa ~18-19 minutos**, não os ~5 que a extrapolação do teste direto
 sugeria. Para agente noturno serve; para qualquer coisa com pessoa esperando, não.
 
+**Pendência aberta em 2026-09-03:** as duas medições acima truncaram a resposta
+(`finish_reason: length`) — o texto da review nunca terminou. Tentativas de subir `max_tokens`
+pra evitar o corte esbarraram num problema não relacionado ao Colibrì (tarefas em background
+desta sessão de chat morrendo em segundos, investigado e isolado a ponto de descartar RAM,
+LiteLLM, timeout e payload como causa). Dados crus, timeline e a investigação completa em
+`docs/colibri-evidence/README.md`. Não decidido: rodar em foreground, tentar em sessão nova,
+ou aceitar o truncamento como não-bloqueante (a métrica de tempo já está fechada).
+
 ### O wrapper custou mais que o experimento
 
 Seis defeitos apareceram no `colibri-serve.sh` durante o uso, e o padrão que os une é mais
