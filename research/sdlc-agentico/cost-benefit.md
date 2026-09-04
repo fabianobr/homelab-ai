@@ -10,6 +10,72 @@ Gerado pelo agente semanal em `agents/weekly-cost-benefit/`.
 
 ## Setups avaliados
 
+### Analise de 2026-09-04
+
+| Setup | Tipo | CAPEX (US$) | OPEX (US$/mes) | Vel. | Qual. | Breakeven | Veredito |
+|---|---|---|---|---|---|---|---|
+| OpenClaw 2.0 | local | 430 | 15 | 4/5 | 4/5 | nunca | local |
+| Endeavor 1.0 | paid | 0 | 200 | 5/5 | 5/5 | nunca | paid |
+| Mistral Small 4 | local | 430 | 15 | 4/5 | 4/5 | nunca | local |
+| Kilo AI Leaderboard Models | paid | 0 | 100 | 5/5 | 5/5 | nunca | paid |
+| Serena MCP | local | 430 | 15 | 4/5 | 4/5 | nunca | local |
+
+### OpenClaw 2.0
+- **Tipo:** local
+- **CAPEX:** US$ 430
+- **OPEX:** US$ 15/mes
+- **IDs de preço:** `rtx-5060-ti-16gb`
+- **Velocidade:** 4/5 | **Qualidade:** 4/5
+- **Breakeven local vs pago:** nunca
+- **Veredito:** local
+- **Justificativa:** Local setup offers cost efficiency and control over the AI agent without recurring subscription fees.
+- **Fonte:** https://www.infoq.com/news/2026/09/openclaw-2-release/
+
+### Endeavor 1.0
+- **Tipo:** paid
+- **CAPEX:** US$ 0
+- **OPEX:** US$ 200/mes
+- **IDs de preço:** `claude-max-20x`
+- **Velocidade:** 5/5 | **Qualidade:** 5/5
+- **Breakeven local vs pago:** nunca
+- **Veredito:** paid
+- **Justificativa:** High performance and quality from a premium model justify the cost for advanced coding tasks.
+- **Fonte:** https://flower.ai/blog/2026-09-01-introducing-endeavor-1.0
+
+### Mistral Small 4
+- **Tipo:** local
+- **CAPEX:** US$ 430
+- **OPEX:** US$ 15/mes
+- **IDs de preço:** `rtx-5060-ti-16gb`
+- **Velocidade:** 4/5 | **Qualidade:** 4/5
+- **Breakeven local vs pago:** nunca
+- **Veredito:** local
+- **Justificativa:** Capable of handling coding and reasoning tasks with the available hardware, offering good value for money.
+- **Fonte:** https://www.promptquorum.com/local-llms/local-llm-hardware-guide-2026
+
+### Kilo AI Leaderboard Models
+- **Tipo:** paid
+- **CAPEX:** US$ 0
+- **OPEX:** US$ 100/mes
+- **IDs de preço:** `claude-max-5x`
+- **Velocidade:** 5/5 | **Qualidade:** 5/5
+- **Breakeven local vs pago:** nunca
+- **Veredito:** paid
+- **Justificativa:** Top-tier models on the Kilo leaderboard provide superior performance and quality for coding tasks.
+- **Fonte:** https://kilo.ai/leaderboard
+
+### Serena MCP
+- **Tipo:** local
+- **CAPEX:** US$ 430
+- **OPEX:** US$ 15/mes
+- **IDs de preço:** `rtx-5060-ti-16gb`
+- **Velocidade:** 4/5 | **Qualidade:** 4/5
+- **Breakeven local vs pago:** nunca
+- **Veredito:** local
+- **Justificativa:** Local setup with Serena MCP provides a powerful coding environment without ongoing subscription costs.
+- **Fonte:** https://www.xda-developers.com/thought-local-llm-was-limited-discovered-mcp-could-extend-it-ide/
+
+
 ### Analise de 2026-08-28
 
 | Setup | Tipo | CAPEX (US$) | OPEX (US$/mes) | Vel. | Qual. | Breakeven | Veredito |
