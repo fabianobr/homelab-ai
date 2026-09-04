@@ -582,13 +582,16 @@ O que fica como fato operacional, agora com duas medições concordantes: **uma 
 diff médio pelo gateway custa ~18-19 minutos**, não os ~5 que a extrapolação do teste direto
 sugeria. Para agente noturno serve; para qualquer coisa com pessoa esperando, não.
 
-**Pendência aberta em 2026-09-03:** as duas medições acima truncaram a resposta
-(`finish_reason: length`) — o texto da review nunca terminou. Tentativas de subir `max_tokens`
-pra evitar o corte esbarraram num problema não relacionado ao Colibrì (tarefas em background
-desta sessão de chat morrendo em segundos, investigado e isolado a ponto de descartar RAM,
-LiteLLM, timeout e payload como causa). Dados crus, timeline e a investigação completa em
-`docs/colibri-evidence/README.md`. Não decidido: rodar em foreground, tentar em sessão nova,
-ou aceitar o truncamento como não-bloqueante (a métrica de tempo já está fechada).
+**Truncamento (aberto em 2026-09-03, resolvido em 2026-09-04):** as duas medições acima
+truncaram a resposta (`finish_reason: length`) — o texto da review nunca terminou. Tentativas
+de subir `max_tokens` pra evitar o corte esbarraram num problema não relacionado ao Colibrì
+(tarefas em background desta sessão de chat morrendo em segundos, investigado e isolado a
+ponto de descartar RAM, LiteLLM, timeout e payload como causa). A saída foi rodar fora de
+qualquer tarefa em background do Claude Code: um `max_tokens: 4000` disparado num terminal
+próprio (`nohup ... & disown`) completou com `finish_reason: stop` em ~22 min. Confirma que a
+morte sistemática era da camada de background do Claude Code, não do Colibrì/LiteLLM/script —
+causa raiz exata não investigada, por ser externa a este repositório. Dados crus, timeline e a
+investigação completa (rodadas 1-7) em `docs/colibri-evidence/README.md`.
 
 ### O wrapper custou mais que o experimento
 

@@ -1,0 +1,16 @@
+[2026-09-04T09:50:36.792799943Z] === rodada 7: max_tokens=4000, execução fora do Claude Code ===
+[2026-09-04T09:50:36.795999093Z] RAM disponível: 21 GiB
+[2026-09-04T09:50:36.827116248Z] VRAM livre: 15827 MiB
+[2026-09-04T09:50:36.830101791Z] checando colibri-serve...
+colibri-serve: rodando (pid 2577496)
+  endpoint: http://172.17.0.1:5000/v1
+  RAM do engine: 0,9 GiB
+[2026-09-04T09:50:36.919797164Z] já estava rodando — não vou parar no final.
+[2026-09-04T09:50:36.922522001Z] esperando o endpoint direto aceitar conexão...
+[2026-09-04T09:50:51.316596217Z] request_start (via LiteLLM, timeout local generoso: 3000s)
+[2026-09-04T09:50:51.984395046Z] request_start (via LiteLLM, timeout local generoso: 3000s)
+[2026-09-04T10:13:01.789349388Z] curl saiu com código 0 (0 = completou, 28 = timeout de 3000s estourado)
+[2026-09-04T10:13:01.797110178Z] resposta salva em response7_raw.txt (3638 bytes)
+[2026-09-04T10:13:01.799976147Z] fomos nós que subimos o serviço — deixando no ar para inspeção manual.
+[2026-09-04T10:13:01.802508335Z] para derrubar depois: infra/scripts/colibri-serve.sh stop
+[2026-09-04T10:13:01.804939114Z] === rodada 7 concluída ===
