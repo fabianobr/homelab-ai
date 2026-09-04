@@ -271,6 +271,23 @@ Detalhes adicionais em [feedback.md](../feedback.md).
 
 ## Novos itens pendentes de avaliacao
 
+### Pesquisa de 2026-09-04
+
+### Observer AI
+- **Tipo:** orchestrator
+- **Relevancia SDLC:** 3/5
+- **Viabilidade HW:** 4/5
+- **Descricao:** An open-source local automation agent framework that provides infrastructure for agent behavior, useful for managing multiple agents in a development workflow.
+- **Fonte:** https://fast.io/resources/top-10-open-source-ai-agents/
+
+### Agent Orchestrator (AO)
+- **Tipo:** orchestrator
+- **Relevancia SDLC:** 4/5
+- **Viabilidade HW:** 4/5
+- **Descricao:** A full-automation system that allows multiple agents to run in isolated worktrees, each with its own PR, supervised from a central interface.
+- **Fonte:** https://www.augmentcode.com/tools/open-source-agent-orchestrators
+
+
 ### Pesquisa de 2026-08-28
 
 ### Nimbalyst
