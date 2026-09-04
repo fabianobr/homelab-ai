@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
+# Replay exato do payload que funcionou na rodada 1 (run.sh/request.json,
+# max_tokens=200) — usado para isolar se voltar à config-base ainda falhava.
+# Ainda morreu; ver docs/colibri-evidence/kill-timestamps.md.
 set -euo pipefail
-cd /tmp/claude-1000/-home-fabiano-homelab-ai/0f20f676-fedb-4c99-92ae-88284111472f/scratchpad/colibri-run2
+cd "$(dirname "$0")"
 set -a; . /home/fabiano/homelab-ai/homelab.env; set +a
 
 for _ in $(seq 1 120); do

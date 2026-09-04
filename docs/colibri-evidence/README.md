@@ -16,6 +16,11 @@ de decidir (em outra sessão) como prosseguir.
 Ambas truncaram (`finish_reason: length`) — a resposta do modelo não coube no limite de tokens
 em nenhuma das duas. `response2_raw.txt` mostra o texto cortado no meio do "Bug 4" da review.
 
+**Nota do review do PR #36:** o `time_total` do `curl -w` é impresso no stdout, não no arquivo
+gravado por `-o` — então `response*_raw.txt` não contém essas métricas, e o número citado na
+tabela acima não batia com nenhum arquivo commitado originalmente. `metrics.txt` (adicionado
+depois do review) guarda o `time_total` real, recuperado do output da tarefa em background.
+
 Prompt usado nas duas: diff real combinado dos commits `5e5a9ad` + `66f978d` deste repo
 (~14,4 KB, `usage.prompt_tokens: 4858`), pedindo review de bugs no `colibri-serve.sh`.
 Script usado: `run.sh` / `run2.sh` (idênticos exceto o arquivo de request).
@@ -24,11 +29,15 @@ Script usado: `run.sh` / `run2.sh` (idênticos exceto o arquivo de request).
 
 | Tentativa | max_tokens | O que mudou | Resultado |
 |---|---|---|---|
-| `request3.json` (1ª vez) | 2000 | timeout gateway 2400→4800 + restart do container LiteLLM | task em background morta ~13s após início, antes do prefill |
-| `request3.json` (2ª vez) | 2000 | mesmo, sem restart desta vez | task morta ~6s após início |
-| `request4.json` (isolamento) | 1300 | nada além do max_tokens | task morta ~6s após início |
-| `request2.json` (replay exato) | 900 | nada — payload idêntico ao que funcionou | task morta ~10s após início |
-| `request.json` (replay exato) | 200 | nada — payload idêntico à 1ª rodada bem-sucedida | task morta ~8s após início |
+| `request3.json` via `run3.sh` (1ª vez) | 2000 | timeout gateway 2400→4800 + restart do container LiteLLM | task em background morta, sem timestamp registrado (`timeline3.txt` nunca chegou a ser escrito), antes do prefill |
+| `request3.json` via `run3.sh` (2ª vez, sobrescreveu a 1ª) | 2000 | mesmo, sem restart desta vez | task morta, teto observado ~13s após início |
+| `request4.json` via `run4.sh` (isolamento) | 1300 | nada além do max_tokens | task morta, teto observado ~6s após início |
+| `request2.json` via `run5.sh` (replay exato) | 900 | nada — payload idêntico ao que funcionou | task morta, teto observado ~10s após início |
+| `request.json` via `run6.sh` (replay exato) | 200 | nada — payload idêntico à 1ª rodada bem-sucedida | task morta, teto observado ~8s após início |
+
+Os tempos "teto observado" vêm de `kill-timestamps.md` (adicionado depois do review do PR #36)
+— são o intervalo entre `request_start` e o instante em que checei o estado após a notificação
+de morte, não o timestamp exato da morte, que nenhum arquivo grava.
 
 **Conclusão da investigação:** eliminado, um a um — não é o Colibrì (processo seguiu vivo e são
 depois de cada morte), não é o `colibri-serve.sh` (script idêntico), não é o LiteLLM/timeout
@@ -46,10 +55,18 @@ como feedback de produto durante a sessão.
 
 ## Arquivos desta pasta
 
-- `request*.json` — payloads enviados (prompt = diff real + max_tokens variando)
+- `request*.json` — payloads enviados (prompt = diff real + max_tokens variando: 200, 900,
+  2000, 1300 respectivamente para `request`/`request2`/`request3`/`request4`)
 - `response*.txt` — respostas cruas do servidor (só as que completaram têm response)
-- `timeline*.txt` — timestamps UTC de início/fim de cada tentativa
-- `run*.sh` — scripts exatos usados para disparar cada tentativa
+- `timeline*.txt` — timestamps UTC de início (e fim, quando completou) de cada tentativa
+- `metrics.txt` — `time_total`/`http_code` reais das duas rodadas que completaram (ausentes
+  dos `response*.txt` porque `curl -w` escreve no stdout, não no arquivo de `-o`)
+- `kill-timestamps.md` — reconstrução dos "tetos observados" de quanto tempo cada tentativa
+  morta rodou, com o disclaimer de que não é medição exata
+- `run*.sh` — scripts usados para disparar cada tentativa; `run.sh`/`run2.sh`/`run3.sh`/
+  `run4.sh` correspondem 1:1 a `request.json`/`request2.json`/`request3.json`/`request4.json`;
+  `run5.sh` e `run6.sh` são replays que reusam `request2.json` e `request.json` (comentado no
+  topo de cada script). Todos usam `cd "$(dirname "$0")"`, então rodam de qualquer diretório.
 - `diff_combined.patch` — o diff real usado como corpo do prompt
 
 ## Próximos passos (para decidir em outra sessão)
@@ -61,3 +78,12 @@ como feedback de produto durante a sessão.
 3. **Aceitar os dois dados já coletados** — já respondem a pergunta original (RAM
    desconfirmada, ~18-19 min de custo operacional pelo gateway); o truncamento afeta só a
    completude do texto de review, não a métrica de tempo.
+
+## Limitações desta evidência (do review do PR #36)
+
+- O log do servidor Colibrì (`~/.local/state/colibri/serve.log`) nunca foi copiado pra esta
+  pasta — as citações a `v4_prefill`/`[V4] temperature ignored` nas respostas da sessão vêm de
+  `tail` rodado ao vivo, não de um arquivo commitado aqui.
+- Os timestamps de morte são tetos observados, não exatos — ver `kill-timestamps.md`.
+- A 1ª tentativa com `request3.json` teve seu `timeline3.txt` sobrescrito pela 2ª — dado
+  irrecuperável.

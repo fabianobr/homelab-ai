@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
+# ATENÇÃO: este script rodou DUAS vezes na sessão original com request3.json
+# (max_tokens=2000) — a 1ª vez com o timeout do LiteLLM recém-bumped pra 4800s
+# e o container reiniciado; a 2ª vez sem reiniciar o container. Como as duas
+# escrevem em timeline3.txt/response3_raw.txt, a 1ª rodada foi sobrescrita
+# pela 2ª e seu timestamp de início é irrecuperável — só sobrou o teto
+# observado na conversa. Ver docs/colibri-evidence/kill-timestamps.md.
 set -euo pipefail
-cd /tmp/claude-1000/-home-fabiano-homelab-ai/0f20f676-fedb-4c99-92ae-88284111472f/scratchpad/colibri-run2
+cd "$(dirname "$0")"
 set -a; . /home/fabiano/homelab-ai/homelab.env; set +a
 
 for _ in $(seq 1 120); do

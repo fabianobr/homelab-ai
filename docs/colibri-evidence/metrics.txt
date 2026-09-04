@@ -1,0 +1,13 @@
+# Métricas reais do `curl -w`, capturadas do stdout da tarefa em background
+# (não estavam nos arquivos originais deste PR porque `-w` escreve no stdout,
+# não no arquivo passado a `-o` — achado do review do PR #36. Recuperadas do
+# output da tarefa em background, ainda disponível no host no momento da
+# correção; texto idêntico ao que a tarefa realmente produziu.)
+
+## rodada 1 (request.json, max_tokens=200) — corresponde a timeline.txt
+http_code=200
+time_total=1286.471771
+
+## rodada 2 (request2.json, max_tokens=900) — corresponde a timeline2.txt
+http_code=200
+time_total=1911.470448
