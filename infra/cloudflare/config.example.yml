@@ -10,6 +10,14 @@ ingress:
   - hostname: flow.example.com
     service: http://localhost:5678
 
+  # dsh-files: preview read-only dos arquivos gerados pelo DSH, por PATH sob o
+  # mesmo hostname do DSH web — reusa o mesmo app/policy de Access. Tem que vir
+  # ANTES da regra sem path do mesmo hostname (o cloudflared casa de cima pra
+  # baixo e para na primeira que bate).
+  - hostname: dsh.example.com
+    path: ^/files($|/.*)
+    service: http://localhost:3082
+
   # DeepSeek Harness: proteger no Cloudflare Access antes de instalar esta rota.
   - hostname: dsh.example.com
     service: http://localhost:3081

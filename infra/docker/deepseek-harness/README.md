@@ -8,7 +8,10 @@ O profile `harness` executa o DeepSeek Harness `0.1.0-rc.7` em uma imagem local 
 - `deepseek-harness-relay` compartilha somente o namespace de rede do DSH e encaminha `:8080` para o loopback `127.0.0.1:3080` do próprio DSH;
 - o relay é necessário porque o upstream deliberadamente não permite `dsh web --host 0.0.0.0`;
 - o volume `deepseek-harness-state` persiste sessões/configurações e pode conter credenciais de providers: nunca exporte ou versione esse volume;
-- somente `DSH_WORKSPACE_DIR` é montado como `/workspace`. Não monte o checkout do homelab, `$HOME`, SSH ou socket Docker.
+- dois diretórios são bind mounts para o host, ambos ignorados pelo Git e pertencentes ao usuário local (UID 1000):
+  - `DSH_WORKSPACE_DIR` → `/workspace`;
+  - `DSH_STORAGES_DIR` → `/dsh-home/storages`, onde o DSH web grava os projetos gerados no chat ("storages"). Isso torna cada arquivo gerado acessível fora do volume; antes ele ficava preso em `deepseek-harness-state`.
+- não monte o checkout do homelab, `$HOME`, SSH, socket Docker nem `/dsh-home` inteiro (esconderia `.credentials.yaml`). O bind é só no subpath `storages`, que não guarda segredos — mas o modelo pode escrever qualquer coisa nele, então trate como diretório não confiável.
 
 O Harness é *developer preview* e executa comandos gerados por modelos. Use somente workspaces descartáveis ou com Git inicializado e revise permissões, plugins e comandos. A contenção do container reduz o alcance, mas não substitui revisão humana. Veja o [aviso de segurança do upstream](https://github.com/deepseek-ai/deepseek-harness/blob/master/SAFETY.md).
 
@@ -20,9 +23,10 @@ No `homelab.env` fora do Git, defina:
 DSH_PUBLIC_HOSTNAME=dsh.example.com
 DSH_CLOUDFLARE_ENABLED=false
 DSH_WORKSPACE_DIR=/caminho/local/isolado/dsh-workspaces
+DSH_STORAGES_DIR=/caminho/local/isolado/dsh-storages
 ```
 
-Use um diretório pertencente ao usuário local que executa Docker. No host atual, `infra/runtime/dsh-workspaces` é ignorado pelo Git e foi preparado para esse fim. Não grave chaves de API nesse arquivo.
+Use um diretório pertencente ao usuário local que executa Docker. No host atual, `infra/runtime/dsh-workspaces` e `infra/runtime/dsh-storages` são ignorados pelo Git e foram preparados para esse fim (`infra/runtime/*` está no `.gitignore`). Não grave chaves de API nesse arquivo.
 
 Suba apenas o profile dedicado:
 
@@ -34,6 +38,43 @@ docker compose --env-file homelab.env -f infra/docker/docker-compose.yml \
 O DSH `0.1.0-rc.7` requer iniciar seu perfil Web por `node --expose-internals`; isso está explícito no `command` do Compose porque `NODE_OPTIONS` bloqueia essa flag no Node. Não altere para `--host 0.0.0.0` e não remova `--trusted-host`.
 
 Para registrar Ollama na UI, use `http://ollama:11434/v1`. Isso é uma conexão interna da rede Compose; Ollama não ganha hostname público.
+
+### Ver os arquivos gerados no chat (`dsh-files`)
+
+O botão "abrir arquivo" da UI web chama `/api/host.openPath`, que o upstream
+bloqueia fora de origem loopback (retorna `HTTP 403` pelo hostname público) e que
+não teria como abrir nada dentro do container. O caminho suportado para
+visualizar/baixar é o serviço `dsh-files` (mesmo profile `harness`):
+
+- `nginxinc/nginx-unprivileged` somente-leitura, roda como UID 1000 (mesmo dono
+  dos arquivos que o DSH grava em `0600`), monta `DSH_STORAGES_DIR` como `:ro` e
+  escuta em `127.0.0.1:3082`;
+- `infra/docker/dsh-files/` traz `default.conf` e `index.html`. O nginx serve a
+  listagem em JSON (`/api/ls/…`, via `autoindex_format json`) e o `index.html`
+  (SPA) ordena por data desc e formata o horário no fuso do browser — o
+  `autoindex` HTML puro não faz nem uma coisa nem outra. Arquivos crus saem por
+  `/raw/…`;
+- `workspace.json` e `session_projcache.json` (estado interno do DSH) são
+  retornados como 404 e escondidos da listagem;
+- é só leitura — nunca é caminho de escrita e não substitui o bind mount;
+- serve tanto em `/` (uso local direto, `127.0.0.1:3082`) quanto em `/files/`
+  (uso público — mesmo conteúdo, prefixo diferente para caber no roteamento
+  por path abaixo);
+- para acesso remoto, **não crie um hostname novo**: a rota entra por path sob
+  o hostname que o DSH web já usa (`dsh.<domínio>`), reaproveitando o mesmo
+  app/policy de Cloudflare Access — nada de segundo app pra manter:
+
+  ```bash
+  sudo env DSH_PUBLIC_HOSTNAME=dsh.example.com \
+    bash infra/scripts/add-dsh-files-path-ingress.sh
+  ```
+
+  O script insere a regra de `path: ^/files($|/.*)` **antes** da regra sem
+  path do mesmo hostname (o cloudflared casa de cima pra baixo e para na
+  primeira que bate — a ordem é o que faz `/files/...` cair no dsh-files e o
+  resto continuar caindo no DSH web). Requer que o ingress de
+  `DSH_PUBLIC_HOSTNAME` já exista. Resultado:
+  `https://dsh.example.com/files/` → dsh-files.
 
 ### Administração de providers
 
