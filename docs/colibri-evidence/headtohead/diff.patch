@@ -1,0 +1,211 @@
+commit a264ea7fb61f4d387d71927ff81d3cf6a4434d64
+Author: Fabiano Silva <fabiano@freitassilva.com>
+Date:   Wed Aug 26 07:48:15 2026 -0300
+
+    fix(carwatch): anchor extract to classify's target vehicle, fix case mismatches
+    
+    Continuing the real-API extract run from the previous commit (11/13
+    succeeded once the schema mismatch was fixed): the remaining 2 failures
+    had two distinct real causes.
+    
+    1. A roundup article ("Every new car coming in 2026", covering dozens of
+       vehicles) got approved by classify for one specific vehicle (Aion UT),
+       but extract re-fetches the full page with no idea which vehicle
+       classify meant -- it tried to describe the whole listicle, hit
+       stop_reason="max_tokens" at the 1024-token ceiling, and produced
+       unparseable JSON. Fix: pass classify's already-determined brand/model
+       into extract's prompt as anchor context ("extract data ONLY for this
+       vehicle"), and raise max_tokens 1024->1536 as a cheap safety margin
+       (Anthropic bills tokens generated, not the ceiling, so this costs
+       nothing on the normal ~300-500 token responses).
+    
+    2. drivetrain="AWD" (uppercase) against a lowercase-only literal
+       ("fwd"/"rwd"/"awd"). Same class of case-mismatch could hit
+       range_cycle (uppercase codes: WLTP/CLTC/EPA) and Price.status
+       (lowercase) even though not yet observed for those -- added the same
+       case-folding field_validator preemptively for all three.
+    
+    Verified against the real API 3x after the previous commit's fix (all
+    OK) before this session ran the two straggler items through again;
+    after this fix, both extracted successfully and the full 13/13 approved
+    items are now real launch_events rows.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01BsiqK4GWee7wjhH25RfiWM
+
+diff --git a/agents/carwatch/src/carwatch/llm/client.py b/agents/carwatch/src/carwatch/llm/client.py
+index a68b0b3..390946b 100644
+--- a/agents/carwatch/src/carwatch/llm/client.py
++++ b/agents/carwatch/src/carwatch/llm/client.py
+@@ -62,7 +62,12 @@ async def call_extract(system_prompt: str, article_text: str) -> tuple[str, dict
+     client = get_anthropic_client()
+     response = await client.messages.create(
+         model=MODEL,
+-        max_tokens=1024,
++        # 1024 was observed truncating (stop_reason="max_tokens") a real
++        # response for an article covering many vehicles; the anchor-context
++        # fix in extract.py's extract_one_item addresses the root cause, but
++        # a taller ceiling costs nothing extra on the normal ~300-500 token
++        # responses (Anthropic bills tokens actually generated, not the cap).
++        max_tokens=1536,
+         temperature=0,
+         system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
+         messages=[{"role": "user", "content": article_text}],
+diff --git a/agents/carwatch/src/carwatch/llm/extract.py b/agents/carwatch/src/carwatch/llm/extract.py
+index 5daa5dd..c246af9 100644
+--- a/agents/carwatch/src/carwatch/llm/extract.py
++++ b/agents/carwatch/src/carwatch/llm/extract.py
+@@ -166,7 +166,7 @@ def parse_extract_response(raw_text: str) -> ExtractedEvent | None:
+ 
+ 
+ async def extract_one_item(pool, row: tuple, logger) -> str:
+-    item_id, url, title, summary, source_id, source_tier = row
++    item_id, url, title, summary, source_id, source_tier, classified = row
+ 
+     result = await fetcher.fetch(url, kind="page")
+     degraded = result.status != 200 or result.blocked or not result.body
+@@ -179,6 +179,22 @@ async def extract_one_item(pool, row: tuple, logger) -> str:
+             degraded = True
+             article_text = f"{title}\n\n{summary or ''}"
+ 
++    # classify already picked out which vehicle in this article is the
++    # launch (brand/model) -- without this anchor, a roundup/listicle
++    # article (e.g. "every new car coming in 2026") makes the model try to
++    # describe every vehicle it mentions instead of the one that got
++    # approved, blowing the output token budget and producing an answer
++    # that can't validate as a single ExtractedEvent no matter the budget.
++    target_brand = classified.get("brand") if classified else None
++    target_model = classified.get("model") if classified else None
++    if target_brand or target_model:
++        article_text = (
++            f"[Este item foi classificado como sendo especificamente sobre: "
++            f"{target_brand or '?'} {target_model or ''}. Se o artigo cobrir "
++            f"múltiplos veículos, extraia dados APENAS deste, ignorando os "
++            f"demais.]\n\n{article_text}"
++        )
++
+     truncated = truncate_for_llm(article_text)
+     raw_response, usage = await call_extract(truncated)
+     await _record_extract_usage(pool, usage)
+@@ -234,7 +250,7 @@ async def run_extract(pool, logger, bot_token: str, chat_id: str, limit: int = 5
+ 
+     async with pool.connection() as conn:
+         result = await conn.execute(
+-            "SELECT ri.id, ri.url, ri.title, ri.summary, ri.source_id, s.tier "
++            "SELECT ri.id, ri.url, ri.title, ri.summary, ri.source_id, s.tier, ri.classified "
+             "FROM raw_items ri JOIN sources s ON s.id = ri.source_id "
+             "WHERE ri.status = 'new' AND ri.classified IS NOT NULL "
+             "AND ri.classified->>'is_launch' = 'true' LIMIT %s",
+diff --git a/agents/carwatch/src/carwatch/models.py b/agents/carwatch/src/carwatch/models.py
+index 49a28ad..7d35aa6 100644
+--- a/agents/carwatch/src/carwatch/models.py
++++ b/agents/carwatch/src/carwatch/models.py
+@@ -82,12 +82,30 @@ class Powertrain(BaseModel):
+             return _POWERTRAIN_TYPE_ALIASES.get(v.strip().lower(), v)
+         return v
+ 
++    # Observed against the real API: drivetrain="AWD" (uppercase) against a
++    # lowercase-only literal. Case-folding to the schema's own casing is a
++    # mechanical normalization, not a guess at what the model meant.
++    @field_validator("drivetrain", mode="before")
++    @classmethod
++    def _lowercase_drivetrain(cls, v):
++        return v.lower() if isinstance(v, str) else v
++
++    @field_validator("range_cycle", mode="before")
++    @classmethod
++    def _uppercase_range_cycle(cls, v):
++        return v.upper() if isinstance(v, str) else v
++
+ 
+ class Price(BaseModel):
+     amount: float | None = None
+     currency: str | None = None
+     status: Literal["official", "estimated", "starting_from"] | None = None
+ 
++    @field_validator("status", mode="before")
++    @classmethod
++    def _lowercase_status(cls, v):
++        return v.lower() if isinstance(v, str) else v
++
+ 
+ class ExtractedEvent(BaseModel):
+     brand: str
+diff --git a/agents/carwatch/tests/test_extract.py b/agents/carwatch/tests/test_extract.py
+index fb2c07c..067cea7 100644
+--- a/agents/carwatch/tests/test_extract.py
++++ b/agents/carwatch/tests/test_extract.py
+@@ -140,6 +140,48 @@ async def test_run_extract_marks_success_as_extracted_and_calls_dedupe(db_pool):
+         assert (await result.fetchone())[0] == 1
+ 
+ 
++async def test_run_extract_anchors_the_prompt_to_classifys_target_vehicle(db_pool):
++    """A real extract call against a roundup article ("every new car coming
++    in 2026") tried to describe every vehicle it mentioned instead of just
++    the one classify had already identified, blowing the output token
++    budget. Without an anchor, extract has no way to know which of several
++    vehicles in the article is the one that was actually approved.
++    """
++    async with db_pool.connection() as conn:
++        source = await conn.execute(
++            "INSERT INTO sources (domain, feed_url, kind, tier, status) "
++            "VALUES ('x.com', 'https://x.com/feed', 'rss', 1, 'active') RETURNING id"
++        )
++        source_id = (await source.fetchone())[0]
++        classified = json.dumps(
++            {"i": 0, "is_launch": True, "stage": "on_sale", "brand": "Aion", "model": "UT", "confidence": 0.95}
++        )
++        await conn.execute(
++            "INSERT INTO raw_items (source_id, url, url_hash, title, status, classified) "
++            "VALUES (%s, 'https://x.com/roundup', 'hash-anchor', 'Every new car coming in 2026', 'new', %s)",
++            (source_id, classified),
++        )
++
++    fake_extracted_json = json.dumps(
++        {
++            "brand": "Aion", "model": "UT", "generation": None, "body_type": None,
++            "stage": "on_sale", "is_new_generation": False, "markets": [],
++            "global_debut": False, "event_date": None, "sales_start": None,
++            "powertrain": None, "price": None, "highlights": [], "confidence": 0.7,
++        }
++    )
++    call_extract_mock = AsyncMock(return_value=(fake_extracted_json, _USAGE))
++
++    with patch("carwatch.llm.extract.fetcher.fetch", new=AsyncMock(
++        return_value=type("R", (), {"status": 200, "body": "x" * 1000, "blocked": False})()
++    )), patch("carwatch.llm.extract.call_extract", new=call_extract_mock):
++        await run_extract(db_pool, logger=None, bot_token="test-bot-token", chat_id="test-chat-id", limit=10)
++
++    sent_text = call_extract_mock.call_args.args[0]
++    assert "Aion" in sent_text
++    assert "UT" in sent_text
++
++
+ async def test_run_extract_marks_unparseable_response_as_error_after_one_retry(db_pool):
+     async with db_pool.connection() as conn:
+         source = await conn.execute(
+diff --git a/agents/carwatch/tests/test_models_extract.py b/agents/carwatch/tests/test_models_extract.py
+index 1189595..85754d6 100644
+--- a/agents/carwatch/tests/test_models_extract.py
++++ b/agents/carwatch/tests/test_models_extract.py
+@@ -31,6 +31,20 @@ def test_powertrain_rejects_truly_invalid_type():
+         Powertrain.model_validate({"type": "nonsense_fuel_type"})
+ 
+ 
++def test_powertrain_normalizes_drivetrain_and_range_cycle_case():
++    """A real extract call against the live API returned drivetrain="AWD"
++    (uppercase) against a lowercase-only literal.
++    """
++    pt = Powertrain.model_validate({"type": "bev", "drivetrain": "AWD", "range_cycle": "wltp"})
++    assert pt.drivetrain == "awd"
++    assert pt.range_cycle == "WLTP"
++
++
++def test_price_normalizes_status_case():
++    price = Price.model_validate({"status": "Official"})
++    assert price.status == "official"
++
++
+ def test_price_all_fields_optional():
+     price = Price()
+     assert price.amount is None

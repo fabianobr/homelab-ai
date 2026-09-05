@@ -546,6 +546,50 @@ O que torna isso perigoso é a forma da falha: **sem erro, sem exit não-zero**,
 no log. Quem rodasse os dois juntos teria um serviço mais lento sem nenhum sinal. É mais uma
 razão — além da RAM — para os dois não coexistirem.
 
+### O Ollama também contende a VRAM, e o `colibri-serve.sh` não vê isso (2026-09-05)
+
+Até aqui só o ComfyUI era o suspeito documentado. Numa tentativa de comparar a qualidade de
+review do Colibrì contra o Claude lado a lado (ver
+`docs/colibri-evidence/headtohead/README.md`), o `colibri-serve.sh start` subiu normalmente
+(RAM disponível ok), mas a requisição real ficou **~28 min presa** em
+`[DSV4 CUDA] activation allocation: out of memory` (5.694 repetições no log, sem nunca
+progredir) porque um `llama-server` do container `ollama` (`docker top ollama`) estava com um
+modelo carregado (`qwen3.8:27b-mtp-q4_K_M`, 13,1 GiB de VRAM) gerando ativamente — não era um
+resíduo ocioso, era uma geração real em andamento (confirmado por `docker logs ollama`
+mostrando `slot print_timing` avançando tokens ao vivo). `docker restart ollama` liberou a
+VRAM na hora.
+
+**O guard de `colibri-serve.sh` só checa `MemAvailable` (RAM), nunca VRAM livre.** O ComfyUI
+sendo Docker Compose deste mesmo repo pelo menos está documentado como incompatível; o Ollama
+— que é a peça mais usada de toda a stack — nunca tinha sido flagrado como concorrente de GPU
+do Colibrì. Não é hipotético: aconteceu na primeira vez que alguém rodou os dois de verdade ao
+mesmo tempo.
+
+### Sem esse concorrente, o próprio Colibrì travou sozinho num diff maior
+
+Com a VRAM do Ollama liberada e recarregando do zero, a mesma requisição (agora um diff
+diferente, ~2.700 tokens de prompt — maior que os ~900-2000 dos testes de 2026-09-03/04)
+**travou de novo**, desta vez sem nenhum outro processo disputando GPU: o próprio
+`deepseek_v4` chegou a **15,5 GiB de VRAM usados sozinho** (contra o pico de 13,4 GiB medido
+antes) e ficou preso em `[DSV4 CUDA] weight allocation: out of memory` /
+`matvec launch: out of memory` em loop, por 44 minutos, sem cair para `moe-batch=off` como a
+seção anterior descreve para o caso de contenção externa.
+
+**Isso é diferente do failover conhecido:** a mensagem "bank allocation failed; CPU union
+stays" documentada acima é uma degradação graciosa por contenção *externa*. Aqui o próprio
+motor, sozinho, sem concorrência, excedeu a VRAM disponível processando um prompt maior e
+**não fez failover nenhum** — ficou repetindo a tentativa de alocação indefinidamente. Não
+investigado a fundo (não é claro se é o tamanho do prompt, do `--ctx 32768`, ou alguma
+combinação específica); registrado aqui para não se perder. Efeito prático: o
+`sdlc-review-local` não é confiável para qualquer diff que passe de um tamanho ainda não
+determinado — pode travar em vez de responder mais devagar ou errar rápido.
+
+**Consequência para o head-to-head:** o lado Claude da comparação foi concluído (ver
+`docs/colibri-evidence/headtohead/review_claude.md`); o lado Colibrì falhou duas vezes por
+motivos de infraestrutura de GPU antes de qualquer resposta do modelo, e a comparação de
+qualidade ficou incompleta. Decisão do usuário: parar por aqui em vez de insistir uma
+3ª vez.
+
 ### Prompt grande pelo LiteLLM: 18 minutos
 
 Medido em 2026-08-31, prompt de **4.566 tokens** (um diff real deste repo) atravessando o
