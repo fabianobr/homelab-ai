@@ -270,6 +270,7 @@ services:
     volumes:
       - deepseek-harness-state:/dsh-home
       - deepseek-harness-npm-cache:/dsh-home/.npm
+      - ${DSH_WORKSPACE_DIR:-/srv/homelab-ai/dsh-workspaces}:/workspace
       # Diretório onde o DSH web grava os projetos gerados no chat ("storages").
       # Bind no host para que cada arquivo gerado seja acessível fora do volume.
       - ${DSH_STORAGES_DIR:-/srv/homelab-ai/dsh-storages}:/dsh-home/storages

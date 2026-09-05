@@ -59,11 +59,15 @@ candidate="$(mktemp "${config_dir}/config.yml.dshfiles.XXXXXX")"
 rollback="$(mktemp "${config_dir}/config.yml.rollback.XXXXXX")"
 trap 'rm -f "${candidate}" "${rollback}"' EXIT
 
-awk -v hostname="${DSH_PUBLIC_HOSTNAME}" -v path_regex="${path_regex}" -v origin="${DSH_FILES_ORIGIN_URL}" '
-  $0 == "  - hostname: " hostname && !inserted {
-    print "  - hostname: " hostname
-    print "    path: " path_regex
-    print "    service: " origin
+# Regex tolerante a indentação, aspas e espaço final — não casa string exata.
+host_re="$(printf '%s' "${DSH_PUBLIC_HOSTNAME}" | sed 's/[.]/\\./g')"
+
+awk -v host_re="${host_re}" -v hostname="${DSH_PUBLIC_HOSTNAME}" -v path_regex="${path_regex}" -v origin="${DSH_FILES_ORIGIN_URL}" '
+  $0 ~ ("^[[:space:]]*-[[:space:]]+hostname:[[:space:]]+\"?" host_re "\"?[[:space:]]*$") && !inserted {
+    indent = $0; sub(/[^[:space:]].*$/, "", indent)
+    print indent "- hostname: " hostname
+    print indent "  path: " path_regex
+    print indent "  service: " origin
     print ""
     inserted = 1
   }

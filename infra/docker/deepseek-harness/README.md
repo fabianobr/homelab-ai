@@ -49,17 +49,26 @@ visualizar/baixar é o serviço `dsh-files` (mesmo profile `harness`):
 - `nginxinc/nginx-unprivileged` somente-leitura, roda como UID 1000 (mesmo dono
   dos arquivos que o DSH grava em `0600`), monta `DSH_STORAGES_DIR` como `:ro` e
   escuta em `127.0.0.1:3082`;
-- `infra/docker/dsh-files/` traz `default.conf` e `index.html`. O nginx serve a
-  listagem em JSON (`/api/ls/…`, via `autoindex_format json`) e o `index.html`
-  (SPA) ordena por data desc e formata o horário no fuso do browser — o
-  `autoindex` HTML puro não faz nem uma coisa nem outra. Arquivos crus saem por
-  `/raw/…`;
-- `workspace.json` e `session_projcache.json` (estado interno do DSH) são
-  retornados como 404 e escondidos da listagem;
+- `infra/docker/dsh-files/` traz `default.conf` e `index.html`. Tudo mora sob
+  `/files/` (é o único prefixo que o tunnel roteia pra cá): `/files/_ls/…` é a
+  listagem em JSON (`autoindex_format json`), `/files/_raw/<arquivo>` é o
+  conteúdo cru, e `/files/…` devolve a SPA (`index.html`), que ordena por data
+  desc e formata o horário no fuso do browser — o `autoindex` HTML puro não faz
+  nem uma coisa nem outra;
+- `/files/_raw/…` responde com `Content-Security-Policy: sandbox` e
+  `X-Content-Type-Options: nosniff`: o conteúdo é saída de LLM servida na mesma
+  origem do DSH web, então o sandbox neutraliza script/same-origin mas deixa
+  HTML/CSS renderizar inline;
+- `workspace.json` e `session_projcache.json` **no nível raiz** do storages
+  (estado interno do DSH) têm o conteúdo bloqueado no servidor (`404`, match
+  exato — arquivos de mesmo nome dentro de subprojetos gerados continuam
+  acessíveis); os nomes ainda aparecem no JSON de `/files/_ls/`, o `index.html`
+  é que os esconde da lista renderizada;
+- `_ls` e `_raw` são nomes reservados: um diretório gerado com um desses nomes
+  no nível raiz do storages fica invisível pela SPA (o conteúdo ainda é
+  alcançável por `/files/_ls/_ls/…`);
 - é só leitura — nunca é caminho de escrita e não substitui o bind mount;
-- serve tanto em `/` (uso local direto, `127.0.0.1:3082`) quanto em `/files/`
-  (uso público — mesmo conteúdo, prefixo diferente para caber no roteamento
-  por path abaixo);
+- `/` e `/files` (sem barra) redirecionam pra `/files/`;
 - para acesso remoto, **não crie um hostname novo**: a rota entra por path sob
   o hostname que o DSH web já usa (`dsh.<domínio>`), reaproveitando o mesmo
   app/policy de Cloudflare Access — nada de segundo app pra manter:
