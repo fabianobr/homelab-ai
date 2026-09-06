@@ -45,7 +45,10 @@ cloudflared tunnel --url http://localhost:3000 run homelab-ai
 
 ## Configuração deste host
 
-O tunnel system-wide deve apontar ComfyUI, n8n e DeepSeek Harness:
+O tunnel system-wide deve apontar ComfyUI, n8n e DeepSeek Harness. O preview de
+arquivos do DSH (`dsh-files`) entra por **path** sob o mesmo hostname do DSH
+web — não ganha hostname próprio — e a regra de path precisa vir antes da
+regra sem path do mesmo hostname:
 
 ```yaml
 ingress:
@@ -53,6 +56,9 @@ ingress:
     service: http://localhost:8188
   - hostname: flow.example.com
     service: http://localhost:5678
+  - hostname: dsh.example.com
+    path: ^/files($|/.*)
+    service: http://localhost:3082
   - hostname: dsh.example.com
     service: http://localhost:3081
   - service: http_status:404

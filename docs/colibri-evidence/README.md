@@ -1,10 +1,14 @@
-# Evidência crua: teste de truncamento no `sdlc-review-local` (2026-09-03)
+# Evidência crua: teste de truncamento no `sdlc-review-local` (2026-09-03 a 2026-09-04)
 
 Contexto: depois de confirmar (PR #35) que os ~18 min de latência de um prompt grande pelo
 gateway não são causados por RAM, o pedido seguinte foi mostrar os dados crus (prompt, resposta,
 timeline) sem interpretação, e depois tentar um `max_tokens` maior para não truncar a resposta.
-Esta pasta é o registro bruto dessa tentativa — para não perder nada ao fechar a sessão, antes
-de decidir (em outra sessão) como prosseguir.
+Esta pasta é o registro bruto dessa tentativa.
+
+**Resolvido em 2026-09-04 (rodada 7):** rodar fora de qualquer tarefa em background do Claude
+Code contorna a morte sistemática das rodadas 3-6 — ver seção "Rodada 7" abaixo. A pendência
+está fechada; a causa raiz continua atribuída à camada de background task do Claude Code, não
+investigada mais a fundo por ser externa a este repositório.
 
 ## Rodadas que completaram
 
@@ -67,17 +71,50 @@ como feedback de produto durante a sessão.
   `run4.sh` correspondem 1:1 a `request.json`/`request2.json`/`request3.json`/`request4.json`;
   `run5.sh` e `run6.sh` são replays que reusam `request2.json` e `request.json` (comentado no
   topo de cada script). Todos usam `cd "$(dirname "$0")"`, então rodam de qualquer diretório.
-- `diff_combined.patch` — o diff real usado como corpo do prompt
+  `run7.sh` é o único pensado para rodar fora do Claude Code (ver seção "Rodada 7") e tem
+  lockfile próprio (`run7.lock`) contra execução concorrente.
+- `diff_combined.patch` — o diff real usado como corpo do prompt (rodadas 1-6)
+- `request7.json` / `response7_raw.txt` / `timeline7.txt` / `log7.txt` — payload, resposta,
+  timestamps e log de execução da rodada 7
 
-## Próximos passos (para decidir em outra sessão)
+## Rodada 7 (2026-09-04) — resolvida rodando fora do Claude Code
 
-1. **Rodar em foreground** (sem tarefa em background) — contorna o problema sem entender a
-   causa, ao custo de bloquear a sessão ~20-30 min por chamada.
-2. **Nova sessão** — o padrão "2 primeiras OK, resto morre" sugere algo por-sessão; não
-   confirmado.
-3. **Aceitar os dois dados já coletados** — já respondem a pergunta original (RAM
-   desconfirmada, ~18-19 min de custo operacional pelo gateway); o truncamento afeta só a
-   completude do texto de review, não a métrica de tempo.
+`request7.json` (mesmo estilo de prompt, diff menor ~6 KB, `max_tokens: 4000`) via `run7.sh`,
+disparado pelo usuário num terminal próprio com `nohup ... & disown` — fora de qualquer task
+gerenciada por esta sessão de chat, que era o suspeito principal das mortes em segundos das
+rodadas 3-6.
+
+| | Resultado |
+|---|---|
+| HTTP | 200 |
+| `finish_reason` | **`stop`** — primeira resposta completa, sem truncar |
+| Tempo total (`timeline7.txt`, início→fim) | **1.330 s (~22 min 10 s)** |
+| `usage` | `prompt_tokens: 2079`, `completion_tokens: 1081`, `total: 3160` |
+
+**Confirma a opção 1 dos "próximos passos" originais:** rodar fora do gerenciamento de
+background do Claude Code contorna o problema, ao custo de bloquear ~22 min por chamada — sem
+precisar entender a causa raiz exata daquela camada.
+
+Dois problemas apareceram na própria execução, não no Colibrì:
+
+1. **O usuário disparou `run7.sh` duas vezes em sequência** (comando colado/executado 2x) —
+   as duas cópias escreviam no mesmo `response7_raw.txt`, o que corromperia o arquivo ao
+   terminar. Detectado a tempo (`ps aux`, dois PGIDs do mesmo PPID) e a cópia mais nova foi
+   morta manualmente antes de concluir. Corrigido depois: `run7.sh` agora usa um lockfile
+   (`run7.lock`, via `mkdir` atômico) que aborta uma segunda execução concorrente em vez de
+   disputar arquivo.
+2. **`metrics7.txt` nunca foi gerado** — repetição do mesmo erro que o review do PR #36 já
+   tinha documentado (`curl -w` escreve no *stdout* do processo `curl`, não no arquivo do
+   `-o`), agravado pelo `nohup ... > /dev/null` que o usuário usou para desacoplar do
+   terminal: mesmo se a extração de `response7_raw.txt` funcionasse, o redirect já tinha
+   descartado esse stdout. O tempo real só ficou disponível porque `timeline7.txt` (escrito
+   pelo próprio script, não pelo `-w` do curl) registra início e fim à parte.
+
+## Próximos passos
+
+Nenhum pendente para esta investigação — ver "Resolvido" no topo. Se o custo de ~20-22 min por
+chamada precisar cair, a via não explorada é investigar por que o modo serve do Colibrì é caro
+nesse patamar independente de RAM (hipótese aberta em `docs/colibri.md`, não desta pasta).
 
 ## Limitações desta evidência (do review do PR #36)
 

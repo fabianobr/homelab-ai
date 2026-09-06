@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DSH files</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 1rem;
+    background: #14151a; color: #e6e6e6;
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  h1 { font-size: 1rem; font-weight: 600; margin: 0 0 .25rem; color: #9aa4b2; }
+  .crumbs { margin-bottom: 1rem; word-break: break-all; }
+  .crumbs a { color: #6ea8fe; text-decoration: none; }
+  .crumbs span { color: #6b7280; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { border-bottom: 1px solid #23252d; }
+  li a {
+    display: flex; gap: .75rem; align-items: baseline;
+    padding: .7rem .25rem; color: #e6e6e6; text-decoration: none;
+  }
+  li a:hover, li a:focus { background: #1c1e26; }
+  .name { flex: 1; word-break: break-all; }
+  .dir .name { color: #7fd4a4; }
+  .meta { color: #6b7280; font-size: .8rem; white-space: nowrap; }
+  .size { color: #6b7280; font-size: .8rem; white-space: nowrap; min-width: 4.5rem; text-align: right; }
+  .msg { color: #9aa4b2; padding: 1rem .25rem; }
+  .err { color: #f28b82; }
+</style>
+</head>
+<body>
+<h1>arquivos gerados pelo DSH</h1>
+<div class="crumbs" id="crumbs"></div>
+<ul id="list"></ul>
+<div class="msg" id="msg">carregando…</div>
+<script>
+(function () {
+  var HIDDEN = { "workspace.json": 1, "session_projcache.json": 1, "_ls": 1, "_raw": 1 };
+  var listEl = document.getElementById("list");
+  var msgEl = document.getElementById("msg");
+  var crumbsEl = document.getElementById("crumbs");
+
+  // path relativo dentro de /srv/files, a partir da URL
+  var rel = decodeURIComponent(location.pathname).replace(/^\/+/, "");
+  if (rel === "files" || rel.indexOf("files/") === 0) {
+    rel = rel.slice(5).replace(/^\/+/, "");
+  }
+  rel = rel.replace(/\/+$/, "");
+  var parts = rel ? rel.split("/") : [];
+
+  function enc(p) { return p.split("/").map(encodeURIComponent).join("/"); }
+  function joinRel(name) { return (rel ? rel + "/" : "") + name; }
+  function human(n) {
+    if (n == null) return "";
+    var u = ["B", "K", "M", "G"], i = 0;
+    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+    return (i === 0 ? n : n.toFixed(1)) + u[i];
+  }
+  function fmtDate(s) {
+    var d = new Date(s);
+    if (isNaN(d)) return "";
+    // fuso e locale do browser
+    return d.toLocaleString([], {
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit"
+    });
+  }
+
+  // breadcrumbs
+  var html = '<a href="/files/">files</a>';
+  var acc = "";
+  parts.forEach(function (p) {
+    acc += (acc ? "/" : "") + p;
+    html += ' <span>/</span> <a href="/files/' + enc(acc) + '/">' + p + "</a>";
+  });
+  crumbsEl.innerHTML = html;
+
+  fetch("/files/_ls/" + (rel ? enc(rel) + "/" : ""))
+    .then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    })
+    .then(function (entries) {
+      entries = entries.filter(function (e) { return !HIDDEN[e.name]; });
+      entries.sort(function (a, b) {
+        return new Date(b.mtime) - new Date(a.mtime);
+      });
+
+      var frag = document.createDocumentFragment();
+
+      if (parts.length) {
+        var up = "/files/" + (parts.length > 1 ? enc(parts.slice(0, -1).join("/")) + "/" : "");
+        frag.appendChild(row(up, "../", "", "", true));
+      }
+
+      entries.forEach(function (e) {
+        var isDir = e.type === "directory";
+        var href = isDir
+          ? "/files/" + enc(joinRel(e.name)) + "/"
+          : "/files/_raw/" + enc(joinRel(e.name));
+        frag.appendChild(row(href, e.name + (isDir ? "/" : ""), fmtDate(e.mtime), isDir ? "" : human(e.size), isDir));
+      });
+
+      listEl.appendChild(frag);
+      msgEl.hidden = true;
+      if (!entries.length && !parts.length) {
+        msgEl.hidden = false;
+        msgEl.textContent = "nada aqui ainda";
+      }
+    })
+    .catch(function (err) {
+      msgEl.className = "msg err";
+      msgEl.textContent = "não foi possível listar: " + err.message;
+    });
+
+  function row(href, name, meta, size, isDir) {
+    var li = document.createElement("li");
+    if (isDir) li.className = "dir";
+    var a = document.createElement("a");
+    a.href = href;
+    a.innerHTML =
+      '<span class="name"></span>' +
+      '<span class="meta"></span>' +
+      '<span class="size"></span>';
+    a.querySelector(".name").textContent = name;
+    a.querySelector(".meta").textContent = meta;
+    a.querySelector(".size").textContent = size;
+    li.appendChild(a);
+    return li;
+  }
+})();
+</script>
+</body>
+</html>

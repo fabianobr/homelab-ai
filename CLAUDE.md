@@ -131,7 +131,7 @@ O hook usa [gitleaks](https://github.com/gitleaks/gitleaks) e roda também no CI
 
 ## Subir a stack — profiles importam
 
-**Todos os oito serviços estão atrás de profile. Sem `--profile`, nada sobe** — não é
+**Todos os nove serviços estão atrás de profile. Sem `--profile`, nada sobe** — não é
 falha, é profile desligado. Confirme com
 `docker compose --env-file homelab.env -f infra/docker/docker-compose.yml config --services`:
 sem profile a saída é vazia.
@@ -145,6 +145,7 @@ sem profile a saída é vazia.
 | `litellm` | `optional` | 4000 |
 | `searxng` | `optional` | 8080 |
 | `deepseek-harness` + relay | `harness` | 3081 |
+| `dsh-files` (preview read-only de `DSH_STORAGES_DIR`) | `harness` | 3082 |
 
 O env-file é `homelab.env` na raiz (gitignored) — **não** `.env`. Ele define
 `HOMELAB_ROOT`, `COMFYUI_SOURCE_DIR` e `SEARXNG_SECRET`, que o compose lê como
@@ -190,6 +191,7 @@ de 20 GB livres. Armadilhas e medições em `docs/colibri.md`.
 - n8n `5678`
 - LiteLLM `4000`
 - DeepSeek Harness `3081`
+- dsh-files `3082` (preview read-only dos arquivos gerados pelo DSH; publicar só via Access)
 - Postgres do CarWatch `5433` (compose próprio do agente)
 - Colibrì / DeepSeek V4 `5000` (**no host, não em container** — escuta na bridge do
   Docker, não em loopback, porque o LiteLLM precisa alcançá-lo; protegido por `COLI_API_KEY`)
@@ -208,11 +210,12 @@ homelab-ai/
 ├── STANDARDS.md             ← padrões de código e convenções
 ├── scripts/                 ← utilitários de sessão (state.sh: retrato do host)
 ├── infra/                   ← trilha 1: homelab que roda os modelos
-│   ├── docker/              ← docker-compose.yml, comfyui/, n8n/, searxng/, litellm-config.yaml
-│   ├── scripts/             ← healthcheck, apply-system-config, update, check-public-ready, comfyui-idle-stop, colibri-serve
+│   ├── docker/              ← docker-compose.yml, comfyui/, n8n/, searxng/, deepseek-harness/, dsh-files/, litellm-config.yaml
+│   ├── scripts/             ← healthcheck, apply-system-config, update, check-public-ready, comfyui-idle-stop, colibri-serve, add-dsh-cloudflared-ingress, add-dsh-files-path-ingress
 │   ├── systemd/             ← unidades de usuário de infra (comfyui-idle-stop.timer)
 │   ├── cloudflare/          ← config do Tunnel e Access + deadman-switch/ (Worker)
 │   ├── media-pipeline/      ← contrato público (contract.yaml) do repo media-meme-pipeline
+│   ├── runtime/             ← bind mounts gitignored: dsh-workspaces/, dsh-storages/ (arquivos gerados pelo DeepSeek Harness no host)
 │   ├── ARCHITECTURE.md      ← C4 L1/L2 do homelab
 │   ├── SERVICES.md          ← tabela de serviços e portas
 │   └── ROADMAP.md           ← fases concluídas e próximas

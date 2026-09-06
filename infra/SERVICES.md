@@ -12,6 +12,7 @@
 | n8n | Opcional | Docker Compose profile `optional` | 5678 | Automações |
 | carwatch-deadman | Sim | Cloudflare Worker (`wrangler deploy`) | - | Dead man's switch dos agentes; cron diário + `POST /ping/<agente>`. Código em `infra/cloudflare/deadman-switch/` |
 | DeepSeek Harness | Opcional | Docker Compose profile `harness` | 3081 | Agente de código, via Access |
+| dsh-files | Opcional | Docker Compose profile `harness` | 3082 | Preview HTTP read-only dos arquivos gerados pelo DSH (`DSH_STORAGES_DIR`); publicado por path sob o hostname do DSH web, mesmo Access |
 
 ## Ordem de instalação
 
@@ -37,7 +38,8 @@ Serviços publicados via Cloudflare Access:
 ```text
 https://media.example.com -> http://localhost:8188  (ComfyUI)
 https://flow.example.com  -> http://localhost:5678  (n8n)
-https://dsh.example.com   -> http://localhost:3081 (DeepSeek Harness)
+https://dsh.example.com         -> http://localhost:3081 (DeepSeek Harness)
+https://dsh.example.com/files/  -> http://localhost:3082 (dsh-files, preview read-only; rota por path, mesmo hostname/Access)
 ```
 
 E-mail permitido no Access:
@@ -53,7 +55,7 @@ http://ollama:11434        (chat/completions)
 http://ollama:11434/v1     (endpoint OpenAI-compatible)
 ```
 
-O DeepSeek Harness acessa o Ollama pela mesma rede Compose e só publica `127.0.0.1:3081` para o Tunnel. O estado e os workspaces são isolados; ver [`docker/deepseek-harness/README.md`](docker/deepseek-harness/README.md).
+O DeepSeek Harness acessa o Ollama pela mesma rede Compose e só publica `127.0.0.1:3081` para o Tunnel. O estado fica no volume `deepseek-harness-state`; os workspaces (`DSH_WORKSPACE_DIR`) e os projetos gerados no chat (`DSH_STORAGES_DIR` → `/dsh-home/storages`) são bind mounts em `infra/runtime/`, acessíveis no host. O serviço `dsh-files` (mesmo profile `harness`, porta 3082) serve esse diretório por HTTP somente-leitura para visualizar/baixar os arquivos — necessário porque o `/api/host.openPath` do DSH web é bloqueado fora de loopback. É publicado por **path** (`/files/`) sob o mesmo hostname do DSH web, não por um hostname/app de Access novo. Ver [`docker/deepseek-harness/README.md`](docker/deepseek-harness/README.md).
 
 ## Paths de modelos (bind mounts)
 
