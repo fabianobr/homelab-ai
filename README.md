@@ -71,6 +71,10 @@ para os gates de segurança e release.
 - Cloudflare Tunnel + Access (acesso remoto seguro, sem abrir portas)
 - GPU NVIDIA RTX 5060 Ti 16GB VRAM
 
+O mesmo host roda ainda containers de **outros repositórios** (QuickTools, MoneyPrinterTurbo),
+com compose próprio e portas próprias — não fazem parte desta stack, mas disputam porta e RAM
+com ela. Estão listados em [`infra/SERVICES.md`](infra/SERVICES.md).
+
 ## Segurança do repositório (repo público)
 
 Este repositório é público no GitHub. Antes de qualquer commit:
