@@ -113,6 +113,10 @@ fi
 
 # Todo container do profile precisa estar `running` — `restarting` é falha.
 mapfile -t containers < <(dc ps -a --format '{{.Name}}' "${services[@]}" 2>/dev/null || true)
+# Sem esta guarda, um `compose ps` que falhe ou mude de formato deixaria os dois
+# laços abaixo sem iterar e o script sairia 0 — inclusive o guard de netns, que
+# é a regressão que este arquivo existe para pegar.
+(( ${#containers[@]} )) || fail "não consegui listar os containers do profile $PROFILE"
 for name in "${containers[@]}"; do
   [[ -n "$name" ]] || continue
   state="$(docker inspect "$name" --format '{{.State.Status}}' 2>/dev/null || echo missing)"

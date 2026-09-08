@@ -22,6 +22,13 @@
  * de dentro do próprio container, seguia verde. Um processo no mesmo container
  * não tem esse vínculo por ID: não há o que apontar para um container morto.
  *
+ * Limite conhecido: isto cobre a *morte* de um dos processos, não o
+ * *travamento*. Um DSH que pare de responder sem sair deixa o container
+ * `unhealthy` para sempre — `restart: unless-stopped` age na saída do
+ * container, e o Docker não reinicia container por healthcheck reprovado.
+ * Recuperar disso exigiria um probe periódico aqui dentro ou um autoheal
+ * externo; nenhum dos dois existe hoje.
+ *
  * O preço é ter dois processos sem supervisor de verdade, e é exatamente por
  * isso que este arquivo existe: um container "up" com o relay morto seria a
  * mesma mentira que estamos consertando. Aqui, a morte de qualquer um dos dois
@@ -113,7 +120,12 @@ function fail(code, message) {
 }
 
 child.on('error', (error) => {
-  fail(1, `não consegui executar o DSH (${childArgv[0]}): ${error.message}`);
+  // `spawn` falhou: não existe filho para matar e o evento `exit` pode nunca
+  // ser emitido. Passar por `fail()` aqui esperaria o FORCE_EXIT_MS inteiro e
+  // transformaria uma falha imediata num crashloop de 10 em 10s — sai direto.
+  console.error(`supervisor: não consegui executar o DSH (${childArgv[0]}): ${error.message}`);
+  server.close();
+  process.exit(1);
 });
 
 child.on('exit', (code, signal) => {
