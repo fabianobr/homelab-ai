@@ -131,7 +131,7 @@ O hook usa [gitleaks](https://github.com/gitleaks/gitleaks) e roda também no CI
 
 ## Subir a stack — profiles importam
 
-**Todos os nove serviços estão atrás de profile. Sem `--profile`, nada sobe** — não é
+**Todos os oito serviços estão atrás de profile. Sem `--profile`, nada sobe** — não é
 falha, é profile desligado. Confirme com
 `docker compose --env-file homelab.env -f infra/docker/docker-compose.yml config --services`:
 sem profile a saída é vazia.
@@ -144,7 +144,7 @@ sem profile a saída é vazia.
 | `n8n` | `optional` | 5678 |
 | `litellm` | `optional` | 4000 |
 | `searxng` | `optional` | 8080 |
-| `deepseek-harness` + relay | `harness` | 3081 |
+| `deepseek-harness` (o relay TCP roda no mesmo container) | `harness` | 3081 |
 | `dsh-files` (preview read-only de `DSH_STORAGES_DIR`) | `harness` | 3082 |
 
 O env-file é `homelab.env` na raiz (gitignored) — **não** `.env`. Ele define
@@ -184,6 +184,43 @@ engine é compilado no host com CUDA/DeepGEMM para `sm_120`. Sobe sob demanda co
 ~16–21 GB de RAM, então **não convive com o ComfyUI ligado** — o script recusa subir com menos
 de 20 GB livres. Armadilhas e medições em `docs/colibri.md`.
 
+E, fora tudo isso, o `docker ps` ainda mostra containers de **outros repositórios** — ver a
+seção seguinte antes de concluir que uma porta ocupada é da stack.
+
+## Containers de outros repos neste host
+
+Dois projetos que **não são deste repositório** rodam neste mesmo host, cada um com o seu
+`docker-compose.yml`, o seu projeto Compose e as suas portas. Não entram na tabela de
+profiles acima: `docker compose --profile ...` em `infra/docker/docker-compose.yml` não sobe
+nem derruba nenhum deles. Estão documentados aqui porque ocupam porta e RAM da máquina — e,
+num dos casos, uma rota do Tunnel deste homelab.
+
+| Container | Porta (loopback) | Projeto Compose | Onde vive |
+|---|---|---|---|
+| `quicktools-api` | 8000 | `quicktools` | `~/code/quicktools/quicktools` |
+| `quicktools-daily-report` | — (sem porta publicada) | `quicktools` | idem |
+| `moneyprinterturbo-webui` | 8501 | `moneyprinterturbo` | `~/AI/MoneyPrinterTurbo` |
+| `moneyprinterturbo-api` | 8081 (→ 8080 dentro do container) | `moneyprinterturbo` | idem |
+
+- **QuickTools** (repo próprio, `github.com/fabianobr/quicktools`): micro-ferramentas de
+  vídeo/áudio — o site é estático e as tools de IA batem numa API FastAPI, que é o
+  `quicktools-api`. O `quicktools-daily-report` é um worker sem porta publicada que manda um
+  resumo diário no Telegram, com credenciais do `.env` do próprio repo — não é agente de
+  `agents/` e não lê o `$HOME/.hermes/.env`. Vive em rede Compose própria
+  (`quicktools_default`): **não** fala com o Ollama nem com nada da stack. O único acoplamento com este homelab é o **Tunnel** — o ingress do `cloudflared`
+  tem um hostname apontando para `localhost:8000` (ver `infra/SERVICES.md`).
+- **MoneyPrinterTurbo** (upstream `harry0703/MoneyPrinterTurbo`, MIT): geração de vídeo curto.
+  Ao contrário do QuickTools, **consome a stack**: os dois containers estão anexados também à
+  rede `docker_default` — a do compose deste repo — e o log da API mostra
+  `llm provider: ollama`. Se o Ollama estiver fora, o MPT quebra sem que nada aqui mude.
+  Nunca foi montado sob profile deste compose; o plano de 2026-08-29 previa isso, mas não foi
+  o caminho seguido.
+  **Armadilha:** os containers no ar foram criados com um `docker-compose.override.yml` que
+  **não existe mais** na pasta. O `docker-compose.yml` que sobrou publica
+  `127.0.0.1:8080:8080` — que **colide com o SearXNG** — e não anexa a `docker_default`.
+  Recriar o MPT a partir dos arquivos presentes hoje não reproduz o que está rodando;
+  conferir porta e rede antes de um `up -d` lá.
+
 ## Portas nunca expostas diretamente na internet
 
 - Ollama `11434`
@@ -195,6 +232,10 @@ de 20 GB livres. Armadilhas e medições em `docs/colibri.md`.
 - Postgres do CarWatch `5433` (compose próprio do agente)
 - Colibrì / DeepSeek V4 `5000` (**no host, não em container** — escuta na bridge do
   Docker, não em loopback, porque o LiteLLM precisa alcançá-lo; protegido por `COLI_API_KEY`)
+- QuickTools API `8000` (compose de outro repo). Está em loopback, mas é a única desta lista
+  que o Tunnel publica num hostname de produto — se esse hostname tem Access ou é aberto é
+  política do repo do QuickTools, não deste, e não foi verificado aqui.
+- MoneyPrinterTurbo WebUI `8501` e API `8081` (compose de outro repo)
 - Docker socket
 
 Todas ficam em `127.0.0.1` no Compose. Usar Cloudflare Access para os hostnames publicados.

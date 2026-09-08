@@ -5,8 +5,9 @@ O profile `harness` executa o DeepSeek Harness `0.1.0-rc.7` em uma imagem local 
 ## Arquitetura e limites
 
 - `deepseek-harness` roda como usuário sem privilégios (UID/GID 1000), com raiz somente leitura, sem GPU, socket Docker, `privileged` ou rede do host;
-- `deepseek-harness-relay` compartilha somente o namespace de rede do DSH e encaminha `:8080` para o loopback `127.0.0.1:3080` do próprio DSH;
-- o relay é necessário porque o upstream deliberadamente não permite `dsh web --host 0.0.0.0`;
+- o relay é necessário porque o upstream deliberadamente não permite `dsh web --host 0.0.0.0` — ele responde `error: --host 0.0.0.0 is intentionally not supported yet for safety`, então o DSH só escuta em `127.0.0.1:3080` e a porta publicada pelo Docker (DNAT para o IP do container) nunca alcançaria esse loopback;
+- por isso o entrypoint é o `supervisor.mjs`, que roda **no mesmo container**: ele sobe o DSH web como filho e um relay TCP que escuta em `0.0.0.0:8080` e encaminha para o loopback do DSH. Se qualquer um dos dois cair, o supervisor sai e o container morre junto, para o `restart: unless-stopped` recriá-lo — um container "up" com o relay morto seria uma mentira do `docker ps`;
+- isso já foi um container sidecar (`deepseek-harness-relay`) com `network_mode: service:deepseek-harness`. O Docker resolve isso para o **ID** do container alvo no momento da criação, então recriar o `deepseek-harness` deixava o sidecar preso a um ID morto: ele sobrevivia até o próximo boot e então morria com `No such container`, derrubando a porta publicada enquanto o healthcheck seguia verde. O arranjo atual não tem esse vínculo;
 - o volume `deepseek-harness-state` persiste sessões/configurações e pode conter credenciais de providers: nunca exporte ou versione esse volume;
 - dois diretórios são bind mounts para o host, ambos ignorados pelo Git e pertencentes ao usuário local (UID 1000):
   - `DSH_WORKSPACE_DIR` → `/workspace`;
@@ -116,7 +117,7 @@ docker exec -i deepseek-harness sh -lc \
   < ~/.dsh/.credentials.yaml
 docker exec deepseek-harness sh -lc \
   "sed -i 's#http://127.0.0.1:11434/v1#http://ollama:11434/v1#g' /dsh-home/settings.yaml"
-docker restart deepseek-harness deepseek-harness-relay
+docker restart deepseek-harness
 ```
 
 Os arquivos ficam no volume `deepseek-harness-state`, pertencentes ao usuário sem

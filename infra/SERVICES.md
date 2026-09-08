@@ -40,7 +40,12 @@ https://media.example.com -> http://localhost:8188  (ComfyUI)
 https://flow.example.com  -> http://localhost:5678  (n8n)
 https://dsh.example.com         -> http://localhost:3081 (DeepSeek Harness)
 https://dsh.example.com/files/  -> http://localhost:3082 (dsh-files, preview read-only; rota por path, mesmo hostname/Access)
+https://api.example.com   -> http://localhost:8000  (QuickTools API — serviço de outro repo, ver seção abaixo)
 ```
+
+A última rota é a exceção da lista: o serviço do outro lado **não é deste repositório**, mas
+ocupa uma entrada do ingress do `cloudflared` deste host. Se esse hostname está atrás de Access
+ou aberto ao público é decisão do repo do QuickTools; não foi verificado aqui.
 
 E-mail permitido no Access:
 
@@ -73,7 +78,8 @@ Modelos ficam fora do Docker (muito volume de storage):
 | `coli serve` (DeepSeek V4 Flash, 284B) | **host**, não em container | 5000, na bridge do Docker | `infra/scripts/colibri-serve.sh start` |
 
 Único **serviço de inferência** fora do `docker-compose.yml` — o CarWatch tem compose próprio
-e o MoneyPrinterTurbo é outro projeto. O engine é compilado no host com
+e o MoneyPrinterTurbo é outro projeto (ver [Containers de outros repos neste
+host](#containers-de-outros-repos-neste-host)). O engine é compilado no host com
 CUDA/DeepGEMM para `sm_120`. **Sob demanda** — segura ~16–21 GB de RAM. Consumido pelo
 LiteLLM como `sdlc-review-local`. Detalhes e armadilhas em `docs/colibri.md`.
 
@@ -86,3 +92,35 @@ Validado ponta a ponta em 2026-08-30: `POST /v1/chat/completions` no LiteLLM com
 `model: sdlc-review-local` respondeu 48 tokens em 47 s. Note que isso implica ~2,1 tok/s,
 acima do 1,37 tok/s medido em execução avulsa — o servidor mantém os pesos densos residentes
 e não paga o carregamento a cada requisição.
+
+## Containers de outros repos neste host
+
+Além da stack e do CarWatch, dois projetos de **outros repositórios** rodam neste host com
+compose próprio. Não têm profile aqui e não sobem nem descem com
+`docker compose -f infra/docker/docker-compose.yml`; aparecem nesta página porque ocupam
+porta e RAM da máquina — e, no caso do QuickTools, uma rota do Tunnel.
+
+| Container | Porta (host, loopback) | Projeto Compose | Onde vive | Relação com esta stack |
+|---|---|---|---|---|
+| `quicktools-api` | 8000 | `quicktools` | `~/code/quicktools/quicktools` | Nenhuma (rede `quicktools_default`); publicado pelo Tunnel |
+| `quicktools-daily-report` | — | `quicktools` | idem | Nenhuma; worker sem porta publicada |
+| `moneyprinterturbo-webui` | 8501 | `moneyprinterturbo` | `~/AI/MoneyPrinterTurbo` | Anexado também à rede `docker_default` |
+| `moneyprinterturbo-api` | 8081 → 8080 | `moneyprinterturbo` | idem | Idem; usa o Ollama da stack |
+
+**QuickTools** (`github.com/fabianobr/quicktools`): micro-ferramentas de vídeo/áudio. O
+free tier roda no navegador; as tools de IA batem no `quicktools-api` (FastAPI). O
+`quicktools-daily-report` é um worker que envia um resumo diário de acessos no Telegram, com
+credenciais do `.env` daquele repo — não é um agente de `agents/` e não lê o
+`$HOME/.hermes/.env` que os agentes daqui usam. Isolado na rede `quicktools_default`: não
+alcança o Ollama nem os demais serviços daqui.
+
+**MoneyPrinterTurbo** (upstream `harry0703/MoneyPrinterTurbo`, MIT, clonado fora do repo como
+o ComfyUI e o Colibrì): geração de vídeo curto, WebUI Streamlit + API FastAPI. Os dois
+containers estão anexados também à rede `docker_default`, a do compose deste repo, e o log da
+API mostra `llm provider: ollama` — o `config.toml` do MPT (fora deste repo) é quem define a
+URL exata. Consequência operacional: derrubar o Ollama quebra a geração de roteiro do MPT.
+
+Armadilha do MPT: os containers no ar foram criados com um `docker-compose.override.yml` que
+não existe mais na pasta. O `docker-compose.yml` restante publica `127.0.0.1:8080:8080`, que
+colide com o SearXNG, e não anexa a `docker_default` — um `up -d` a partir dos arquivos
+presentes hoje não reproduz o que está rodando.
