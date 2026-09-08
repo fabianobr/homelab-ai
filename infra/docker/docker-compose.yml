@@ -252,9 +252,12 @@ services:
         reservations:
           memory: 256m
 
-  # DSH escuta somente em 127.0.0.1 dentro do seu namespace. O relay abaixo
-  # compartilha a rede do serviço e publica apenas um alvo loopback no host
-  # para o Cloudflare Tunnel; não use network_mode: host nem --host 0.0.0.0.
+  # DSH escuta somente em 127.0.0.1 dentro do seu namespace — o upstream recusa
+  # `--host 0.0.0.0` de propósito. Quem atende a porta publicada é o relay TCP
+  # do `supervisor.mjs`, que roda NESTE MESMO container e encaminha :8080 para o
+  # loopback do DSH. Ele já foi um sidecar com `network_mode: service:`; isso
+  # virava um vínculo por ID de container e quebrava a cada recriação (ver o
+  # cabeçalho do supervisor.mjs). Não use network_mode: host nem --host 0.0.0.0.
   deepseek-harness:
     build:
       context: ./deepseek-harness
@@ -277,8 +280,13 @@ services:
     environment:
       - DSH_PERMISSION_MODE=workspace-write
       - DSH_TELEMETRY_DISABLED=1
+    # O supervisor sobe o DSH web (argv abaixo) e o relay TCP no mesmo processo
+    # pai; se qualquer um dos dois cair, ele sai e o container morre junto para
+    # o `restart: unless-stopped` agir. A porta do relay vem do `--port` daqui.
     command:
       [
+        "node",
+        "/usr/local/lib/deepseek-harness/supervisor.mjs",
         "node",
         # Necessário pelo serviço HMR incluído no profile web do DSH 0.1.0-rc.7.
         "--expose-internals",
@@ -290,6 +298,9 @@ services:
         "--trusted-host",
         "${DSH_PUBLIC_HOSTNAME:-dsh.example.com}",
       ]
+    # tini como PID 1: com dois processos no container, os netos órfãos que as
+    # ferramentas do DSH deixam precisam de alguém para colhê-los.
+    init: true
     read_only: true
     tmpfs:
       - /tmp:uid=1000,gid=1000,mode=1777
@@ -297,13 +308,19 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # Sonda :8080 (o relay), não :3080 (o DSH): atravessar o relay prova os DOIS
+    # processos de uma vez — se o DSH cair, o relay derruba a conexão e a sonda
+    # falha. Sondar :3080 diretamente deixaria o container verde com o relay
+    # morto, que foi exatamente a mentira que originou este arranjo. O trecho
+    # que nenhuma sonda de dentro do container alcança é o DNAT da porta
+    # publicada; isso é papel do infra/scripts/dsh-smoke.sh, a partir do host.
     healthcheck:
       test:
         [
           "CMD",
           "node",
           "-e",
-          "fetch('http://127.0.0.1:3080').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
+          "fetch('http://127.0.0.1:8080').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
         ]
       interval: 30s
       timeout: 10s
@@ -316,25 +333,6 @@ services:
           memory: 4g
         reservations:
           memory: 512m
-
-  deepseek-harness-relay:
-    image: homelab-ai/deepseek-harness:0.1.0-rc.7
-    pull_policy: never
-    container_name: deepseek-harness-relay
-    profiles:
-      - harness
-    restart: unless-stopped
-    depends_on:
-      - deepseek-harness
-    network_mode: service:deepseek-harness
-    command: ["node", "/usr/local/lib/deepseek-harness/relay.mjs"]
-    read_only: true
-    tmpfs:
-      - /tmp:uid=1000,gid=1000,mode=1777
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
 
   # Preview HTTP somente-leitura dos arquivos que o DSH gera no chat
   # (DSH_STORAGES_DIR). Existe porque /api/host.openPath do DSH web é bloqueado

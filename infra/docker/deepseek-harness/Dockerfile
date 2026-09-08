@@ -17,7 +17,7 @@ RUN apt-get update \
 RUN mkdir -p /workspace /dsh-home/.npm \
     && chown -R node:node /workspace /dsh-home
 
-COPY --chown=node:node relay.mjs /usr/local/lib/deepseek-harness/relay.mjs
+COPY --chown=node:node supervisor.mjs /usr/local/lib/deepseek-harness/supervisor.mjs
 
 USER node
 WORKDIR /workspace
